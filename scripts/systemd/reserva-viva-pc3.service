@@ -1,0 +1,17 @@
+[Unit]
+Description=Reserva Viva - PC-3 Servidor de Administracion e Infraestructura (ERPNext HR + LDAP/DNS/NTP)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# FALLBACK_L2 se lee del archivo .env de esta carpeta (no hace falta definirlo aquí).
+# Ajustar la ruta si el repositorio no está clonado en /opt/reserva-viva
+WorkingDirectory=/opt/reserva-viva/docker/pc3-administracion-infra
+ExecStart=/opt/reserva-viva/docker/pc3-administracion-infra/deploy.sh
+ExecStop=/usr/bin/docker compose down
+
+[Install]
+WantedBy=multi-user.target
