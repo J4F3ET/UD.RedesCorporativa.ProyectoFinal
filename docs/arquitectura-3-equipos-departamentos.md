@@ -94,7 +94,47 @@ Notas heredadas del handoff que siguen aplicando sin cambios por el split en 3 e
 5. **Captura de tráfico:** Wireshark en el puerto trunk de PC-2 o PC-3 durante las pruebas 3 y 4, mostrando las tramas 802.1Q etiquetadas y, si el switch es L3, los intentos denegados.
 6. **Rendimiento/latencia:** `iperf3`/`mtr` entre PC-1↔PC-3 (o el par que se use para demostrar el flujo permitido hacia LDAP) para sustentar "comunicación fiable" entre switch y red interna.
 
-## 8. Próximos pasos actualizados
+## 8. Puesta en marcha (plug-and-play real)
+
+Los `docker-compose.yml` por sí solos **no** son plug-and-play: hace falta que las sub-interfaces VLAN existan antes de que Docker cree las redes `macvlan`, que las contraseñas estén definidas, y que todo eso sobreviva a un reinicio del PC en pleno laboratorio. Para eso cada carpeta de `docker/pcN-*/` trae:
+
+- `.env.example` → copiar a `.env` y definir las contraseñas reales (el `.env` real nunca se commitea, ver `.gitignore`).
+- `deploy.sh` → un solo comando que hace, en el orden correcto: crear/validar las sub-interfaces VLAN (si aplica) → aplicar firewall (solo PC-3 en el fallback L2) → `docker compose up -d`. Es **idempotente**: correrlo dos veces no rompe nada.
+
+### Primera vez, en cada PC
+
+```bash
+# PC-1
+cd docker/pc1-medica && cp .env.example .env && nano .env
+sudo ./deploy.sh
+
+# PC-2
+cd docker/pc2-operaciones && cp .env.example .env && nano .env
+sudo ./deploy.sh
+
+# PC-3 (agregar FALLBACK_L2=true si el switch resultó ser L2 puro)
+cd docker/pc3-administracion-infra && cp .env.example .env && nano .env
+sudo ./deploy.sh
+# o: sudo FALLBACK_L2=true ./deploy.sh
+```
+
+### Que sobreviva a un reinicio (recomendado para el día de la sustentación)
+
+Las sub-interfaces 802.1Q creadas con `ip link add` son efímeras: si el PC se reinicia a mitad de la demo, desaparecen y hay que recrearlas a mano. Para que cada PC quede realmente "enchufar y listo" incluso después de apagar/prender, se instala el servicio systemd correspondiente (`scripts/systemd/reserva-viva-pcN.service`), que en cada arranque repite el mismo `deploy.sh`:
+
+```bash
+sudo mkdir -p /opt/reserva-viva
+sudo cp -r . /opt/reserva-viva            # o clonar el repo directamente ahí
+sudo cp scripts/systemd/reserva-viva-pc1.service /etc/systemd/system/   # el que corresponda a ese PC
+sudo systemctl daemon-reload
+sudo systemctl enable --now reserva-viva-pc1.service   # el que corresponda
+```
+
+En PC-3, si el switch es L2 puro, editar `Environment=FALLBACK_L2=false` a `true` dentro del `.service` antes de habilitarlo.
+
+Con esto, apagar y prender cualquiera de los 3 equipos ya no requiere que alguien recuerde los pasos manuales — es la definición real de "plug-and-play" para este laboratorio.
+
+## 9. Próximos pasos actualizados
 
 1. Confirmar con el laboratorio si el switch es L2 o L3 (define si PC-2/PC-3 necesitan `iptables` de router-on-a-stick).
 2. Validar en software puro (sin switch, un solo host) que las 4 apps + LDAP levantan bien juntas — puede reutilizarse un compose de un solo equipo si hace falta antes de tener las 3 máquinas físicas disponibles.

@@ -18,16 +18,27 @@ Ver el documento completo: [`docs/arquitectura-3-equipos-departamentos.md`](docs
 
 ```
 docs/
-  arquitectura-3-equipos-departamentos.md   # diseño vigente (VLANs, matriz de segmentación, plan de pruebas)
+  arquitectura-3-equipos-departamentos.md   # diseño vigente (VLANs, matriz de segmentación, plan de pruebas, puesta en marcha)
 docker/
-  pc1-medica/docker-compose.yml             # OpenVPMS (VLAN 10)
-  pc2-operaciones/docker-compose.yml        # Pretix + InvenTree (VLAN 20/30)
-  pc3-administracion-infra/docker-compose.yml  # ERPNext HR + OpenLDAP/DNS/NTP (VLAN 40/99)
+  pc1-medica/            # OpenVPMS (VLAN 10) — docker-compose.yml, deploy.sh, .env.example
+  pc2-operaciones/       # Pretix + InvenTree (VLAN 20/30) — docker-compose.yml, deploy.sh, .env.example
+  pc3-administracion-infra/  # ERPNext HR + OpenLDAP/DNS/NTP (VLAN 40/99) — docker-compose.yml, deploy.sh, .env.example
 scripts/
-  setup-vlans-pc2.sh                        # sub-interfaces 802.1Q en PC-2
-  setup-vlans-pc3.sh                        # sub-interfaces 802.1Q en PC-3 (+ fallback L2 completo)
+  setup-vlans-pc2.sh                        # sub-interfaces 802.1Q en PC-2 (idempotente)
+  setup-vlans-pc3.sh                        # sub-interfaces 802.1Q en PC-3 (+ fallback L2 completo, idempotente)
   firewall-pc3-matriz.sh                    # nftables con la matriz de segmentación (fallback switch L2)
+  systemd/reserva-viva-pc{1,2,3}.service    # persistencia al reiniciar cada PC
 ```
+
+## Puesta en marcha rápida
+
+Cada PC trae un `deploy.sh` que hace todo en el orden correcto (VLANs → firewall si aplica → `docker compose up -d`):
+
+```bash
+cd docker/pc1-medica && cp .env.example .env && nano .env && sudo ./deploy.sh
+```
+
+Detalle completo (incluida la instalación de los servicios systemd para que sobreviva a un reinicio) en la sección 8 de [`docs/arquitectura-3-equipos-departamentos.md`](docs/arquitectura-3-equipos-departamentos.md).
 
 ## Pendientes clave
 
