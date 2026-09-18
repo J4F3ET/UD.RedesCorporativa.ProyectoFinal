@@ -1,0 +1,84 @@
+# PC-3 — Servidor de Administración e Infraestructura
+# Departamentos: Recursos Humanos (ERPNext HR) + Infraestructura transversal (OpenLDAP/DNS/NTP)
+# Puerto de switch: TRUNK 802.1Q, VLANs 40 y 99 permitidas
+#
+# Requiere sub-interfaces 802.1Q creadas antes de "docker compose up":
+#   ver scripts/setup-vlans-pc3.sh
+
+networks:
+  vlan40_rrhh:
+    driver: macvlan
+    driver_opts:
+      parent: eth0.40
+    ipam:
+      config:
+        - subnet: 10.10.40.0/24
+          gateway: 10.10.40.1
+          ip_range: 10.10.40.0/28
+
+  vlan99_infra:
+    driver: macvlan
+    driver_opts:
+      parent: eth0.99
+    ipam:
+      config:
+        - subnet: 10.10.99.0/24
+          gateway: 10.10.99.1
+          ip_range: 10.10.99.0/28
+
+services:
+  # --- Recursos Humanos (VLAN 40) — ERPNext, restringido al módulo HR ---
+  erpnext-hr:
+    image: frappe/erpnext:latest
+    container_name: erpnext-hr
+    restart: unless-stopped
+    environment:
+      FRAPPE_SITE_NAME_HEADER: rrhh.reservaviva.local
+      LDAP_HOST: 10.10.99.10
+      # Acceso restringido a nivel de roles/permisos dentro de ERPNext:
+      # solo se exponen los perfiles y páginas del módulo HR (ver docs,
+      # sección 6 — gap de alcance de ERPNext pendiente de cerrar en el informe).
+    networks:
+      vlan40_rrhh:
+        ipv4_address: 10.10.40.10
+
+  # --- Infraestructura transversal (VLAN 99) ---
+  openldap:
+    image: osixia/openldap:1.5.0
+    container_name: openldap
+    restart: unless-stopped
+    environment:
+      LDAP_ORGANISATION: "Zoologico Reserva Viva"
+      LDAP_DOMAIN: reservaviva.local
+      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD}
+    volumes:
+      - ldap_data:/var/lib/ldap
+      - ldap_config:/etc/ldap/slapd.d
+    networks:
+      vlan99_infra:
+        ipv4_address: 10.10.99.10
+
+  dns:
+    image: internetsystemsconsortium/bind9:9.18
+    container_name: dns-interno
+    restart: unless-stopped
+    volumes:
+      - ./bind/named.conf:/etc/bind/named.conf:ro
+      - ./bind/zones:/etc/bind/zones:ro
+    networks:
+      vlan99_infra:
+        ipv4_address: 10.10.99.11
+
+  ntp:
+    image: cturra/ntp:latest
+    container_name: ntp-interno
+    restart: unless-stopped
+    environment:
+      NTP_SERVERS: "10.10.99.12"
+    networks:
+      vlan99_infra:
+        ipv4_address: 10.10.99.12
+
+volumes:
+  ldap_data:
+  ldap_config:

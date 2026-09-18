@@ -1,0 +1,100 @@
+# PC-2 — Servidor de Operaciones
+# Departamentos: Taquilla y Boletería (Pretix) + Logística y Almacén (InvenTree)
+# Puerto de switch: TRUNK 802.1Q, VLANs 20 y 30 permitidas
+#
+# Requiere sub-interfaces 802.1Q creadas antes de "docker compose up":
+#   ver scripts/setup-vlans-pc2.sh
+
+networks:
+  vlan20_taquilla:
+    driver: macvlan
+    driver_opts:
+      parent: eth0.20
+    ipam:
+      config:
+        - subnet: 10.10.20.0/24
+          gateway: 10.10.20.1
+          ip_range: 10.10.20.0/28
+
+  vlan30_logistica:
+    driver: macvlan
+    driver_opts:
+      parent: eth0.30
+    ipam:
+      config:
+        - subnet: 10.10.30.0/24
+          gateway: 10.10.30.1
+          ip_range: 10.10.30.0/28
+
+services:
+  # --- Taquilla y Boletería (VLAN 20) ---
+  pretix-db:
+    image: postgres:15
+    container_name: pretix-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pretix
+      POSTGRES_USER: pretix
+      POSTGRES_PASSWORD: ${PRETIX_DB_PASSWORD}
+    volumes:
+      - pretix_db_data:/var/lib/postgresql/data
+    networks:
+      vlan20_taquilla:
+        ipv4_address: 10.10.20.11
+
+  pretix-redis:
+    image: redis:7
+    container_name: pretix-redis
+    restart: unless-stopped
+    networks:
+      vlan20_taquilla:
+        ipv4_address: 10.10.20.12
+
+  pretix-web:
+    image: pretix/standalone:stable
+    container_name: pretix-web
+    restart: unless-stopped
+    depends_on:
+      - pretix-db
+      - pretix-redis
+    environment:
+      PRETIX_DATABASE_BACKEND: postgresql
+      PRETIX_DATABASE_HOST: 10.10.20.11
+      PRETIX_REDIS_LOCATION: redis://10.10.20.12
+      PRETIX_MAIL_FROM: taquilla@reservaviva.local
+    networks:
+      vlan20_taquilla:
+        ipv4_address: 10.10.20.10
+
+  # --- Logística y Almacén (VLAN 30) ---
+  inventree-db:
+    image: postgres:15
+    container_name: inventree-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: inventree
+      POSTGRES_USER: inventree
+      POSTGRES_PASSWORD: ${INVENTREE_DB_PASSWORD}
+    volumes:
+      - inventree_db_data:/var/lib/postgresql/data
+    networks:
+      vlan30_logistica:
+        ipv4_address: 10.10.30.11
+
+  inventree-app:
+    image: inventree/inventree:stable
+    container_name: inventree-app
+    restart: unless-stopped
+    depends_on:
+      - inventree-db
+    environment:
+      INVENTREE_DB_ENGINE: postgresql
+      INVENTREE_DB_HOST: 10.10.30.11
+      INVENTREE_DB_NAME: inventree
+    networks:
+      vlan30_logistica:
+        ipv4_address: 10.10.30.10
+
+volumes:
+  pretix_db_data:
+  inventree_db_data:

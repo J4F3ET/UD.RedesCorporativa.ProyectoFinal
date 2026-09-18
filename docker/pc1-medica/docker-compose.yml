@@ -1,0 +1,49 @@
+# PC-1 — Servidor Médico
+# Departamento: Unidad Médica Veterinaria (OpenVPMS)
+# Puerto de switch: ACCESS en VLAN 10 (10.10.10.0/24)
+#
+# OpenVPMS no tiene imagen Docker oficial: construir openvpms/Dockerfile
+# (Tomcat + WAR + MySQL) antes de levantar este compose.
+
+networks:
+  vlan10_medica:
+    driver: macvlan
+    driver_opts:
+      parent: eth0        # interfaz física de PC-1 conectada en modo access a VLAN10
+    ipam:
+      config:
+        - subnet: 10.10.10.0/24
+          gateway: 10.10.10.1
+          ip_range: 10.10.10.0/28   # rango reservado para contenedores (.1-.14)
+
+services:
+  openvpms-db:
+    image: mysql:8.0
+    container_name: openvpms-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${OPENVPMS_DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: openvpms
+    volumes:
+      - openvpms_db_data:/var/lib/mysql
+    networks:
+      vlan10_medica:
+        ipv4_address: 10.10.10.11
+
+  openvpms-app:
+    build: ./openvpms
+    container_name: openvpms-app
+    restart: unless-stopped
+    depends_on:
+      - openvpms-db
+    environment:
+      OPENVPMS_DB_HOST: 10.10.10.11
+      LDAP_HOST: 10.10.99.10     # OpenLDAP en PC-3, VLAN99
+      DNS_HOST: 10.10.99.10
+      NTP_HOST: 10.10.99.10
+    networks:
+      vlan10_medica:
+        ipv4_address: 10.10.10.10
+
+volumes:
+  openvpms_db_data:
