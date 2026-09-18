@@ -21,6 +21,12 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+# Carga IFACE (y cualquier otra variable de .env) al entorno, para que la
+# use tanto el script de VLANs como docker compose.
+set -a
+source .env
+set +a
+
 "${REPO_ROOT}/scripts/setup-vlans-pc2.sh"
 docker compose up -d
 docker compose ps

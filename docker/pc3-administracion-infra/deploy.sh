@@ -5,16 +5,15 @@
 #
 # Requiere root (crea interfaces de red y, en el fallback, reglas nft).
 # Ejecutar con: sudo ./deploy.sh
-#   o, si el switch es L2 puro:  sudo FALLBACK_L2=true ./deploy.sh
+# (IFACE y FALLBACK_L2 se leen del archivo .env de esta carpeta)
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 REPO_ROOT="$(cd ../.. && pwd)"
-FALLBACK_L2="${FALLBACK_L2:-false}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Este script necesita ejecutarse como root (crea interfaces de red)." >&2
-  echo "Uso: sudo ./deploy.sh   (o sudo FALLBACK_L2=true ./deploy.sh si el switch es L2 puro)" >&2
+  echo "Uso: sudo ./deploy.sh" >&2
   exit 1
 fi
 
@@ -23,9 +22,15 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-FALLBACK_L2="${FALLBACK_L2}" "${REPO_ROOT}/scripts/setup-vlans-pc3.sh"
+# Carga IFACE, FALLBACK_L2 (y el resto de .env) al entorno, para que las
+# use tanto los scripts de VLANs/firewall como docker compose.
+set -a
+source .env
+set +a
 
-if [ "${FALLBACK_L2}" = "true" ]; then
+"${REPO_ROOT}/scripts/setup-vlans-pc3.sh"
+
+if [ "${FALLBACK_L2:-false}" = "true" ]; then
   "${REPO_ROOT}/scripts/firewall-pc3-matriz.sh"
 fi
 

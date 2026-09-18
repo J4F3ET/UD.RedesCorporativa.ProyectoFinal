@@ -7,8 +7,7 @@ Requires=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# Cambiar a "true" solo si el switch resultó ser L2 puro (ver docs/arquitectura-3-equipos-departamentos.md, sección 5)
-Environment=FALLBACK_L2=false
+# FALLBACK_L2 se lee del archivo .env de esta carpeta (no hace falta definirlo aquí).
 # Ajustar la ruta si el repositorio no está clonado en /opt/reserva-viva
 WorkingDirectory=/opt/reserva-viva/docker/pc3-administracion-infra
 ExecStart=/opt/reserva-viva/docker/pc3-administracion-infra/deploy.sh

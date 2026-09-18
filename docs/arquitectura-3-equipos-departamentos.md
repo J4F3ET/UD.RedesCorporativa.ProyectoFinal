@@ -98,8 +98,10 @@ Notas heredadas del handoff que siguen aplicando sin cambios por el split en 3 e
 
 Los `docker-compose.yml` por sí solos **no** son plug-and-play: hace falta que las sub-interfaces VLAN existan antes de que Docker cree las redes `macvlan`, que las contraseñas estén definidas, y que todo eso sobreviva a un reinicio del PC en pleno laboratorio. Para eso cada carpeta de `docker/pcN-*/` trae:
 
-- `.env.example` → copiar a `.env` y definir las contraseñas reales (el `.env` real nunca se commitea, ver `.gitignore`).
-- `deploy.sh` → un solo comando que hace, en el orden correcto: crear/validar las sub-interfaces VLAN (si aplica) → aplicar firewall (solo PC-3 en el fallback L2) → `docker compose up -d`. Es **idempotente**: correrlo dos veces no rompe nada.
+- `.env.example` → copiar a `.env` y definir ahí las contraseñas, el nombre de la tarjeta de red (`IFACE`) y, solo en PC-3, `FALLBACK_L2` (el `.env` real nunca se commitea, ver `.gitignore`). Es el **único** archivo que hay que editar — nada de tocar YAML ni scripts.
+- `deploy.sh` → un solo comando que lee ese `.env` y hace, en el orden correcto: crear/validar las sub-interfaces VLAN (si aplica) → aplicar firewall (solo PC-3 si `FALLBACK_L2=true`) → `docker compose up -d`. Es **idempotente**: correrlo dos veces no rompe nada.
+
+Para alguien no técnico ejecutando esto en el laboratorio, ver los tutoriales paso a paso en [`tutoriales/`](../tutoriales/) (uno por PC, con capturas de lo que debe ver en pantalla).
 
 ### Primera vez, en cada PC
 
@@ -112,10 +114,9 @@ sudo ./deploy.sh
 cd docker/pc2-operaciones && cp .env.example .env && nano .env
 sudo ./deploy.sh
 
-# PC-3 (agregar FALLBACK_L2=true si el switch resultó ser L2 puro)
+# PC-3 (dejar FALLBACK_L2=false en .env salvo que el switch sea L2 puro)
 cd docker/pc3-administracion-infra && cp .env.example .env && nano .env
 sudo ./deploy.sh
-# o: sudo FALLBACK_L2=true ./deploy.sh
 ```
 
 ### Que sobreviva a un reinicio (recomendado para el día de la sustentación)
@@ -130,7 +131,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now reserva-viva-pc1.service   # el que corresponda
 ```
 
-En PC-3, si el switch es L2 puro, editar `Environment=FALLBACK_L2=false` a `true` dentro del `.service` antes de habilitarlo.
+En PC-3, `FALLBACK_L2` se sigue leyendo del `.env` de esa carpeta — no hay que tocar el `.service`.
 
 Con esto, apagar y prender cualquiera de los 3 equipos ya no requiere que alguien recuerde los pasos manuales — es la definición real de "plug-and-play" para este laboratorio.
 

@@ -9,7 +9,7 @@ networks:
   vlan20_taquilla:
     driver: macvlan
     driver_opts:
-      parent: eth0.20
+      parent: ${IFACE:-eth0}.20
     ipam:
       config:
         - subnet: 10.10.20.0/24
@@ -19,7 +19,7 @@ networks:
   vlan30_logistica:
     driver: macvlan
     driver_opts:
-      parent: eth0.30
+      parent: ${IFACE:-eth0}.30
     ipam:
       config:
         - subnet: 10.10.30.0/24

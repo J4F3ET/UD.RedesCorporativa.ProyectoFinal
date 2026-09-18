@@ -40,6 +40,8 @@ cd docker/pc1-medica && cp .env.example .env && nano .env && sudo ./deploy.sh
 
 Detalle completo (incluida la instalación de los servicios systemd para que sobreviva a un reinicio) en la sección 8 de [`docs/arquitectura-3-equipos-departamentos.md`](docs/arquitectura-3-equipos-departamentos.md).
 
+**¿Quien va a instalar esto en el laboratorio no es técnico?** Usa los tutoriales paso a paso en [`tutoriales/`](tutoriales/) — uno por PC, con cada comando explicado y qué hacer si algo sale mal.
+
 ## Pendientes clave
 
 - Confirmar con el laboratorio de la universidad si el switch soporta L3 (SVIs/ACLs) o es puramente L2 (define quién aplica la matriz de segmentación: el switch o PC-3 como router-on-a-stick).

@@ -9,7 +9,7 @@ networks:
   vlan10_medica:
     driver: macvlan
     driver_opts:
-      parent: eth0        # interfaz física de PC-1 conectada en modo access a VLAN10
+      parent: ${IFACE:-eth0}   # nombre de la tarjeta de red de PC-1 (definido en .env), conectada en modo access a VLAN10
     ipam:
       config:
         - subnet: 10.10.10.0/24

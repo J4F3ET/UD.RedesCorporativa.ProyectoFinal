@@ -9,7 +9,7 @@ networks:
   vlan40_rrhh:
     driver: macvlan
     driver_opts:
-      parent: eth0.40
+      parent: ${IFACE:-eth0}.40
     ipam:
       config:
         - subnet: 10.10.40.0/24
@@ -19,7 +19,7 @@ networks:
   vlan99_infra:
     driver: macvlan
     driver_opts:
-      parent: eth0.99
+      parent: ${IFACE:-eth0}.99
     ipam:
       config:
         - subnet: 10.10.99.0/24
