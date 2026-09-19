@@ -72,10 +72,16 @@ Se abre un editor de texto simple. Vas a ver algo así:
 IFACE=eth0
 PRETIX_DB_PASSWORD=cambiar-esta-clave
 INVENTREE_DB_PASSWORD=cambiar-esta-clave
+INVENTREE_ADMIN_USER=admin
+INVENTREE_ADMIN_PASSWORD=cambiar-esta-clave
+INVENTREE_ADMIN_EMAIL=admin@reservaviva.local
+PRETIX_ADMIN_EMAIL=admin@reservaviva.local
+PRETIX_ADMIN_PASSWORD=cambiar-esta-clave
 ```
 
 - Si el nombre que anotaste en el Paso 5 **no** era `eth0`, bórralo y escribe el nombre correcto después del `=`.
 - Cambia cada `cambiar-esta-clave` por una contraseña propia (sin espacios). Pueden ser distintas entre sí.
+- `INVENTREE_ADMIN_PASSWORD` y `PRETIX_ADMIN_PASSWORD` son las contraseñas con las que se entra a InvenTree y a Pretix por primera vez (usuario `admin` en InvenTree, y el correo `PRETIX_ADMIN_EMAIL` en Pretix). Anótalas en un lugar seguro. Los usuarios se crean solos: no hay que crear ningún administrador a mano.
 
 Para guardar y salir: presiona `Ctrl` + `O`, luego `Enter`, luego `Ctrl` + `X`.
 
@@ -86,6 +92,8 @@ sudo ./deploy.sh
 ```
 
 Este comando hace automáticamente todo lo necesario: prepara la red para las dos VLANs (20 y 30) y luego descarga y arranca las aplicaciones. La primera vez tarda varios minutos, depende de la velocidad de Internet. No necesitas hacer nada manual de redes — el script se encarga.
+
+**Importante:** en el primer arranque, Pretix e InvenTree preparan sus bases de datos y tardan **unos 10 minutos** en responder. El script espera y, cuando Pretix está listo, crea su administrador. Si al final ves el aviso `Pretix no quedo listo a tiempo`, espera unos minutos y ejecuta `sudo ./deploy.sh --solo-admins`. Es normal y no significa que algo esté roto.
 
 ## Paso 8 — Verificar que quedó funcionando
 
@@ -98,11 +106,12 @@ pretix-redis      redis:7                 Up
 pretix-web        pretix/standalone       Up
 inventree-db      postgres:15             Up
 inventree-app     inventree/inventree     Up
+inventree-worker  inventree/inventree     Up
 ```
 
 Si **todas** las filas dicen **"Up"**, quedó funcionando correctamente. Si alguna dice algo distinto (como "Restarting" o "Exited"), ve a la sección "Si algo sale mal" más abajo.
 
-> Nota: que digan "Up" confirma que las aplicaciones están corriendo y conectadas a la red del laboratorio. Terminar de configurarlas por dentro (crear el evento en Pretix, cargar el catálogo en InvenTree) es un paso aparte que hace el equipo técnico — no hace falta que lo hagas tú aquí.
+> Nota: que digan "Up" confirma que las aplicaciones están corriendo y conectadas a la red del laboratorio. Para ver que responden, desde **otro** equipo de la VLAN correspondiente abre `http://10.10.20.10` (Pretix, VLAN 20) o `http://10.10.30.10:8000` (InvenTree, VLAN 30); un PC con red `macvlan` no puede abrir sus propios contenedores desde sí mismo. Crear el evento en Pretix y cargar el catálogo en InvenTree es un paso aparte que hace el equipo técnico.
 
 ## Paso 9 — Dejarlo funcionando aunque el PC se reinicie (recomendado)
 

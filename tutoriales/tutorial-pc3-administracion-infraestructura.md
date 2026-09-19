@@ -73,11 +73,15 @@ Se abre un editor de texto simple. Vas a ver algo así:
 IFACE=eth0
 FALLBACK_L2=false
 LDAP_ADMIN_PASSWORD=cambiar-esta-clave
+ERPNEXT_DB_ROOT_PASSWORD=cambiar-esta-clave-db
+ERPNEXT_ADMIN_PASSWORD=cambiar-esta-clave-erp
+ERPNEXT_SITE=rrhh.reservaviva.local
 ```
 
 - Si el nombre que anotaste en el Paso 5 **no** era `eth0`, bórralo y escribe el nombre correcto después del `=`.
 - `FALLBACK_L2`: déjalo en `false` si el equipo técnico confirmó que el switch soporta VLANs con enrutamiento ("L3"), o si todavía no lo saben. Cámbialo a `true` **solo** si te confirmaron que el switch es "L2 puro" (sin esa capacidad).
 - Cambia `cambiar-esta-clave` por una contraseña propia (sin espacios) — esta va a ser la contraseña de administrador del directorio de usuarios (LDAP) de todo el laboratorio, guárdala en un lugar seguro.
+- Cambia también `ERPNEXT_DB_ROOT_PASSWORD` (base de datos de ERPNext) y `ERPNEXT_ADMIN_PASSWORD`. Esta última es la contraseña del usuario `Administrator` con el que se entra a ERPNext; anótala. `ERPNEXT_SITE` déjalo como está. El sitio de ERPNext se crea solo.
 
 Para guardar y salir: presiona `Ctrl` + `O`, luego `Enter`, luego `Ctrl` + `X`.
 
@@ -89,21 +93,26 @@ sudo ./deploy.sh
 
 Este comando hace automáticamente todo lo necesario: prepara la red para las VLANs (40, 99, y las adicionales si pusiste `FALLBACK_L2=true`) y luego descarga y arranca las aplicaciones. La primera vez tarda varios minutos, depende de la velocidad de Internet. No necesitas hacer nada manual de redes — el script se encarga.
 
+**Importante:** en el primer arranque, ERPNext crea su sitio y tarda **unos 10 minutos** en responder. Es normal.
+
 ## Paso 8 — Verificar que quedó funcionando
 
 Al final del paso anterior, el mismo comando muestra una tabla. Debe verse algo así:
 
 ```
 NAME           IMAGE                  STATUS
-erpnext-hr     frappe/erpnext         Up
+erpnext-hr     nginx                  Up
 openldap       osixia/openldap        Up
 dns-interno    ...bind9               Up
 ntp-interno    cturra/ntp             Up
+...            (más filas erpnext-*)
 ```
 
-Si **todas** las filas dicen **"Up"**, quedó funcionando correctamente. Si alguna dice algo distinto (como "Restarting" o "Exited"), ve a la sección "Si algo sale mal" más abajo.
+Verás además varias filas `erpnext-*` (base de datos, colas, backend, etc.). Todas deben decir **"Up"**, salvo `erpnext-configurator` y `erpnext-create-site`, que **deben** decir `Exited (0)`: son tareas que corren una vez, terminan y es lo esperado.
 
-> Nota: que digan "Up" confirma que los servicios están corriendo y conectados a la red del laboratorio. Terminar de configurarlos por dentro (crear el sitio de ERPNext, cargar usuarios en LDAP) es un paso aparte que hace el equipo técnico — no hace falta que lo hagas tú aquí.
+Si todas las demás dicen **"Up"**, quedó funcionando correctamente. Si alguna dice algo distinto (como "Restarting" o "Exited"), ve a la sección "Si algo sale mal" más abajo.
+
+> Nota: que digan "Up" confirma que los servicios están corriendo y conectados a la red del laboratorio. Para ver ERPNext, desde **otro** equipo de la VLAN 40 abre `http://10.10.40.10:8080` (el puerto es 8080) e ingresa con `Administrator` y `ERPNEXT_ADMIN_PASSWORD`. Cargar usuarios en LDAP es un paso aparte del equipo técnico.
 
 ## Paso 9 — Dejarlo funcionando aunque el PC se reinicie (recomendado)
 
