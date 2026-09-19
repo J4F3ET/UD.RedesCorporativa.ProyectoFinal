@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Reserva Viva — Flujo de datos y política de segmentación",
+    "output": "flujo.html",
+    "quality_profile": "showcase",
+    "viewBox": [1060, 480],
+    "views": [
+      { "id": "permitido", "label": "Camino permitido", "focus": ["negocio", "switch", "vlan99"], "note": "Las 4 VLAN de negocio solo tienen permitido llegar a LDAP/DNS/NTP en VLAN99." },
+      { "id": "bloqueado", "label": "Camino bloqueado", "focus": ["negocio", "switch", "bloqueado"], "note": "Cualquier intento entre VLANs de negocio se descarta, incluso VLAN20↔30 en el mismo PC." }
+    ]
+  },
+  "stages": [
+    { "label": "VLANs de negocio (PC-1 / PC-2 / PC-3)" },
+    { "label": "Switch / política" },
+    { "label": "Resultado" }
+  ],
+  "nodes": [
+    { "id": "negocio", "type": "cloud", "label": "4 VLANs de negocio", "sublabel": "VLAN 10 · 20 · 30 · 40", "stage": 0, "row": 0 },
+    { "id": "switch", "type": "security", "label": "Switch / ACL", "sublabel": "access + trunk 802.1Q", "stage": 1, "row": 0 },
+    { "id": "vlan99", "type": "backend", "label": "VLAN 99 · Infra", "sublabel": "LDAP + DNS + NTP", "stage": 2, "row": 0 },
+    { "id": "bloqueado", "type": "security", "label": "Bloqueado", "sublabel": "política DENY", "stage": 2, "row": 1 }
+  ],
+  "flows": [
+    { "id": "uplink", "from": "negocio", "to": "switch", "label": "uplink" },
+    { "id": "permitido-vlan99", "from": "switch", "to": "vlan99", "label": "permitido", "variant": "emphasis", "route": "straight" },
+    { "id": "denegado-cruzado", "from": "switch", "to": "bloqueado", "label": "bloqueado", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Único destino permitido", "items": ["Cada VLAN de negocio (10/20/30/40) solo puede llegar a VLAN99", "VLAN99 sirve autenticación (LDAP), resolución de nombres (DNS) y hora (NTP) a las 4"] },
+    { "dot": "rose", "title": "Todo lo demás, bloqueado", "items": ["VLAN10↔20, VLAN10↔30, VLAN10↔40, VLAN20↔30, VLAN20↔40, VLAN30↔40: denegado", "Aplica igual entre VLANs del mismo PC físico: VLAN20 y VLAN30 viven ambas en PC-2, pero el tráfico entre ellas igual sale por el trunk, hace hairpin en el switch, y ahí se descarta — no hay atajo local"] },
+    { "dot": "amber", "title": "Quién aplica la política", "items": ["Switch L3: SVI + ACL propias del switch", "Switch L2 puro: PC-3 recibe sub-interfaces virtuales de VLAN10/20/30 (sin contenedores) y aplica la misma matriz con nftables — ver docs/arquitectura-3-equipos-departamentos.md sección 5"] }
+  ]
+}

@@ -1,0 +1,95 @@
+# Prueba de software en UN SOLO equipo (tu laptop), SIN VLANs ni switch real.
+# Red bridge normal de Docker — el objetivo es validar que Pretix, InvenTree,
+# ERPNext y OpenLDAP/DNS/NTP arrancan y funcionan juntos, antes de llevar el
+# diseño a los 3 PCs físicos con macvlan (ver docker/pc1-medica, pc2-operaciones,
+# pc3-administracion-infra para el diseño de producción con VLANs reales).
+#
+# OpenVPMS NO está incluido: no tiene imagen oficial y su Dockerfile
+# (docker/pc1-medica/openvpms/) todavía no existe en este repo — es la
+# siguiente tarea pendiente, no una prueba de hoy.
+#
+# ERPNext: la imagen frappe/erpnext:latest sola (sin bench init / mariadb /
+# redis-queue / redis-cache separados) es una simplificación conocida y
+# puede no levantar completamente. Si falla, es un hallazgo real y esperado
+# de esta prueba, no un error de configuración — ver docs/arquitectura-3-equipos-departamentos.md,
+# sección 6.
+#
+# DNS (bind9) y NTP tampoco están incluidos aquí: el compose de producción
+# (docker/pc3-administracion-infra) los referencia con archivos de
+# configuración (bind/named.conf, bind/zones/) que todavía no existen en
+# el repo. Esta prueba se enfoca en las 3 aplicaciones de negocio + LDAP.
+
+services:
+  # --- Taquilla y Boletería ---
+  pretix-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: pretix
+      POSTGRES_USER: pretix
+      POSTGRES_PASSWORD: ${PRETIX_DB_PASSWORD}
+    volumes:
+      - pretix_db_data:/var/lib/postgresql/data
+
+  pretix-redis:
+    image: redis:7
+
+  pretix-web:
+    image: pretix/standalone:stable
+    depends_on:
+      - pretix-db
+      - pretix-redis
+    environment:
+      PRETIX_DATABASE_BACKEND: postgresql
+      PRETIX_DATABASE_HOST: pretix-db
+      PRETIX_REDIS_LOCATION: redis://pretix-redis
+      PRETIX_MAIL_FROM: taquilla@reservaviva.local
+    ports:
+      - "18080:80"
+
+  # --- Logística y Almacén ---
+  inventree-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: inventree
+      POSTGRES_USER: inventree
+      POSTGRES_PASSWORD: ${INVENTREE_DB_PASSWORD}
+    volumes:
+      - inventree_db_data:/var/lib/postgresql/data
+
+  inventree-app:
+    image: inventree/inventree:stable
+    depends_on:
+      - inventree-db
+    environment:
+      INVENTREE_DB_ENGINE: postgresql
+      INVENTREE_DB_HOST: inventree-db
+      INVENTREE_DB_NAME: inventree
+    ports:
+      - "18090:8000"
+
+  # --- Recursos Humanos ---
+  erpnext-hr:
+    image: frappe/erpnext:latest
+    environment:
+      FRAPPE_SITE_NAME_HEADER: rrhh.reservaviva.local
+    ports:
+      - "18095:8080"
+
+  # --- Infraestructura transversal ---
+  openldap:
+    image: osixia/openldap:1.5.0
+    environment:
+      LDAP_ORGANISATION: "Zoologico Reserva Viva"
+      LDAP_DOMAIN: reservaviva.local
+      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD}
+    volumes:
+      - ldap_data:/var/lib/ldap
+      - ldap_config:/etc/ldap/slapd.d
+    ports:
+      - "1389:389"
+
+volumes:
+  pretix_db_data:
+  inventree_db_data:
+  ldap_data:
+  ldap_config:

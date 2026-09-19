@@ -1,0 +1,478 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Reserva Viva — Topología de red en 3 equipos",
+    "output": "topologia.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/J4F3ET/UD.RedesCorporativaa.ProyectoFinak",
+      "provider": "github",
+      "revision": "6ae51e633a4aef24e39beecd73af169e2533952e"
+    },
+    "viewBox": [
+      1360,
+      500
+    ],
+    "views": [
+      {
+        "id": "topologia-completa",
+        "label": "Topología completa",
+        "focus": [
+          "switch",
+          "openvpms-app",
+          "openvpms-db",
+          "pretix-web",
+          "pretix-db",
+          "pretix-redis",
+          "inventree-app",
+          "inventree-db",
+          "erpnext-hr",
+          "openldap",
+          "dns-interno",
+          "ntp-interno"
+        ],
+        "note": "El switch central conecta los 3 PCs, cada uno en su propio puerto access o trunk."
+      },
+      {
+        "id": "pc2-operaciones",
+        "label": "PC-2: Taquilla + Logística",
+        "focus": [
+          "switch",
+          "pretix-web",
+          "pretix-db",
+          "pretix-redis",
+          "inventree-app",
+          "inventree-db"
+        ],
+        "note": "Un solo PC físico, dos VLANs distintas (20 y 30) por macvlan, un puerto trunk."
+      },
+      {
+        "id": "infraestructura-transversal",
+        "label": "Infraestructura transversal (VLAN99)",
+        "focus": [
+          "switch",
+          "openvpms-app",
+          "pretix-web",
+          "inventree-app",
+          "erpnext-hr",
+          "openldap",
+          "dns-interno",
+          "ntp-interno"
+        ],
+        "note": "LDAP, DNS y NTP en PC-3 son alcanzables por las 4 VLANs de negocio a través del switch."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "switch",
+      "type": "cloud",
+      "label": "Switch administrable",
+      "sublabel": "sin Internet",
+      "tag": "802.1Q",
+      "pos": [
+        580,
+        20
+      ],
+      "size": [
+        200,
+        70
+      ]
+    },
+    {
+      "id": "openvpms-app",
+      "type": "backend",
+      "label": "OpenVPMS",
+      "sublabel": "VLAN10 · 10.10.10.10",
+      "tag": "Tomcat",
+      "pos": [
+        40,
+        170
+      ],
+      "size": [
+        190,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docker/pc1-medica/docker-compose.yml",
+          "line": 33,
+          "end_line": 46,
+          "label": "openvpms-app"
+        }
+      ]
+    },
+    {
+      "id": "openvpms-db",
+      "type": "database",
+      "label": "MySQL",
+      "sublabel": "VLAN10 · 10.10.10.11",
+      "tag": "openvpms-db",
+      "pos": [
+        40,
+        270
+      ],
+      "size": [
+        190,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docker/pc1-medica/docker-compose.yml",
+          "line": 20,
+          "end_line": 31,
+          "label": "openvpms-db"
+        }
+      ]
+    },
+    {
+      "id": "pretix-web",
+      "type": "backend",
+      "label": "Pretix",
+      "sublabel": "VLAN20 · 10.10.20.10",
+      "tag": "pretix/standalone",
+      "pos": [
+        320,
+        170
+      ],
+      "size": [
+        180,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docker/pc2-operaciones/docker-compose.yml",
+          "line": 53,
+          "end_line": 67,
+          "label": "pretix-web"
+        }
+      ]
+    },
+    {
+      "id": "pretix-db",
+      "type": "database",
+      "label": "Postgres",
+      "sublabel": "VLAN20 · 10.10.20.11",
+      "tag": "pretix-db",
+      "pos": [
+        260,
+        270
+      ],
+      "size": [
+        150,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docker/pc2-operaciones/docker-compose.yml",
+          "line": 31,
+          "end_line": 43,
+          "label": "pretix-db"
+        }
+      ]
+    },
+    {
+      "id": "pretix-redis",
+      "type": "database",
+      "label": "Redis",
+      "sublabel": "VLAN20 · 10.10.20.12",
+      "tag": "pretix-redis",
+      "pos": [
+        430,
+        270
+      ],
+      "size": [
+        150,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docker/pc2-operaciones/docker-compose.yml",
+          "line": 45,
+          "end_line": 51,
+          "label": "pretix-redis"
+        }
+      ]
+    },
+    {
+      "id": "inventree-app",
+      "type": "backend",
+      "label": "InvenTree",
+      "sublabel": "VLAN30 · 10.10.30.10",
+      "tag": "inventree/inventree",
+      "pos": [
+        610,
+        170
+      ],
+      "size": [
+        180,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docker/pc2-operaciones/docker-compose.yml",
+          "line": 84,
+          "end_line": 96,
+          "label": "inventree-app"
+        }
+      ]
+    },
+    {
+      "id": "inventree-db",
+      "type": "database",
+      "label": "Postgres",
+      "sublabel": "VLAN30 · 10.10.30.11",
+      "tag": "inventree-db",
+      "pos": [
+        610,
+        270
+      ],
+      "size": [
+        180,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docker/pc2-operaciones/docker-compose.yml",
+          "line": 70,
+          "end_line": 82,
+          "label": "inventree-db"
+        }
+      ]
+    },
+    {
+      "id": "erpnext-hr",
+      "type": "backend",
+      "label": "ERPNext (HR)",
+      "sublabel": "VLAN40 · 10.10.40.10",
+      "tag": "frappe/erpnext",
+      "pos": [
+        830,
+        170
+      ],
+      "size": [
+        190,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docker/pc3-administracion-infra/docker-compose.yml",
+          "line": 31,
+          "end_line": 43,
+          "label": "erpnext-hr"
+        }
+      ]
+    },
+    {
+      "id": "openldap",
+      "type": "security",
+      "label": "OpenLDAP",
+      "sublabel": "VLAN99 · 10.10.99.10",
+      "tag": "osixia/openldap",
+      "pos": [
+        1060,
+        170
+      ],
+      "size": [
+        190,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docker/pc3-administracion-infra/docker-compose.yml",
+          "line": 46,
+          "end_line": 59,
+          "label": "openldap"
+        }
+      ]
+    },
+    {
+      "id": "dns-interno",
+      "type": "security",
+      "label": "DNS interno",
+      "sublabel": "VLAN99 · 10.10.99.11",
+      "tag": "bind9",
+      "pos": [
+        1060,
+        270
+      ],
+      "size": [
+        190,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docker/pc3-administracion-infra/docker-compose.yml",
+          "line": 61,
+          "end_line": 70,
+          "label": "dns-interno"
+        }
+      ]
+    },
+    {
+      "id": "ntp-interno",
+      "type": "security",
+      "label": "NTP interno",
+      "sublabel": "VLAN99 · 10.10.99.12",
+      "tag": "cturra/ntp",
+      "pos": [
+        1060,
+        380
+      ],
+      "size": [
+        190,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docker/pc3-administracion-infra/docker-compose.yml",
+          "line": 72,
+          "end_line": 80,
+          "label": "ntp-interno"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "PC-1 · Servidor Médico · puerto ACCESS",
+      "wraps": [
+        "openvpms-app",
+        "openvpms-db"
+      ],
+      "pad": 26
+    },
+    {
+      "kind": "region",
+      "label": "PC-2 · Servidor de Operaciones · puerto TRUNK (VLAN20+30)",
+      "wraps": [
+        "pretix-web",
+        "pretix-db",
+        "pretix-redis",
+        "inventree-app",
+        "inventree-db"
+      ],
+      "pad": 26
+    },
+    {
+      "kind": "region",
+      "label": "PC-3 · Administración e Infraestructura · puerto TRUNK (VLAN40+99)",
+      "wraps": [
+        "erpnext-hr",
+        "openldap",
+        "dns-interno",
+        "ntp-interno"
+      ],
+      "pad": 26
+    }
+  ],
+  "connections": [
+    {
+      "id": "switch-vlan10",
+      "from": "switch",
+      "to": "openvpms-app",
+      "label": "ACCESS · VLAN10",
+      "variant": "emphasis"
+    },
+    {
+      "id": "switch-vlan20",
+      "from": "switch",
+      "to": "pretix-web",
+      "label": "TRUNK · VLAN20",
+      "variant": "emphasis"
+    },
+    {
+      "id": "switch-vlan30",
+      "from": "switch",
+      "to": "inventree-app",
+      "label": "TRUNK · VLAN30",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "switch-vlan40",
+      "from": "switch",
+      "to": "erpnext-hr",
+      "label": "TRUNK · VLAN40",
+      "variant": "emphasis"
+    },
+    {
+      "id": "switch-vlan99",
+      "from": "switch",
+      "to": "openldap",
+      "label": "TRUNK · VLAN99",
+      "variant": "emphasis"
+    },
+    {
+      "id": "openvpms-sql",
+      "from": "openvpms-app",
+      "to": "openvpms-db",
+      "label": "MySQL :3306",
+      "labelDy": 24
+    },
+    {
+      "id": "pretix-sql",
+      "from": "pretix-web",
+      "to": "pretix-db",
+      "label": "PostgreSQL",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "pretix-cache",
+      "from": "pretix-web",
+      "to": "pretix-redis",
+      "label": "cache",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "inventree-sql",
+      "from": "inventree-app",
+      "to": "inventree-db",
+      "label": "PostgreSQL",
+      "labelDy": 24
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "3 PCs, 1 switch, sin Internet",
+      "items": [
+        "PC-1 va en puerto access (una sola VLAN)",
+        "PC-2 y PC-3 van en puerto trunk 802.1Q (dos VLANs cada uno)",
+        "Ningún equipo tiene ruta por defecto a Internet"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Redes macvlan por VLAN",
+      "items": [
+        "Cada contenedor tiene IP real dentro de su VLAN (macvlan), no NAT",
+        "Un mismo PC físico puede tener 2 redes macvlan distintas (PC-2 y PC-3)"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "VLAN 99 es transversal",
+      "items": [
+        "OpenLDAP, DNS y NTP en PC-3 dan servicio a las 4 VLANs de negocio",
+        "Comparten el mismo enlace trunk que ERPNext hacia el switch"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Enrutamiento entre VLANs",
+      "items": [
+        "Si el switch es L3: aplica las ACLs con SVIs propias",
+        "Si el switch es L2 puro: PC-3 asume router-on-a-stick para toda la matriz (ver diagrama de flujo de datos)"
+      ]
+    }
+  ]
+}
