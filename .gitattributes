@@ -1,0 +1,4 @@
+# Los scripts y Dockerfiles se ejecutan en Linux: forzar LF aunque se clonen en Windows.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.service text eol=lf

@@ -2,8 +2,10 @@
 # Departamento: Unidad Médica Veterinaria (OpenVPMS)
 # Puerto de switch: ACCESS en VLAN 10 (10.10.10.0/24)
 #
-# OpenVPMS no tiene imagen Docker oficial: construir openvpms/Dockerfile
-# (Tomcat + WAR + MySQL) antes de levantar este compose.
+# OpenVPMS no tiene imagen Docker oficial: `docker compose up -d` construye openvpms/Dockerfile
+# (Tomcat 9 + Java 11 + release oficial 2.4.0.1). El build descarga ~300 MB y necesita Internet
+# UNA vez; en un laboratorio sin salida, construir antes en otro equipo y llevar la imagen
+# (`docker save` / `docker load`). El primer arranque crea el esquema y carga los datos base solo.
 
 networks:
   vlan10_medica:
@@ -23,7 +25,8 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${OPENVPMS_DB_ROOT_PASSWORD}
-      MYSQL_DATABASE: openvpms
+      # No se define MYSQL_DATABASE: `toolbox database --create` de OpenVPMS crea la base y su usuario.
+    command: ["--character-set-server=utf8mb4", "--max_allowed_packet=16M", "--innodb_file_per_table=1", "--innodb_buffer_pool_size=512M"]
     volumes:
       - openvpms_db_data:/var/lib/mysql
     networks:
@@ -38,6 +41,9 @@ services:
       - openvpms-db
     environment:
       OPENVPMS_DB_HOST: 10.10.10.11
+      OPENVPMS_DB_ROOT_PASSWORD: ${OPENVPMS_DB_ROOT_PASSWORD}
+      OPENVPMS_DB_PASSWORD: ${OPENVPMS_DB_PASSWORD}
+      OPENVPMS_ADMIN_PASSWORD: ${OPENVPMS_ADMIN_PASSWORD}
       LDAP_HOST: 10.10.99.10     # OpenLDAP en PC-3, VLAN99
       DNS_HOST: 10.10.99.10
       NTP_HOST: 10.10.99.10
