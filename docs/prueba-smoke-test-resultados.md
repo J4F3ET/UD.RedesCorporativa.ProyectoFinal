@@ -102,9 +102,9 @@ Ninguna variable existente fue renombrada.
 0. ~~LDAPS (636) no funciona~~ **Resuelto** (ver §8): causa raíz `LDAP_TLS_VERIFY_CLIENT=demand` + CA de la imagen caducada; se generan certificados propios con `scripts/generar-certificados.sh`.
 
 1. Resolver o documentar las plantillas de impresión que no cargan en OpenVPMS 2.4.0.1 y añadir LibreOffice/OpenOffice si se necesita combinar documentos.
-2. Integrar OpenVPMS, Pretix, InvenTree y ERPNext con LDAP (hoy solo hay alcance de red). Ya no es un bloque único (ver §9):
+2. ~~Integrar OpenVPMS, Pretix, InvenTree y ERPNext con LDAP (hoy solo hay alcance de red).~~ **Resuelto** (ver §9): cierre parcial, 2 de 4 integradas y 2 descartadas con justificación:
    - OpenVPMS y Pretix: cerrados como **no viables** con la versión actual, por decisión razonada ([§9.2](#92-pretix-y-openvpms-no-se-integran-decisión-razonada); detalle en [`ldap-pretix-openvpms.md`](ldap-pretix-openvpms.md)).
-   - ERPNext e InvenTree: **siguen abiertos**, en curso en la ronda 5.
+   - ERPNext e InvenTree: **integrados** con LDAPS y cadena verificada ([§9.3](#93-erpnext-e-inventree-integrados-con-ldaps); detalle en [`integracion-ldap-erpnext-inventree.md`](integracion-ldap-erpnext-inventree.md)).
 3. ~~Probar LDAPS (636).~~ **Resuelto** (ver §8): el puerto 636 sirve el certificado correcto y se verificó cadena y nombre desde un cliente externo en otro segmento. Lo que sigue pendiente es que las aplicaciones lo usen (punto 2).
 4. Repetir con macvlan real en los 3 PCs + switch; confirmar si es L2 o L3.
 5. Aclarar en el informe el alcance de ERPNext (solo HR) y Pretix vs. PretixPOS.
@@ -164,8 +164,8 @@ Nota: tras el reinicio, la primera petición a `/login` de ERPNext dio un timeou
 
 ## 9. Ronda 5 — integración LDAP en las aplicaciones
 
-> **Estado:** en curso. Bootstrap de OpenLDAP hecho; Pretix y OpenVPMS evaluados y descartados; **ERPNext e
-> InvenTree pendientes de resultados en esta misma ronda** (no se da ningún resultado por bueno hasta que se reporte).
+> **Estado:** cerrada. Bootstrap de OpenLDAP hecho; ERPNext e InvenTree integrados con LDAPS y cadena TLS verificada;
+> Pretix y OpenVPMS evaluados y descartados con justificación.
 
 ### 9.1 Bootstrap de OpenLDAP (rama `feat/ldap-erpnext-inventree`, commit `d84c59e`)
 
@@ -217,9 +217,51 @@ su administrador local (creado por `deploy.sh`).
 > **Confianza:** esta evaluación es de Pepe. Quien consolida este documento revisó el texto de `ldap-pretix-openvpms.md`
 > pero **no volvió a ejecutar** la prueba de TLS ni la inspección de los JAR; no está verificada de forma independiente.
 
-### 9.3 ERPNext e InvenTree: pendiente
+### 9.3 ERPNext e InvenTree: integrados con LDAPS
 
-- **ERPNext (LDAP Settings):** *pendiente de resultados de esta ronda.*
-- **InvenTree (`django-auth-ldap`, variables `INVENTREE_LDAP_*`):** *pendiente de resultados de esta ronda.*
+Cumplen el criterio "Funcional" del plan: autentican usuarios LDAP reales por LDAPS con la cadena TLS verificada
+(rama `feat/ldap-erpnext-inventree`, PR #7; detalle en [`integracion-ldap-erpnext-inventree.md`](integracion-ldap-erpnext-inventree.md)).
 
-Se completarán aquí cuando se reporten; hasta entonces no debe leerse ninguna integración como lograda.
+**Diseño común:**
+- Conexión a `ldaps://ldap.reservaviva.local:636` con verificación de **cadena y de nombre** contra la CA de
+  `scripts/generar-certificados.sh`, montada como `/certs/ca.crt` en solo lectura.
+- El nombre se fija con `extra_hosts` a `10.10.99.10` para que coincida con el certificado sin depender del DNS.
+- Flujo: la app hace bind con `cn=svc-lectura`, busca `uid=<usuario>` **solo en la OU de su departamento** y luego hace
+  bind con el DN encontrado y la clave del usuario.
+- **InvenTree (PC-2):** `django-auth-ldap` con variables `INVENTREE_LDAP_*`, busca en `ou=operaciones`; habla LDAPS
+  `inventree-app`.
+- **ERPNext (PC-3):** "LDAP Settings" de Frappe (`ldap3`), configurado por un job idempotente nuevo,
+  `erpnext-ldap-config`, busca en `ou=rrhh`; habla LDAPS `erpnext-backend`, no el frontend.
+- Variables nuevas: `ERPNEXT_LDAP_BIND_PASSWORD` e `INVENTREE_LDAP_BIND_PASSWORD` (ambas, la clave de `svc-lectura`), en
+  los dos `.env.example` y en `pruebas/smoke-test-3-pcs/test.env`.
+
+**Resultados** (endpoints: ERPNext `/api/method/frappe.integrations.doctype.ldap_settings.ldap_settings.login`,
+InvenTree `/api/user/token/`):
+
+| Prueba | ERPNext | InvenTree |
+|---|---|---|
+| Usuario de su departamento, clave correcta | 200 (`rrhh.prueba`) | 200 + token (`logistica.prueba`) |
+| Clave errónea | 417 | 401 |
+| Usuario de **otro** departamento con su clave correcta | 417 (`logistica.prueba`, `vet.prueba`) | 401 (`rrhh.prueba`) |
+| Administrador local (no LDAP) | sigue funcionando | 200 |
+| Cadena TLS: con `ca.crt` / con la CA del sistema | OK / falla | OK / falla (`self-signed certificate in certificate chain`) |
+| `docker compose down` (sin `-v`) + `up -d` | 200 / 417 idénticos | 200 / 401 idénticos |
+
+**Matiz sobre el rechazo de otro departamento:** no es una política de autorización ni un control de acceso por
+departamento. Es consecuencia de que cada app busca solo dentro de la OU de su departamento; si se ampliara el ámbito de
+búsqueda, ese usuario entraría. Aun así es un buen resultado y encaja con el tema de segmentación del curso.
+
+**Límites:**
+- Los usuarios LDAP entran **sin permisos**: un administrador debe asignarles roles/grupos. En ERPNext el rol `Employee`
+  se retira solo porque no hay empleado mapeado; el mapeo a empleados y roles de HR queda pendiente.
+- La búsqueda no filtra por grupos: cualquier entrada con `uid` dentro de la OU puede autenticar.
+- `erpnext-ldap-config` guarda la configuración con `ignore_mandatory`, es decir, **no valida contra LDAP al guardar**;
+  la prueba real es el login.
+- En ERPNext el login se probó por la API, no por navegador. El formulario web muestra el botón "Login with LDAP" cuando
+  está habilitado, pero eso no se verificó.
+- Detalle de implementación: el filtro por defecto de la imagen de InvenTree es `(uid= %(user)s)`, con un espacio de más,
+  y no encuentra a nadie; hay que sobrescribirlo con `(uid=%(user)s)`.
+- Todo se probó en el arnés de un solo host con redes `bridge`: no valida macvlan ni el switch.
+
+> **Confianza:** la verificación es de Juan. Quien consolida este documento revisó su documento y su PR, pero **no
+> reejecutó** sus pruebas.
