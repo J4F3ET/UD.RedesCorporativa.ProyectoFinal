@@ -105,7 +105,7 @@ Ninguna variable existente fue renombrada.
 2. Integrar OpenVPMS, Pretix, InvenTree y ERPNext con LDAP (hoy solo hay alcance de red). Ya no es un bloque único (ver §9):
    - OpenVPMS y Pretix: cerrados como **no viables** con la versión actual, por decisión razonada ([§9.2](#92-pretix-y-openvpms-no-se-integran-decisión-razonada); detalle en [`ldap-pretix-openvpms.md`](ldap-pretix-openvpms.md)).
    - ERPNext e InvenTree: **siguen abiertos**, en curso en la ronda 5.
-3. ~~Probar LDAPS (636).~~ **Resuelto** (ver §8): LDAPS verificado con cadena y nombre desde las apps y desde otro segmento; lo que falta es que las aplicaciones lo usen (punto 2).
+3. ~~Probar LDAPS (636).~~ **Resuelto** (ver §8): el puerto 636 sirve el certificado correcto y se verificó cadena y nombre desde un cliente externo en otro segmento. Lo que sigue pendiente es que las aplicaciones lo usen (punto 2).
 4. Repetir con macvlan real en los 3 PCs + switch; confirmar si es L2 o L3.
 5. Aclarar en el informe el alcance de ERPNext (solo HR) y Pretix vs. PretixPOS.
 
