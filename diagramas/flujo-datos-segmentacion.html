@@ -5085,7 +5085,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       </div>
     </div>
 
-    <script id="archify-guided-views-data" type="application/json">[{"id":"permitido","label":"Camino permitido","focus":["negocio","switch","vlan99"],"note":"Las 4 VLAN de negocio solo tienen permitido llegar a LDAP/DNS/NTP en VLAN99."},{"id":"bloqueado","label":"Camino bloqueado","focus":["negocio","switch","bloqueado"],"note":"Cualquier intento entre VLANs de negocio se descarta, incluso VLAN20↔30 en el mismo PC."}]</script>
+    <script id="archify-guided-views-data" type="application/json">[{"id":"permitido","label":"Camino permitido","focus":["vlan10","vlan2030","vlan40","switch","ldap","dns","ntp","permitido"],"note":"Las 4 VLANs de negocio solo tienen permitido llegar a LDAP/LDAPS, DNS y NTP en VLAN99."},{"id":"bloqueado","label":"Camino bloqueado","focus":["vlan10","vlan2030","vlan40","switch","bloqueado"],"note":"Cualquier intento entre VLANs de negocio se descarta, incluso VLAN20 ↔ VLAN30 en el mismo PC."},{"id":"hairpin","label":"Hairpin dentro de un PC","focus":["vlan2030","switch","bloqueado"],"note":"VLAN20 y VLAN30 comparten hardware en PC-2, pero su tráfico mutuo igual sale al switch y muere ahí."}]</script>
 
     <script id="archify-i18n-data" type="application/json">{"locale":"en","messages":{"viewer.kind.frontend":"Frontend","viewer.kind.backend":"Backend","viewer.kind.database":"Database","viewer.kind.cloud":"Cloud","viewer.kind.security":"Security","viewer.kind.messagebus":"Message bus","viewer.kind.external":"External","viewer.kind.neutral":"Neutral","viewer.kind.node":"Node","viewer.kind.start":"Start","viewer.kind.active":"Active","viewer.kind.waiting":"Waiting","viewer.kind.decision":"Decision","viewer.kind.success":"Success","viewer.kind.failure":"Failure","viewer.toolbar.actions":"Diagram actions","viewer.theme.toggle.title":"Toggle theme (T)","viewer.theme.toggle":"Toggle color theme","viewer.theme.dark":"Dark","viewer.theme.light":"Light","viewer.preset.choose.title":"Choose visual style (S cycles)","viewer.preset.choose":"Choose visual style","viewer.preset.style":"Style","viewer.preset.menu":"Visual style","viewer.preset.identity":"Visual identity","viewer.preset.cycles":"S cycles","viewer.preset.classic":"Classic","viewer.preset.classic.short":"Classic","viewer.preset.classic.hint":"Stable technical default","viewer.preset.flow":"Signal Flow","viewer.preset.flow.short":"Flow","viewer.preset.flow.hint":"Motion-forward presentation","viewer.preset.blueprint":"Blueprint","viewer.preset.blueprint.hint":"Engineering review","viewer.preset.editorial":"Editorial","viewer.preset.editorial.hint":"Publication and launch notes","viewer.preset.badge.signalFlow":"SIGNAL FLOW","viewer.preset.badge.blueprint":"BLUEPRINT / REV 01","viewer.preset.badge.editorial":"EDITORIAL / FIELD NOTE","viewer.preset.badge.editorialPlate":"ARCHIFY / PLATE 04","viewer.preset.current":"Visual style: {style}. Choose visual style","viewer.motion.live":"Live","viewer.motion.still":"Still","viewer.motion.pause":"Pause motion","viewer.motion.resume":"Resume motion","viewer.motion.reduced":"Motion paused by reduced-motion preference","viewer.motion.hidden":"Motion paused while this page is hidden","viewer.motion.yielding":"Pause motion; currently yielding to {owner}","viewer.motion.yielding.title":"Live preview enabled · yielding to {owner}","viewer.owner.story":"the guided story","viewer.owner.chapter":"the active chapter","viewer.owner.chapterPreview":"the chapter delta preview","viewer.owner.handoff":"the chapter handoff","viewer.owner.route":"Route Probe","viewer.owner.lens":"Semantic Lens","viewer.owner.relationship":"Relationship Preview","viewer.owner.intent":"Intent Trace","viewer.owner.focus":"semantic focus","viewer.owner.legend":"legend preview","viewer.owner.reader":"reader interaction","viewer.present.enter":"Enter presentation stage","viewer.present.enter.title":"Presentation stage (F)","viewer.present.exit":"Exit presentation stage","viewer.present.exit.title":"Exit presentation stage (F or Escape)","viewer.present.present":"Present","viewer.present.exit.label":"Exit","viewer.export.button":"Export","viewer.export.button.title":"Export diagram (E)","viewer.export.diagram":"Export diagram","viewer.export.menu":"Export","viewer.export.subtitle":"Portable, clean outputs","viewer.export.share":"Share","viewer.export.shareCard":"Share Card","viewer.export.routeShareCard":"Route Share Card","viewer.export.reachShareCard":"Reach Share Card","viewer.export.copyShareCard":"Copy Share Card","viewer.export.copyDiagram":"Copy diagram","viewer.export.clipboardPng":"PNG to clipboard","viewer.export.raster":"Raster images","viewer.export.image":"Image","viewer.export.lossless":"Lossless image","viewer.export.compact":"Compact image","viewer.export.modern":"Modern image","viewer.export.vectorMotion":"Vector and motion","viewer.export.vectorMotion.heading":"Vector \u0026 motion","viewer.export.editable":"Editable vector","viewer.export.motion6s":"6s motion","viewer.export.unsupported":"Not supported by this browser","viewer.export.clipboardUnsupported":"Clipboard image write not supported by this browser","viewer.export.clipboardUnsupported.period":"Clipboard image write not supported by this browser.","viewer.export.clipboardUnsupported.short":"Clipboard image write not supported in this browser.","viewer.export.motionUnavailable":"Motion capture unavailable in this browser","viewer.export.webmUnavailable":"WebM unavailable in this browser","viewer.export.failed":"Export failed: {message}","viewer.export.unknownVariant":"Unknown Share Card variant: {variant}","viewer.export.routeRequired":"Trace a route before exporting a Route Share Card","viewer.export.reachRequired":"Trace authored reach before exporting a Reach Share Card","viewer.export.unknown":"unknown","viewer.export.routeFailed":"Route Share Card export failed: {message}","viewer.export.reachFailed":"Reach Share Card export failed: {message}","viewer.export.copyFailed":"Copy failed: {message}","viewer.export.copiedPng":"Copied PNG to clipboard","viewer.export.copiedShare":"Copied Share Card","viewer.export.downloadedShare":"Downloaded Share Card","viewer.export.downloadedRoute":"Downloaded Route Share Card","viewer.export.downloadedReach":"Downloaded Reach Share Card","viewer.export.downloadedWebm":"Downloaded WebM","viewer.export.recording":"Recording 6 seconds of motion…","viewer.export.card.routeSummary.one":"Route: {source} → {target} · {count} directed hop","viewer.export.card.routeSummary.other":"Route: {source} → {target} · {count} directed hops","viewer.export.card.reachSummary":"Authored {direction} from {origin} · {nodes} · {links} · max {hops}","viewer.export.card.node.one":"{count} node","viewer.export.card.node.other":"{count} nodes","viewer.export.card.link.one":"{count} link","viewer.export.card.link.other":"{count} links","viewer.export.card.hop.one":"{count} hop","viewer.export.card.hop.other":"{count} hops","viewer.export.card.routeBadge":"ARCHIFY · ROUTE · {hops}","viewer.export.card.reachBadge":"ARCHIFY · {direction} REACH","viewer.export.card.defaultBadge":"ARCHIFY · {preset} · {theme}","viewer.export.direction.upstream":"Upstream","viewer.export.direction.downstream":"Downstream","viewer.export.error.canvasUnavailable":"Canvas unavailable for {label}","viewer.export.error.contextUnavailable":"2D canvas context unavailable for {label}","viewer.export.error.toBlobUnavailable":"canvas.toBlob unavailable for {label}","viewer.export.error.toBlobNull":"canvas.toBlob returned no data for {label}","viewer.export.error.variantsCombined":"Share Card variants cannot be combined","viewer.export.error.viewerState":"Share Card export could not remove temporary viewer state","viewer.export.error.routeState":"Route Card export could not preserve the resolved route safely","viewer.export.error.reachState":"Reach Card export could not preserve authored reach safely","viewer.export.error.webmRequirements":"WebM motion export requires a trace animation and browser MediaRecorder support","viewer.export.error.mediaRecorder":"MediaRecorder failed","viewer.export.error.emptyWebm":"MediaRecorder produced an empty WebM","viewer.export.error.webmBackground":"SVG background could not be loaded for WebM export","viewer.guided.region":"Guided diagram views","viewer.guided.previous":"Previous guided view","viewer.guided.previous.title":"Previous guided view ([)","viewer.guided.next":"Next guided view","viewer.guided.next.title":"Next guided view (])","viewer.guided.views":"Guided views","viewer.guided.explore":"Explore this system","viewer.guided.intro":"Step through curated paths without changing the source diagram.","viewer.guided.trail":"Story trail","viewer.guided.beat":"Beat","viewer.guided.nextBeat":"Next","viewer.guided.play":"Play guided story","viewer.guided.play.title":"Play guided story (P)","viewer.guided.pause":"Pause guided story","viewer.guided.pause.title":"Pause guided story (P)","viewer.guided.replay":"Replay guided story","viewer.guided.replay.title":"Replay guided story (P)","viewer.guided.playStory":"Play story","viewer.guided.pauseStory":"Pause","viewer.guided.replayStory":"Replay story","viewer.guided.motionUnavailable":"Story playback unavailable while motion is Still","viewer.guided.enableMotion":"Switch motion to Live to play the guided story","viewer.guided.selectBeatLink":"Select a Story Beat to copy its exact link","viewer.guided.copyMoment":"Copy moment","viewer.guided.momentCopied":"Moment link copied","viewer.guided.momentCopyFailed":"Could not copy story moment link","viewer.guided.copied":"Copied","viewer.guided.copyFailed":"Copy failed","viewer.guided.showAll":"Show all","viewer.guided.showAll.aria":"Show entire diagram","viewer.guided.chapters":"Story chapters","viewer.guided.storyTrail":"Story trail for {label}: {count} beats","viewer.guided.chapter.open":"Open chapter {index} of {total}: {label}, {count} stops","viewer.guided.chapter.current":"Current chapter {index} of {total}: {label}, {count} stops","viewer.guided.chapter.selectedNodes":"{count} selected nodes","viewer.guided.chapter.stops":"{count} stops","viewer.guided.chapter.stop.one":"{count} stop","viewer.guided.chapter.stop.other":"{count} stops","viewer.guided.chapter.current.title":"{label} — current chapter, {count} stops","viewer.guided.chapter.delta.expanded":"{stay} stay, {enter} enter, {leave} leave","viewer.guided.chapter.delta.aria":"Open chapter {index} of {total}: {label}. Chapter focus delta: {delta}","viewer.guided.chapter.delta.title":"{label} — {delta} chapter focus","viewer.guided.handoff":"{from} → {to} · via {label}","viewer.guided.share.chapter":"Chapter {index} / {total}","viewer.guided.share.initial":"Chapter 01 / 01","viewer.guided.share.default":"Guided chapter","viewer.guided.state.ready":"Ready","viewer.guided.state.playing":"Playing","viewer.guided.state.settled":"Settled","viewer.guided.state.paused":"Paused","viewer.guided.state.pinned":"Pinned","viewer.guided.state.still":"Still","viewer.guided.share.step":"Step {index} / {total} · {label}","viewer.guided.share.staticMoment":"{step} · Static moment","viewer.guided.share.complete":"{count} steps complete · {note}","viewer.guided.share.settled":"Path settled for reading.","viewer.guided.share.staticPath":"{count} steps · Static path","viewer.guided.share.ready":"{count} steps · Ready","viewer.guided.share.aria":"{state} chapter {index} of {total}: {label}. {beat}. {route}","viewer.guided.beat.start":"Beat {index} / {total} · {label} · starting point","viewer.guided.beat.forward":"Beat {index} / {total} · {from} → {to}","viewer.guided.beat.reverse":"Beat {index} / {total} · {from} → {to} · reverse authored link","viewer.guided.beat.multiple":"Beat {index} / {total} · {from} ⇄ {to} · {count} authored links","viewer.guided.beat.group":"Beat {index} / {total} · {from} · {to} · grouped · no direct link","viewer.guided.beat.aria.prefix":"Story beat {index} of {total}: {label}. ","viewer.guided.beat.aria.start":"Starting point.","viewer.guided.beat.aria.forward":"From {from} through one authored forward relationship.","viewer.guided.beat.aria.reverse":"From {from}; the authored relationship points from {to} to {from}.","viewer.guided.beat.aria.multiple":"From {from} through {count} authored relationships; shown without arbitrary motion.","viewer.guided.beat.aria.group":"Grouped from {from} with no direct authored relationship.","viewer.guided.caption.start":"Starting point","viewer.guided.caption.grouped":"Grouped transition · no direct authored link","viewer.guided.caption.more":" +{count} more","viewer.guided.caption.reverse":"Reverse authored relationship","viewer.guided.caption.relationships":"{count} authored relationships","viewer.guided.caption.relationship":"Authored relationship","viewer.guided.caption.direction":"authored direction: {from} → {to}","viewer.guided.caption.starting":"Authored starting point","viewer.guided.beatLink":"Copy link to current story moment: Beat {index} of {total}: {label}","viewer.guided.noStory":"This diagram has no authored guided story.","viewer.guide.eyebrow":"Diagram guide","viewer.guide.close":"Close diagram guide","viewer.guide.inspecting":"Inspecting compiled semantics","viewer.guide.actions":"Diagram exploration actions","viewer.guide.find":"Find any node","viewer.guide.find.hint":"Search labels, responsibilities, kinds, and stable IDs.","viewer.guide.route":"Trace a route","viewer.guide.route.aria":"Trace a directed route","viewer.guide.route.hint":"Ask how two semantic nodes connect in authored direction.","viewer.guide.map":"See the whole system","viewer.guide.map.hint":"Open Semantic Radar with a live viewport and stable nodes.","viewer.guide.lens":"Compare semantic kinds","viewer.guide.lens.hint":"Count roles, reveal their traffic, and compare direct authored links.","viewer.guide.story":"Play the guided story","viewer.guide.story.hint":"Walk the authored chapters and real relationships.","viewer.guide.present":"Enter Presentation Stage","viewer.guide.present.hint":"Give the live diagram the viewport without changing export.","viewer.guide.shortcuts":"Additional keyboard shortcuts","viewer.guide.shortcut.export":"Export","viewer.guide.shortcut.theme":"Theme","viewer.guide.shortcut.style":"Style","viewer.guide.shortcut.reset":"Reset","viewer.guide.shortcut.zoomIn":"Zoom in","viewer.guide.shortcut.zoomOut":"Zoom out","viewer.guide.shortcut.close":"Close","viewer.guide.facts":"{nodes} · {relationships} · {views}","viewer.guide.fact.node.one":"{count} semantic node","viewer.guide.fact.node.other":"{count} semantic nodes","viewer.guide.fact.relationship.one":"{count} relationship","viewer.guide.fact.relationship.other":"{count} relationships","viewer.guide.fact.view.one":"{count} guided view","viewer.guide.fact.view.other":"{count} guided views","viewer.guide.story.available.one":"Walk {count} authored chapter and its real relationships.","viewer.guide.story.available.other":"Walk {count} authored chapters and their real relationships.","viewer.guide.story.unavailable":"No authored guided story in this diagram.","viewer.guide.open":"Open diagram guide","viewer.guide.noStory":"This diagram has no authored guided story.","viewer.finder.title":"Find a node","viewer.finder.close":"Close node finder","viewer.finder.placeholder":"Search labels or IDs","viewer.finder.search":"Search diagram nodes","viewer.finder.results":"Diagram nodes","viewer.finder.empty":"No matching nodes","viewer.finder.result.focus":"Focus {label}","viewer.finder.result.routeStart":"Choose {label} as route start","viewer.finder.result.routeTarget":"Choose {label} as route destination, {links}","viewer.finder.status.empty":"No matching nodes","viewer.finder.status.count.one":"{count} matching node","viewer.finder.status.count.other":"{count} matching nodes","viewer.finder.noun.nodes":"nodes","viewer.finder.link.one":"{count} link","viewer.finder.link.other":"{count} links","viewer.finder.result.focus.one":"Focus {label}, {count} related connection","viewer.finder.result.focus.other":"Focus {label}, {count} related connections","viewer.finder.status.filtered":"{visible} of {available} {noun}","viewer.finder.status.all":"{available} {noun}","viewer.passport.eyebrow":"Semantic passport","viewer.passport.metadata":"Node metadata","viewer.passport.evidence":"Verified source evidence","viewer.passport.verified":"Verified source","viewer.passport.verificationScope":"Verified against local Git at the pinned revision. Remote access has not been checked.","viewer.passport.reach":"Authored reach","viewer.passport.reach.trace":"Trace authored reachability","viewer.passport.upstream":"Upstream","viewer.passport.downstream":"Downstream","viewer.passport.upstream.trace":"Trace upstream authored reachability","viewer.passport.downstream.trace":"Trace downstream authored reachability","viewer.passport.close":"Close semantic passport","viewer.passport.copy":"Copy link","viewer.passport.copy.focus":"Copy link to focused node","viewer.passport.relations":"Relations","viewer.passport.relations.show":"Show connected relationships","viewer.passport.relations.hide":"Hide connected relationships","viewer.passport.relations.list":"Connected relationships","viewer.passport.copyRelation":"Copy relation","viewer.passport.copyNode":"Copy node","viewer.passport.copyPinned":"Copy link to pinned relationship","viewer.passport.copySource":"Copy link to source node","viewer.passport.copy.focused.success":"Focused node link copied","viewer.passport.copy.pinned.success":"Pinned relationship link copied","viewer.passport.copy.focused.failed":"Could not copy focused node link","viewer.passport.copy.pinned.failed":"Could not copy pinned relationship link","viewer.passport.relationship.none":"No connected relationships","viewer.passport.relationship.count.one":"{count} relation","viewer.passport.relationship.count.other":"{count} relations","viewer.passport.relationship.show.one":"Show {count} connected relationship","viewer.passport.relationship.show.other":"Show {count} connected relationships","viewer.passport.relationship.summary":"{out} outgoing · {in} incoming{loops}","viewer.passport.relationship.loops":" · {count} loop","viewer.passport.relationship.explorer":"Direct relationship explorer","viewer.passport.relationship.help":"Use arrow keys to explore relationships. Press Enter or Space to pin details; Escape clears.","viewer.passport.relationship.loopsBack":"loops back","viewer.passport.relationship.connectsTo":"connects to","viewer.passport.relationship.connectsFrom":"connects from","viewer.passport.relationship.pinned":"Pinned relationship · {from} → {to} · {label}","viewer.passport.relationship.inspect":"Inspect relationship {index} of {total}: {from} to {to}, {label}. Press Enter for details.","viewer.passport.relationship.group.out":"Outgoing","viewer.passport.relationship.group.in":"Incoming","viewer.passport.relationship.group.loop":"Self loops","viewer.passport.relationship.row":"{group}: {relationship}, {neighbor}","viewer.passport.relationship.direction.out":"OUT →","viewer.passport.relationship.direction.in":"← IN","viewer.passport.relationship.direction.loop":"LOOP","viewer.passport.sourceCount.one":"{count} verified source reference","viewer.passport.sourceCount.other":"{count} verified source references","viewer.passport.sourceMarker":"SRC","viewer.passport.beacon.one":"{count} verified source; focus this node to inspect","viewer.passport.beacon.other":"{count} verified sources; focus this node to inspect","viewer.passport.repository.open":"Open verified repository revision {revision}","viewer.passport.source.open":"Open verified source {path} at revision {revision}","viewer.passport.source.openLink":"Open ↗","viewer.passport.reach.upstream.one":"Trace {count} upstream authored node","viewer.passport.reach.upstream.other":"Trace {count} upstream authored nodes","viewer.passport.reach.downstream.one":"Trace {count} downstream authored node","viewer.passport.reach.downstream.other":"Trace {count} downstream authored nodes","viewer.passport.reach.noUpstream":"No upstream authored nodes","viewer.passport.reach.noDownstream":"No downstream authored nodes","viewer.passport.reach.status":"{direction} · {nodes} nodes · {links} links · max {hops} hops","viewer.route.eyebrow":"Route probe","viewer.route.start":"Choose a start node","viewer.route.start.find":"Find start","viewer.route.start.find.aria":"Find a route start","viewer.route.copy":"Copy link","viewer.route.copy.aria":"Copy link to traced route","viewer.route.clear":"Clear","viewer.route.clear.aria":"Clear route probe","viewer.route.traced":"Traced route","viewer.route.pickTwo":"Pick two semantic nodes on the diagram","viewer.route.pickOne":"Pick a semantic node on the diagram","viewer.route.controls":"Route journey controls","viewer.route.previous":"Previous route position","viewer.route.play":"Play route journey","viewer.route.pause":"Pause route journey","viewer.route.replay":"Replay route journey","viewer.route.next":"Next route position","viewer.route.journey":"Journey","viewer.route.pause.label":"Pause","viewer.route.replay.label":"Replay","viewer.route.overview":"Overview","viewer.route.overview.aria":"Show complete route overview","viewer.route.instructions":"Choose the source, then the destination. Direction matters.","viewer.route.destination":"Choose a destination from {label}","viewer.route.destination.find":"Find target","viewer.route.destination.find.aria":"Find a reachable route destination","viewer.route.differentDestination":"Choose a different destination","viewer.route.distinct":"A route needs two distinct semantic nodes.","viewer.route.unreachable":"No directed route to {label}","viewer.route.unreachable.detail":"{target} is not reachable from {source}. Pick a highlighted destination.","viewer.route.start.instructions":"Select the source. The next step will reveal only directed destinations.","viewer.route.copy.success":"Traced route link copied","viewer.route.copy.failed":"Could not copy traced route link","viewer.route.position":"Route position {index} of {total}: {label}","viewer.route.step":"Step {index} of {total} · {phase} · {label}","viewer.route.motionRequired":"Automatic journey requires Live motion","viewer.route.trigger.clear":"Clear traced route","viewer.route.overview.status":"{nodes} · {hops} · shortest authored route","viewer.route.overview.node.one":"{count} node","viewer.route.overview.node.other":"{count} nodes","viewer.route.overview.hop.one":"{count} directed hop","viewer.route.overview.hop.other":"{count} directed hops","viewer.route.phase.playing":"Playing","viewer.route.phase.complete":"Complete","viewer.route.phase.inspecting":"Inspecting","viewer.route.destination.count.one":"{count} directed destination available. Pick a highlighted node.","viewer.route.destination.count.other":"{count} directed destinations available. Pick a highlighted node.","viewer.route.noOutgoing":"No outgoing route starts here. Clear and choose another source.","viewer.route.result.title":"{source} to {target}","viewer.route.finder.source.title":"Choose route start","viewer.route.finder.source.placeholder":"Search route sources","viewer.route.finder.source.empty":"No matching route sources","viewer.route.finder.source.results":"Nodes that can start a route","viewer.route.finder.source.noun":"route sources","viewer.route.finder.source.badge":"start","viewer.route.finder.target.title":"Destination from {label}","viewer.route.finder.target.placeholder":"Search reachable destinations","viewer.route.finder.target.empty":"No matching reachable destinations","viewer.route.finder.target.results":"Reachable route destinations","viewer.route.finder.target.noun":"reachable destinations","viewer.route.hop.one":"{count} hop","viewer.route.hop.other":"{count} hops","viewer.lens.eyebrow":"Semantic lens","viewer.lens.title":"Compare system roles","viewer.lens.close":"Close semantic lens","viewer.lens.instruction":"Choose up to two semantic kinds. One reveals its real traffic; two compare only direct authored relationships.","viewer.lens.kinds":"Semantic kinds","viewer.lens.choose":"Choose a kind to inspect its nodes and touching relationships.","viewer.lens.copy":"Copy link to semantic lens","viewer.lens.clear":"Clear semantic lens","viewer.lens.open":"Open semantic lens","viewer.lens.openActive":"Open active semantic lens","viewer.lens.legend":"Semantic legend","viewer.lens.legend.inspect.one":"Inspect {label}, {count} node","viewer.lens.legend.inspect.other":"Inspect {label}, {count} nodes","viewer.lens.kind.count.one":"{label}, {count} node","viewer.lens.kind.count.other":"{label}, {count} nodes","viewer.lens.compare.one":"{first} → {second}: {forward} · {second} → {first}: {reverse} · {count} direct relationship","viewer.lens.compare.other":"{first} → {second}: {forward} · {second} → {first}: {reverse} · {count} direct relationships","viewer.lens.single":"{nodes} · {relationships} · connected peers remain visible","viewer.lens.node.one":"{count} {label} node","viewer.lens.node.other":"{count} {label} nodes","viewer.lens.relationship.one":"{count} touching relationship","viewer.lens.relationship.other":"{count} touching relationships","viewer.radar.title":"Semantic radar","viewer.radar.building":"Building overview","viewer.radar.openFull":"Open full semantic radar","viewer.radar.open":"Open radar","viewer.radar.close":"Close semantic radar","viewer.radar.surface":"Diagram overview. Click a node to focus it, or use arrow keys to pan.","viewer.radar.click":"Click node","viewer.radar.drag":"Drag to pan","viewer.radar.space":"Semantic radar needs more MAP space.","viewer.radar.nodes":"Semantic diagram radar nodes","viewer.radar.focus":"Focus {label} from Semantic Radar","viewer.radar.status":"{count} nodes · {viewport}","viewer.radar.fullMap":"{count} nodes · full map","viewer.radar.compacted":"Radar compacted to avoid covering the Semantic Passport or MAP controls.","viewer.radar.cancelWaiting":"Cancel semantic radar waiting for more MAP space","viewer.radar.needsSpace":"Semantic radar needs more visible MAP space","viewer.radar.viewport.full":"full map","viewer.radar.viewport.width":"{percent}% width","viewer.radar.viewport.scale":"{percent}% viewport","viewer.nav.controls":"Diagram view controls","viewer.nav.route":"Trace a directed route","viewer.nav.route.title":"Trace route (R)","viewer.nav.route.short":"PATH","viewer.nav.radar":"Open semantic radar","viewer.nav.radar.title":"Semantic radar (M)","viewer.nav.radar.short":"MAP","viewer.nav.lens":"Open semantic lens","viewer.nav.lens.title":"Semantic lens (L)","viewer.nav.lens.short":"LENS","viewer.nav.find":"Find a node","viewer.nav.find.title":"Find a node (/)","viewer.nav.guide":"Open diagram guide","viewer.nav.guide.title":"Diagram guide (?)","viewer.nav.zoomOut":"Zoom out","viewer.nav.zoomOut.title":"Zoom out (-)","viewer.nav.reset":"Reset diagram view","viewer.nav.reset.title":"Reset view (0)","viewer.nav.read":"READ","viewer.nav.zoomIn":"Zoom in","viewer.nav.zoomIn.title":"Zoom in (+)","viewer.nav.camera":"{hint}. Reset diagram view","viewer.nav.camera.title":"{semantic}{hint} · reset view (0)","viewer.nav.camera.semantic":"Semantic camera active · ","viewer.nav.level.map":"MAP","viewer.nav.level.read":"READ","viewer.nav.level.full":"FULL","viewer.nav.level.auto":"AUTO","viewer.nav.detail.map":"Zoom in to reveal relationship labels and node context","viewer.nav.detail.read":"Zoom in again to reveal tags and annotations","viewer.nav.detail.full":"Full diagram detail","viewer.intent.summary":"{label}. {out} outgoing, {in} incoming{loops}. {total} connections. Press Enter for details.","viewer.intent.loops":", {count} self loop","viewer.common.copied":"Copied","viewer.common.copyFailed":"Copy failed","viewer.common.copyLink":"Copy link","viewer.common.clear":"Clear","viewer.common.close":"Close"}}</script>
     <div class="guided-views no-print" id="guided-views" hidden aria-label="Guided diagram views">
@@ -5130,7 +5130,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     <!-- Main Diagram -->
     <div class="diagram-container" data-detail-level="read"
          data-preset-badge-editorial-plate="ARCHIFY / PLATE 04">
-      <svg viewBox="0 0 1060 480" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase">
+      <svg viewBox="0 0 880 500" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase">
         <title id="archify-diagram-title">Reserva Viva — Flujo de datos y política de segmentación</title>
         <desc id="archify-diagram-description">A data-flow diagram generated by Archify.</desc>
         <!-- Definitions -->
@@ -5156,95 +5156,202 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <rect width="100%" height="100%" fill="url(#grid)" />
 
         <!-- Data Stages -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="0" x="16" y="46" width="168" height="360" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="100" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">01 / VLANs de negocio (PC-1 / PC-2 / PC-3)</text>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="0" x="16" y="46" width="168" height="380" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="100" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">01 / Origen · VLANs de negocio</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="1" x="231" y="46" width="168" height="360" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="1" x="231" y="46" width="168" height="380" rx="10" class="c-lane" stroke-width="1"/>
         <text x="315" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">02 / Switch / política</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="2" x="446" y="46" width="168" height="360" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="530" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">03 / Resultado</text>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="2" x="446" y="46" width="168" height="380" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="530" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">03 / VLAN 99 · Infraestructura</text>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="3" x="661" y="46" width="168" height="380" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="745" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">04 / Resultado</text>
 
         <!-- Flow paths -->
-        <path data-edge-from="negocio" data-edge-to="switch" data-edge-label="uplink" data-edge-key="0" data-edge-id="uplink" data-composition-points="156,157;259,157" d="M 156 157 L 259 157" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="switch" data-edge-to="vlan99" data-edge-label="permitido" data-edge-key="1" data-edge-id="permitido-vlan99" data-composition-points="371,157;474,157" d="M 371 157 L 474 157" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="switch" data-edge-to="bloqueado" data-edge-label="bloqueado" data-edge-key="2" data-edge-id="denegado-cruzado" data-composition-points="371,157;422.5,157;422.5,271;474,271" d="M 371 157 L 422.5 157 L 422.5 271 L 474 271" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="vlan10" data-edge-to="switch" data-edge-label="access VLAN10" data-edge-key="0" data-edge-id="uplink-vlan10" data-composition-points="170,157;207.5,157;207.5,258;245,258" d="M 170 157 L 207.5 157 L 207.5 258 L 245 258" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="vlan2030" data-edge-to="switch" data-edge-label="VLAN20+30" data-edge-key="1" data-edge-id="uplink-vlan2030" data-composition-points="170,271;245,271" d="M 170 271 L 245 271" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="vlan40" data-edge-to="switch" data-edge-label="trunk VLAN40" data-edge-key="2" data-edge-id="uplink-vlan40" data-composition-points="170,385;207.5,385;207.5,284;245,284" d="M 170 385 L 207.5 385 L 207.5 284 L 245 284" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="switch" data-edge-to="ldap" data-edge-label="LDAPS 636" data-edge-key="3" data-edge-id="permitido-ldaps" data-composition-points="385,258;422.5,258;422.5,157;460,157" d="M 385 258 L 422.5 258 L 422.5 157 L 460 157" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="switch" data-edge-to="dns" data-edge-label="DNS 53" data-edge-key="4" data-edge-id="permitido-dns" data-composition-points="385,271;460,271" d="M 385 271 L 460 271" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="switch" data-edge-to="ntp" data-edge-label="NTP 123" data-edge-key="5" data-edge-id="permitido-ntp" data-composition-points="385,284;422.5,284;422.5,385;460,385" d="M 385 284 L 422.5 284 L 422.5 385 L 460 385" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="ldap" data-edge-to="permitido" data-edge-label="cadena verificada" data-edge-key="6" data-edge-id="ldap-ok" data-composition-points="600,157;637.5,157;637.5,258;675,258" d="M 600 157 L 637.5 157 L 637.5 258 L 675 258" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="dns" data-edge-to="permitido" data-edge-label="resolución" data-edge-key="7" data-edge-id="dns-ok" data-composition-points="600,271;675,271" d="M 600 271 L 675 271" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="ntp" data-edge-to="permitido" data-edge-label="sincronización" data-edge-key="8" data-edge-id="ntp-ok" data-composition-points="600,385;637.5,385;637.5,284;675,284" d="M 600 385 L 637.5 385 L 637.5 284 L 675 284" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="switch" data-edge-to="bloqueado" data-edge-label="negocio ↔ negocio: descartado" data-edge-key="9" data-edge-id="denegado-cruzado" data-composition-points="385,271;385,450;675,450;675,385" d="M 385 271 L 385 450 L 675 450 L 675 385" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
 
         <!-- Nodes -->
-        <g id="node-negocio" data-node-id="negocio" data-node-label="4 VLANs de negocio" tabindex="0" role="button" aria-label="Focus 4 VLANs de negocio, VLAN 10 · 20 · 30 · 40, 01 / VLANs de negocio (PC-1 / PC-2 / PC-3)" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="VLAN 10 · 20 · 30 · 40" data-node-context="01 / VLANs de negocio (PC-1 / PC-2 / PC-3)">
-          <title>4 VLANs de negocio · VLAN 10 · 20 · 30 · 40 · 01 / VLANs de negocio (PC-1 / PC-2 / PC-3)</title>
-          <rect x="44" y="128" width="112" height="58" rx="6" class="c-mask"/>
-          <rect x="44" y="128" width="112" height="58" rx="6" class="c-cloud" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(50 134) scale(0.6875)">
+        <g id="node-vlan10" data-node-id="vlan10" data-node-label="PC-1 · VLAN10" tabindex="0" role="button" aria-label="Focus PC-1 · VLAN10, Médica · OpenVPMS, 01 / Origen · VLANs de negocio" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="Médica · OpenVPMS" data-node-tag="puerto access" data-node-context="01 / Origen · VLANs de negocio">
+          <title>PC-1 · VLAN10 · Médica · OpenVPMS · 01 / Origen · VLANs de negocio · puerto access</title>
+          <rect x="30" y="128" width="140" height="58" rx="6" class="c-mask"/>
+          <rect x="30" y="128" width="140" height="58" rx="6" class="c-cloud" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(36 134) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="100" y="149" class="t-primary" font-size="9.6" font-weight="600" text-anchor="middle">4 VLANs de negocio</text>
-          <text data-detail="context" x="100" y="165" class="t-muted" font-size="7" text-anchor="middle">VLAN 10 · 20 · 30 · 40</text>
+          <text data-node-label="" data-detail-anchor="" x="100" y="149" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">PC-1 · VLAN10</text>
+          <text data-detail="context" x="100" y="165" class="t-muted" font-size="7" text-anchor="middle">Médica · OpenVPMS</text>
+        <text data-detail="fine" x="100" y="175" class="t-cloud" font-size="7" text-anchor="middle">puerto access</text>
         </g>
 
-        <g id="node-switch" data-node-id="switch" data-node-label="Switch / ACL" tabindex="0" role="button" aria-label="Focus Switch / ACL, access + trunk 802.1Q, 02 / Switch / política" aria-pressed="false" data-node-kind="security" data-node-sublabel="access + trunk 802.1Q" data-node-context="02 / Switch / política">
-          <title>Switch / ACL · access + trunk 802.1Q · 02 / Switch / política</title>
-          <rect x="259" y="128" width="112" height="58" rx="6" class="c-mask"/>
-          <rect x="259" y="128" width="112" height="58" rx="6" class="c-security" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(265 134) scale(0.6875)">
+        <g id="node-vlan2030" data-node-id="vlan2030" data-node-label="PC-2 · VLAN20+30" tabindex="0" role="button" aria-label="Focus PC-2 · VLAN20+30, Taquilla + Logística, 01 / Origen · VLANs de negocio" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="Taquilla + Logística" data-node-tag="puerto trunk" data-node-context="01 / Origen · VLANs de negocio">
+          <title>PC-2 · VLAN20+30 · Taquilla + Logística · 01 / Origen · VLANs de negocio · puerto trunk</title>
+          <rect x="30" y="242" width="140" height="58" rx="6" class="c-mask"/>
+          <rect x="30" y="242" width="140" height="58" rx="6" class="c-cloud" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(36 248) scale(0.6875)">
+            <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="100" y="263" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">PC-2 · VLAN20+30</text>
+          <text data-detail="context" x="100" y="279" class="t-muted" font-size="7" text-anchor="middle">Taquilla + Logística</text>
+        <text data-detail="fine" x="100" y="289" class="t-cloud" font-size="7" text-anchor="middle">puerto trunk</text>
+        </g>
+
+        <g id="node-vlan40" data-node-id="vlan40" data-node-label="PC-3 · VLAN40" tabindex="0" role="button" aria-label="Focus PC-3 · VLAN40, RRHH · ERPNext, 01 / Origen · VLANs de negocio" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="RRHH · ERPNext" data-node-tag="puerto trunk" data-node-context="01 / Origen · VLANs de negocio">
+          <title>PC-3 · VLAN40 · RRHH · ERPNext · 01 / Origen · VLANs de negocio · puerto trunk</title>
+          <rect x="30" y="356" width="140" height="58" rx="6" class="c-mask"/>
+          <rect x="30" y="356" width="140" height="58" rx="6" class="c-cloud" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(36 362) scale(0.6875)">
+            <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="100" y="377" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">PC-3 · VLAN40</text>
+          <text data-detail="context" x="100" y="393" class="t-muted" font-size="7" text-anchor="middle">RRHH · ERPNext</text>
+        <text data-detail="fine" x="100" y="403" class="t-cloud" font-size="7" text-anchor="middle">puerto trunk</text>
+        </g>
+
+        <g id="node-switch" data-node-id="switch" data-node-label="Switch / ACL" tabindex="0" role="button" aria-label="Focus Switch / ACL, 802.1Q · aplica la matriz, 02 / Switch / política" aria-pressed="false" data-node-kind="security" data-node-sublabel="802.1Q · aplica la matriz" data-node-tag="L3, o L2 + PC-3" data-node-context="02 / Switch / política">
+          <title>Switch / ACL · 802.1Q · aplica la matriz · 02 / Switch / política · L3, o L2 + PC-3</title>
+          <rect x="245" y="242" width="140" height="58" rx="6" class="c-mask"/>
+          <rect x="245" y="242" width="140" height="58" rx="6" class="c-security" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(251 248) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="315" y="149" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">Switch / ACL</text>
-          <text data-detail="context" x="315" y="165" class="t-muted" font-size="7" text-anchor="middle">access + trunk 802.1Q</text>
+          <text data-node-label="" data-detail-anchor="" x="315" y="263" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">Switch / ACL</text>
+          <text data-detail="context" x="315" y="279" class="t-muted" font-size="7" text-anchor="middle">802.1Q · aplica la matriz</text>
+        <text data-detail="fine" x="315" y="289" class="t-security" font-size="7" text-anchor="middle">L3, o L2 + PC-3</text>
         </g>
 
-        <g id="node-vlan99" data-node-id="vlan99" data-node-label="VLAN 99 · Infra" tabindex="0" role="button" aria-label="Focus VLAN 99 · Infra, LDAP + DNS + NTP, 03 / Resultado" aria-pressed="false" data-node-kind="backend" data-node-sublabel="LDAP + DNS + NTP" data-node-context="03 / Resultado">
-          <title>VLAN 99 · Infra · LDAP + DNS + NTP · 03 / Resultado</title>
-          <rect x="474" y="128" width="112" height="58" rx="6" class="c-mask"/>
-          <rect x="474" y="128" width="112" height="58" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(480 134) scale(0.6875)">
+        <g id="node-ldap" data-node-id="ldap" data-node-label="OpenLDAP" tabindex="0" role="button" aria-label="Focus OpenLDAP, 10.10.99.10 · 389 y 636, 03 / VLAN 99 · Infraestructura" aria-pressed="false" data-node-kind="security" data-node-sublabel="10.10.99.10 · 389 y 636" data-node-tag="CA interna" data-node-context="03 / VLAN 99 · Infraestructura">
+          <title>OpenLDAP · 10.10.99.10 · 389 y 636 · 03 / VLAN 99 · Infraestructura · CA interna</title>
+          <rect x="460" y="128" width="140" height="58" rx="6" class="c-mask"/>
+          <rect x="460" y="128" width="140" height="58" rx="6" class="c-security" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(466 134) scale(0.6875)">
+            <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
+            <path d="m5.8 8 1.5 1.5 3-3"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="530" y="149" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">OpenLDAP</text>
+          <text data-detail="context" x="530" y="165" class="t-muted" font-size="7" text-anchor="middle">10.10.99.10 · 389 y 636</text>
+        <text data-detail="fine" x="530" y="175" class="t-security" font-size="7" text-anchor="middle">CA interna</text>
+        </g>
+
+        <g id="node-dns" data-node-id="dns" data-node-label="DNS bind9" tabindex="0" role="button" aria-label="Focus DNS bind9, 10.10.99.11 · 53, 03 / VLAN 99 · Infraestructura" aria-pressed="false" data-node-kind="backend" data-node-sublabel="10.10.99.11 · 53" data-node-tag="reservaviva.local" data-node-context="03 / VLAN 99 · Infraestructura">
+          <title>DNS bind9 · 10.10.99.11 · 53 · 03 / VLAN 99 · Infraestructura · reservaviva.local</title>
+          <rect x="460" y="242" width="140" height="58" rx="6" class="c-mask"/>
+          <rect x="460" y="242" width="140" height="58" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(466 248) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="530" y="149" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">VLAN 99 · Infra</text>
-          <text data-detail="context" x="530" y="165" class="t-muted" font-size="7" text-anchor="middle">LDAP + DNS + NTP</text>
+          <text data-node-label="" data-detail-anchor="" x="530" y="263" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">DNS bind9</text>
+          <text data-detail="context" x="530" y="279" class="t-muted" font-size="7" text-anchor="middle">10.10.99.11 · 53</text>
+        <text data-detail="fine" x="530" y="289" class="t-backend" font-size="7" text-anchor="middle">reservaviva.local</text>
         </g>
 
-        <g id="node-bloqueado" data-node-id="bloqueado" data-node-label="Bloqueado" tabindex="0" role="button" aria-label="Focus Bloqueado, política DENY, 03 / Resultado" aria-pressed="false" data-node-kind="security" data-node-sublabel="política DENY" data-node-context="03 / Resultado">
-          <title>Bloqueado · política DENY · 03 / Resultado</title>
-          <rect x="474" y="242" width="112" height="58" rx="6" class="c-mask"/>
-          <rect x="474" y="242" width="112" height="58" rx="6" class="c-security" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(480 248) scale(0.6875)">
+        <g id="node-ntp" data-node-id="ntp" data-node-label="NTP interno" tabindex="0" role="button" aria-label="Focus NTP interno, 10.10.99.12 · 123, 03 / VLAN 99 · Infraestructura" aria-pressed="false" data-node-kind="backend" data-node-sublabel="10.10.99.12 · 123" data-node-tag="hora común" data-node-context="03 / VLAN 99 · Infraestructura">
+          <title>NTP interno · 10.10.99.12 · 123 · 03 / VLAN 99 · Infraestructura · hora común</title>
+          <rect x="460" y="356" width="140" height="58" rx="6" class="c-mask"/>
+          <rect x="460" y="356" width="140" height="58" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(466 362) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="530" y="377" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">NTP interno</text>
+          <text data-detail="context" x="530" y="393" class="t-muted" font-size="7" text-anchor="middle">10.10.99.12 · 123</text>
+        <text data-detail="fine" x="530" y="403" class="t-backend" font-size="7" text-anchor="middle">hora común</text>
+        </g>
+
+        <g id="node-permitido" data-node-id="permitido" data-node-label="Permitido" tabindex="0" role="button" aria-label="Focus Permitido, sesión, nombre y hora, 04 / Resultado" aria-pressed="false" data-node-kind="backend" data-node-sublabel="sesión, nombre y hora" data-node-tag="fila VLAN99 de la matriz" data-node-context="04 / Resultado">
+          <title>Permitido · sesión, nombre y hora · 04 / Resultado · fila VLAN99 de la matriz</title>
+          <rect x="675" y="242" width="140" height="58" rx="6" class="c-mask"/>
+          <rect x="675" y="242" width="140" height="58" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(681 248) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="745" y="263" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">Permitido</text>
+          <text data-detail="context" x="745" y="279" class="t-muted" font-size="7" text-anchor="middle">sesión, nombre y hora</text>
+        <text data-detail="fine" x="745" y="289" class="t-backend" font-size="7" text-anchor="middle">fila VLAN99 de la matriz</text>
+        </g>
+
+        <g id="node-bloqueado" data-node-id="bloqueado" data-node-label="Bloqueado" tabindex="0" role="button" aria-label="Focus Bloqueado, política DENY, 04 / Resultado" aria-pressed="false" data-node-kind="security" data-node-sublabel="política DENY" data-node-tag="sin respuesta" data-node-context="04 / Resultado">
+          <title>Bloqueado · política DENY · 04 / Resultado · sin respuesta</title>
+          <rect x="675" y="356" width="140" height="58" rx="6" class="c-mask"/>
+          <rect x="675" y="356" width="140" height="58" rx="6" class="c-security" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(681 362) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="530" y="263" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">Bloqueado</text>
-          <text data-detail="context" x="530" y="279" class="t-muted" font-size="7" text-anchor="middle">política DENY</text>
+          <text data-node-label="" data-detail-anchor="" x="745" y="377" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">Bloqueado</text>
+          <text data-detail="context" x="745" y="393" class="t-muted" font-size="7" text-anchor="middle">política DENY</text>
+        <text data-detail="fine" x="745" y="403" class="t-security" font-size="7" text-anchor="middle">sin respuesta</text>
         </g>
 
         <!-- Flow labels -->
-        <g data-detail="context" data-edge-from="negocio" data-edge-to="switch" data-edge-label="uplink" data-edge-key="0" data-edge-id="uplink">
-          <rect x="186.8" y="136" width="41.4" height="16" rx="4" class="c-mask"/>
-          <text x="207.5" y="147" class="t-muted" font-size="8" text-anchor="middle">uplink</text>
+        <g data-detail="context" data-edge-from="vlan10" data-edge-to="switch" data-edge-label="access VLAN10" data-edge-key="0" data-edge-id="uplink-vlan10">
+          <rect x="169.65" y="186.5" width="75.7" height="16" rx="4" class="c-mask"/>
+          <text x="207.5" y="197.5" class="t-muted" font-size="8" text-anchor="middle">access VLAN10</text>
         </g>
-        <g data-detail="context" data-edge-from="switch" data-edge-to="vlan99" data-edge-label="permitido" data-edge-key="1" data-edge-id="permitido-vlan99">
-          <rect x="394.45" y="136" width="56.1" height="16" rx="4" class="c-mask"/>
-          <text x="422.5" y="147" class="t-backend" font-size="8" text-anchor="middle">permitido</text>
+        <g data-detail="context" data-edge-from="vlan2030" data-edge-to="switch" data-edge-label="VLAN20+30" data-edge-key="1" data-edge-id="uplink-vlan2030">
+          <rect x="179.45" y="263" width="56.1" height="16" rx="4" class="c-mask"/>
+          <text x="207.5" y="274" class="t-backend" font-size="8" text-anchor="middle">VLAN20+30</text>
         </g>
-        <g data-detail="context" data-edge-from="switch" data-edge-to="bloqueado" data-edge-label="bloqueado" data-edge-key="2" data-edge-id="denegado-cruzado">
-          <rect x="394.45" y="193" width="56.1" height="16" rx="4" class="c-mask"/>
-          <text x="422.5" y="204" class="t-messagebus" font-size="8" text-anchor="middle">bloqueado</text>
+        <g data-detail="context" data-edge-from="vlan40" data-edge-to="switch" data-edge-label="trunk VLAN40" data-edge-key="2" data-edge-id="uplink-vlan40">
+          <rect x="172.1" y="313.5" width="70.8" height="16" rx="4" class="c-mask"/>
+          <text x="207.5" y="324.5" class="t-muted" font-size="8" text-anchor="middle">trunk VLAN40</text>
+        </g>
+        <g data-detail="context" data-edge-from="switch" data-edge-to="ldap" data-edge-label="LDAPS 636" data-edge-key="3" data-edge-id="permitido-ldaps">
+          <rect x="394.45" y="186.5" width="56.1" height="16" rx="4" class="c-mask"/>
+          <text x="422.5" y="197.5" class="t-security" font-size="8" text-anchor="middle">LDAPS 636</text>
+        </g>
+        <g data-detail="context" data-edge-from="switch" data-edge-to="dns" data-edge-label="DNS 53" data-edge-key="4" data-edge-id="permitido-dns">
+          <rect x="401.8" y="263" width="41.4" height="16" rx="4" class="c-mask"/>
+          <text x="422.5" y="274" class="t-backend" font-size="8" text-anchor="middle">DNS 53</text>
+        </g>
+        <g data-detail="context" data-edge-from="switch" data-edge-to="ntp" data-edge-label="NTP 123" data-edge-key="5" data-edge-id="permitido-ntp">
+          <rect x="399.35" y="313.5" width="46.3" height="16" rx="4" class="c-mask"/>
+          <text x="422.5" y="324.5" class="t-muted" font-size="8" text-anchor="middle">NTP 123</text>
+        </g>
+        <g data-detail="context" data-edge-from="ldap" data-edge-to="permitido" data-edge-label="cadena verificada" data-edge-key="6" data-edge-id="ldap-ok">
+          <rect x="589.85" y="186.5" width="95.3" height="16" rx="4" class="c-mask"/>
+          <text x="637.5" y="197.5" class="t-security" font-size="8" text-anchor="middle">cadena verificada</text>
+        </g>
+        <g data-detail="context" data-edge-from="dns" data-edge-to="permitido" data-edge-label="resolución" data-edge-key="7" data-edge-id="dns-ok">
+          <rect x="607" y="263" width="61" height="16" rx="4" class="c-mask"/>
+          <text x="637.5" y="274" class="t-backend" font-size="8" text-anchor="middle">resolución</text>
+        </g>
+        <g data-detail="context" data-edge-from="ntp" data-edge-to="permitido" data-edge-label="sincronización" data-edge-key="8" data-edge-id="ntp-ok">
+          <rect x="597.2" y="313.5" width="80.6" height="16" rx="4" class="c-mask"/>
+          <text x="637.5" y="324.5" class="t-muted" font-size="8" text-anchor="middle">sincronización</text>
+        </g>
+        <g data-detail="context" data-edge-from="switch" data-edge-to="bloqueado" data-edge-label="negocio ↔ negocio: descartado" data-edge-key="9" data-edge-id="denegado-cruzado">
+          <rect x="452.95" y="429" width="154.1" height="16" rx="4" class="c-mask"/>
+          <text x="530" y="440" class="t-messagebus" font-size="8" text-anchor="middle">negocio ↔ negocio: descartado</text>
         </g>
 
         <!-- Legend -->
         <g data-legend="">
-          <text x="40" y="424" class="t-primary" font-size="12" font-weight="650">Legend</text>
-          <g data-legend-semantic-kind="emphasis" data-legend-x="40" data-legend-baseline="444" data-legend-width="103">
-            <path d="M 40 441 L 74 441" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-            <text x="83" y="444" class="t-muted" font-size="10" font-weight="500">primary data</text>
+          <text x="40" y="444" class="t-primary" font-size="12" font-weight="650">Legend</text>
+          <g data-legend-semantic-kind="emphasis" data-legend-x="40" data-legend-baseline="464" data-legend-width="103">
+            <path d="M 40 461 L 74 461" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+            <text x="83" y="464" class="t-muted" font-size="10" font-weight="500">primary data</text>
           </g>
-          <g data-legend-semantic-kind="dashed" data-legend-x="165" data-legend-baseline="444" data-legend-width="98">
-            <path d="M 165 441 L 199 441" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-            <text x="208" y="444" class="t-muted" font-size="10" font-weight="500">async batch</text>
+          <g data-legend-semantic-kind="security" data-legend-x="165" data-legend-baseline="464" data-legend-width="103">
+            <path d="M 165 461 L 199 461" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+            <text x="208" y="464" class="t-muted" font-size="10" font-weight="500">policy / PII</text>
           </g>
-          <g data-legend-semantic-kind="default" data-legend-x="285" data-legend-baseline="444" data-legend-width="88">
-            <path d="M 285 441 L 319 441" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-            <text x="328" y="444" class="t-muted" font-size="10" font-weight="500">data flow</text>
+          <g data-legend-semantic-kind="dashed" data-legend-x="290" data-legend-baseline="464" data-legend-width="98">
+            <path d="M 290 461 L 324 461" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+            <text x="333" y="464" class="t-muted" font-size="10" font-weight="500">async batch</text>
+          </g>
+          <g data-legend-semantic-kind="default" data-legend-x="410" data-legend-baseline="464" data-legend-width="88">
+            <path d="M 410 461 L 444 461" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+            <text x="453" y="464" class="t-muted" font-size="10" font-weight="500">data flow</text>
           </g>
         </g>
       </svg>
@@ -5439,8 +5546,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>Único destino permitido</h3>
         </div>
         <ul>
-          <li>&bull; Cada VLAN de negocio (10/20/30/40) solo puede llegar a VLAN99</li>
-          <li>&bull; VLAN99 sirve autenticación (LDAP), resolución de nombres (DNS) y hora (NTP) a las 4</li>
+          <li>&bull; Cada VLAN de negocio (10/20/30/40) solo llega a VLAN99</li>
+          <li>&bull; Allí están LDAP (389 / LDAPS 636), bind9 (53) y NTP (123)</li>
         </ul>
       </div>
 
@@ -5450,8 +5557,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>Todo lo demás, bloqueado</h3>
         </div>
         <ul>
-          <li>&bull; VLAN10↔20, VLAN10↔30, VLAN10↔40, VLAN20↔30, VLAN20↔40, VLAN30↔40: denegado</li>
-          <li>&bull; Aplica igual entre VLANs del mismo PC físico: VLAN20 y VLAN30 viven ambas en PC-2, pero el tráfico entre ellas igual sale por el trunk, hace hairpin en el switch, y ahí se descarta — no hay atajo local</li>
+          <li>&bull; 10↔20, 10↔30, 10↔40, 20↔30, 20↔40, 30↔40: denegado</li>
+          <li>&bull; VLAN20 y VLAN30 comparten PC-2, pero su tráfico muere en el switch</li>
         </ul>
       </div>
 
@@ -5462,7 +5569,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </div>
         <ul>
           <li>&bull; Switch L3: SVI + ACL propias del switch</li>
-          <li>&bull; Switch L2 puro: PC-3 recibe sub-interfaces virtuales de VLAN10/20/30 (sin contenedores) y aplica la misma matriz con nftables — ver docs/arquitectura-3-equipos-departamentos.md sección 5</li>
+          <li>&bull; Switch L2 puro: PC-3 enruta con nftables (arquitectura §5)</li>
         </ul>
       </div>
     </div>
@@ -6267,11 +6374,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         clone.insertBefore(style, clone.firstChild);
         clone.insertBefore(bgRect, style.nextSibling);
 
-        // The XML declaration pins UTF-8: without it, consumers that guess an
-        // encoding instead of defaulting to UTF-8 mangle non-ASCII text.
         return {
-          svgString: '<?xml version="1.0" encoding="UTF-8"?>\n' +
-            new XMLSerializer().serializeToString(clone),
+          svgString: new XMLSerializer().serializeToString(clone),
           width: vb.width * scale,
           height: vb.height * scale,
           canonicalStateClean: canonicalStateClean,
@@ -7921,8 +8025,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       }
       function relationshipHitRecords() {
         var recordsByKey = {};
-        var recordsById = Object.create(null);
-        var byId = Object.create(null);
+        var recordsById = {};
+        var byId = {};
         nodes().forEach(function (node) { byId[node.getAttribute('data-node-id')] = node; });
         var records = [];
         edges().forEach(function (edge) {
@@ -8672,7 +8776,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           Archify.routeProbe.clear({ updateUrl: false, restoreFocus: false });
         }
         var nodeList = nodes();
-        var byId = Object.create(null);
+        var byId = {};
         nodeList.forEach(function (node) { byId[node.getAttribute('data-node-id')] = node; });
         var normalized = [];
         (ids || []).forEach(function (id) {
@@ -8686,8 +8790,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
         clear({ updateUrl: false, preserveView: true });
         activeIds = normalized;
-        var selected = Object.create(null);
-        var related = Object.create(null);
+        var selected = {};
+        var related = {};
         var seenEdges = {};
         var matchedEdges = 0;
         normalized.forEach(function (id) { selected[id] = true; related[id] = true; });
@@ -9038,7 +9142,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         clear({ announce: false });
         var nodeList = nodes();
         var edgeList = edges();
-        var byId = Object.create(null);
+        var byId = {};
         nodeList.forEach(function (node) { byId[node.getAttribute('data-node-id')] = node; });
         var selected = byId[id];
         if (!selected) return false;
@@ -9047,7 +9151,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         overlay.setAttribute('class', 'intent-trace-overlay');
         overlay.setAttribute('data-intent-trace-overlay', '');
         overlay.setAttribute('aria-hidden', 'true');
-        var related = Object.create(null);
+        var related = {};
         var seen = {};
         var counts = { out: 0, in: 0, loop: 0 };
         related[id] = true;
@@ -9218,12 +9322,12 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
       try { views = JSON.parse(data.textContent || '[]'); } catch (_) { views = []; }
       if (!views.length) return { count: 0, active: function () { return null; } };
-      var canonicalNodeIds = Object.create(null);
+      var canonicalNodeIds = {};
       Array.prototype.forEach.call(svg.querySelectorAll('[data-node-id]'), function (node) {
         canonicalNodeIds[node.getAttribute('data-node-id')] = true;
       });
       views.forEach(function (view) {
-        var seen = Object.create(null);
+        var seen = {};
         view.focus = (view.focus || []).filter(function (id) {
           if (!canonicalNodeIds[id] || seen[id]) return false;
           seen[id] = true;
@@ -9252,8 +9356,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       function chapterDelta(previous, destination) {
         var previousFocus = previous ? previous.focus : [];
         var destinationFocus = destination ? destination.focus : [];
-        var previousIds = Object.create(null);
-        var destinationIds = Object.create(null);
+        var previousIds = {};
+        var destinationIds = {};
         previousFocus.forEach(function (id) { previousIds[id] = true; });
         destinationFocus.forEach(function (id) { destinationIds[id] = true; });
         return {
@@ -9265,7 +9369,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
       function chapterAnchor(previous, destination, outgoingBeatIndex, delta) {
         if (!previous || !destination) return '';
-        var stayIds = Object.create(null);
+        var stayIds = {};
         delta.stay.forEach(function (id) { stayIds[id] = true; });
         var activeBeat = outgoingBeatIndex >= 0 ? previous.focus[outgoingBeatIndex] : '';
         if (activeBeat && stayIds[activeBeat]) return activeBeat;
@@ -9283,7 +9387,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       }
 
       function classifyHandoff(delta, anchor) {
-        var roles = Object.create(null);
+        var roles = {};
         delta.stay.forEach(function (id) { roles[id] = 'stay'; });
         delta.enter.forEach(function (id) { roles[id] = 'enter'; });
         delta.leave.forEach(function (id) { roles[id] = 'leave'; });
@@ -9600,7 +9704,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         if (activePreviewIndex === index && svg.getAttribute('data-chapter-preview') === views[index].id) return true;
         clearChapterPreviewPresentation();
         var delta = chapterDelta(activeIndex >= 0 ? views[activeIndex] : null, views[index]);
-        var roles = Object.create(null);
+        var roles = {};
         delta.stay.forEach(function (id) { roles[id] = 'stay'; });
         delta.enter.forEach(function (id) { roles[id] = 'enter'; });
         delta.leave.forEach(function (id) { roles[id] = 'leave'; });
@@ -10254,7 +10358,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
         var nodeList = Array.prototype.slice.call(svg.querySelectorAll('[data-node-id]'));
         var edgeList = Array.prototype.slice.call(svg.querySelectorAll('[data-edge-from][data-edge-to]'));
-        var byId = Object.create(null);
+        var byId = {};
         nodeList.forEach(function (node) { byId[node.getAttribute('data-node-id')] = node; });
         storySteps = view.focus.map(function (_, index) { return storyStep(view, index, edgeList, byId); });
         var labels = [];
@@ -11705,8 +11809,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         return true;
       }
       function semanticIds(ids, includeNeighbors) {
-        var seeds = Object.create(null);
-        var wanted = Object.create(null);
+        var seeds = {};
+        var wanted = {};
         (ids || []).forEach(function (id) { seeds[id] = true; wanted[id] = true; });
         if (includeNeighbors) {
           Array.prototype.forEach.call(svg.querySelectorAll('[data-edge-from][data-edge-to]'), function (edge) {
@@ -13174,7 +13278,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       }
       function outgoingByNode() {
         var byId = nodesById();
-        var outgoing = Object.create(null);
+        var outgoing = {};
         edges().forEach(function (edge) {
           var from = edge.getAttribute('data-edge-from');
           var to = edge.getAttribute('data-edge-to');
@@ -13186,7 +13290,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       }
       function reachableFrom(source) {
         var outgoing = outgoingByNode();
-        var reached = Object.create(null);
+        var reached = {};
         var queue = [source];
         reached[source] = true;
         for (var cursor = 0; cursor < queue.length; cursor += 1) {
@@ -13201,7 +13305,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       }
       function hopDistancesFrom(source) {
         var outgoing = outgoingByNode();
-        var distances = Object.create(null);
+        var distances = {};
         var queue = [source];
         distances[source] = 0;
         for (var cursor = 0; cursor < queue.length; cursor += 1) {
@@ -13217,7 +13321,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       function shortestDirectedPath(source, target) {
         if (source === target) return null;
         var outgoing = outgoingByNode();
-        var previous = Object.create(null);
+        var previous = {};
         var queue = [source];
         previous[source] = null;
         for (var cursor = 0; cursor < queue.length && !Object.prototype.hasOwnProperty.call(previous, target); cursor += 1) {
@@ -13747,7 +13851,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           var sourceIds = nodes().map(function (node) { return node.getAttribute('data-node-id'); }).filter(function (id) {
             return outgoing[id] && outgoing[id].length;
           });
-          var sourceBadges = Object.create(null);
+          var sourceBadges = {};
           sourceIds.forEach(function (id) { sourceBadges[id] = viewerText('viewer.route.finder.source.badge'); });
           return {
             kind: 'route-source',
@@ -13763,7 +13867,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         if (mode === 'target' && startId && byId[startId]) {
           var distances = hopDistancesFrom(startId);
           var targetIds = Object.keys(distances).filter(function (id) { return id !== startId && byId[id]; });
-          var targetBadges = Object.create(null);
+          var targetBadges = {};
           targetIds.forEach(function (id) {
             targetBadges[id] = viewerCount('viewer.route.hop', distances[id]);
           });
@@ -13972,7 +14076,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       var MAX_LENS_FLOW_EDGES = 24;
 
       function nodesById() {
-        var byId = Object.create(null);
+        var byId = {};
         Array.prototype.forEach.call(svg.querySelectorAll('[data-node-id][data-node-kind]'), function (node) {
           var id = node.getAttribute('data-node-id');
           if (id && !byId[id]) byId[id] = node;
@@ -14139,7 +14243,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           return (byId[id].getAttribute('data-node-kind') || 'neutral') === kind;
         });
         if (!matches.length) return false;
-        var chosen = Object.create(null);
+        var chosen = {};
         matches.forEach(function (id) {
           chosen[id] = true;
           byId[id].setAttribute('data-legend-preview-match', '');
@@ -14315,7 +14419,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         options = options || {};
         cleanSvgState();
         var byId = nodesById();
-        var nodeKind = Object.create(null);
+        var nodeKind = {};
         Object.keys(byId).forEach(function (id) { nodeKind[id] = byId[id].getAttribute('data-node-kind') || 'neutral'; });
         if (!selectedKinds.length) {
           status.textContent = viewerText('viewer.lens.choose');

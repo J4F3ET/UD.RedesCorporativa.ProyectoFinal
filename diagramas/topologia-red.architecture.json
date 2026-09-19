@@ -3,15 +3,15 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "Reserva Viva — Topología de red en 3 equipos",
-    "output": "topologia.html",
+    "output": "topologia-red.html",
     "quality_profile": "showcase",
     "repository": {
       "url": "https://github.com/J4F3ET/UD.RedesCorporativaa.ProyectoFinak",
       "provider": "github",
-      "revision": "6ae51e633a4aef24e39beecd73af169e2533952e"
+      "revision": "752e41fa0eb0df0d1680aec956ef35b4dd176a1a"
     },
     "viewBox": [
-      1360,
+      1390,
       500
     ],
     "views": [
@@ -27,12 +27,15 @@
           "pretix-redis",
           "inventree-app",
           "inventree-db",
+          "inventree-worker",
           "erpnext-hr",
+          "erpnext-backend",
+          "erpnext-internals",
           "openldap",
           "dns-interno",
           "ntp-interno"
         ],
-        "note": "El switch central conecta los 3 PCs, cada uno en su propio puerto access o trunk."
+        "note": "El switch central conecta los 3 PCs: PC-1 en puerto access, PC-2 y PC-3 en trunk 802.1Q."
       },
       {
         "id": "pc2-operaciones",
@@ -43,9 +46,21 @@
           "pretix-db",
           "pretix-redis",
           "inventree-app",
-          "inventree-db"
+          "inventree-db",
+          "inventree-worker"
         ],
         "note": "Un solo PC físico, dos VLANs distintas (20 y 30) por macvlan, un puerto trunk."
+      },
+      {
+        "id": "erpnext-stack",
+        "label": "PC-3: el stack real de ERPNext",
+        "focus": [
+          "switch",
+          "erpnext-hr",
+          "erpnext-backend",
+          "erpnext-internals"
+        ],
+        "note": "ERPNext no es un contenedor: son 10 servicios y solo nginx (:8080) y el backend salen a VLAN40."
       },
       {
         "id": "infraestructura-transversal",
@@ -55,12 +70,12 @@
           "openvpms-app",
           "pretix-web",
           "inventree-app",
-          "erpnext-hr",
+          "erpnext-backend",
           "openldap",
           "dns-interno",
           "ntp-interno"
         ],
-        "note": "LDAP, DNS y NTP en PC-3 son alcanzables por las 4 VLANs de negocio a través del switch."
+        "note": "LDAP/LDAPS, DNS y NTP en PC-3 dan servicio a las 4 VLANs de negocio a través del switch."
       }
     ]
   },
@@ -69,59 +84,64 @@
       "id": "switch",
       "type": "cloud",
       "label": "Switch administrable",
-      "sublabel": "sin Internet",
+      "sublabel": "sin salida a Internet",
       "tag": "802.1Q",
       "pos": [
-        580,
-        20
+        576,
+        10
       ],
       "size": [
-        200,
-        70
+        224,
+        60
       ]
     },
     {
       "id": "openvpms-app",
       "type": "backend",
       "label": "OpenVPMS",
-      "sublabel": "VLAN10 · 10.10.10.10",
-      "tag": "Tomcat",
+      "sublabel": "VLAN10 · 10.10.10.10:8080",
+      "tag": "Tomcat 9 · build local",
       "pos": [
-        40,
-        170
+        30,
+        150
       ],
       "size": [
-        190,
+        184,
         58
       ],
       "sources": [
         {
           "path": "docker/pc1-medica/docker-compose.yml",
-          "line": 33,
-          "end_line": 46,
+          "line": 36,
+          "end_line": 54,
           "label": "openvpms-app"
+        },
+        {
+          "path": "docker/pc1-medica/openvpms/Dockerfile",
+          "line": 1,
+          "label": "Dockerfile propio"
         }
       ]
     },
     {
       "id": "openvpms-db",
       "type": "database",
-      "label": "MySQL",
+      "label": "MySQL 8.0",
       "sublabel": "VLAN10 · 10.10.10.11",
       "tag": "openvpms-db",
       "pos": [
-        40,
-        270
+        30,
+        262
       ],
       "size": [
-        190,
+        184,
         58
       ],
       "sources": [
         {
           "path": "docker/pc1-medica/docker-compose.yml",
-          "line": 20,
-          "end_line": 31,
+          "line": 22,
+          "end_line": 34,
           "label": "openvpms-db"
         }
       ]
@@ -130,21 +150,21 @@
       "id": "pretix-web",
       "type": "backend",
       "label": "Pretix",
-      "sublabel": "VLAN20 · 10.10.20.10",
+      "sublabel": "VLAN20 · .20.10:80",
       "tag": "pretix/standalone",
       "pos": [
-        320,
-        170
+        322,
+        150
       ],
       "size": [
-        180,
+        178,
         58
       ],
       "sources": [
         {
           "path": "docker/pc2-operaciones/docker-compose.yml",
           "line": 53,
-          "end_line": 67,
+          "end_line": 74,
           "label": "pretix-web"
         }
       ]
@@ -152,15 +172,15 @@
     {
       "id": "pretix-db",
       "type": "database",
-      "label": "Postgres",
-      "sublabel": "VLAN20 · 10.10.20.11",
+      "label": "Postgres 15",
+      "sublabel": "VLAN20 · .20.11",
       "tag": "pretix-db",
       "pos": [
-        260,
-        270
+        292,
+        262
       ],
       "size": [
-        150,
+        124,
         58
       ],
       "sources": [
@@ -175,15 +195,15 @@
     {
       "id": "pretix-redis",
       "type": "database",
-      "label": "Redis",
-      "sublabel": "VLAN20 · 10.10.20.12",
+      "label": "Redis 7",
+      "sublabel": "VLAN20 · .20.12",
       "tag": "pretix-redis",
       "pos": [
-        430,
-        270
+        436,
+        262
       ],
       "size": [
-        150,
+        124,
         58
       ],
       "sources": [
@@ -199,21 +219,21 @@
       "id": "inventree-app",
       "type": "backend",
       "label": "InvenTree",
-      "sublabel": "VLAN30 · 10.10.30.10",
+      "sublabel": "VLAN30 · .30.10:8000",
       "tag": "inventree/inventree",
       "pos": [
-        610,
-        170
+        628,
+        150
       ],
       "size": [
-        180,
+        178,
         58
       ],
       "sources": [
         {
           "path": "docker/pc2-operaciones/docker-compose.yml",
-          "line": 84,
-          "end_line": 96,
+          "line": 91,
+          "end_line": 120,
           "label": "inventree-app"
         }
       ]
@@ -221,46 +241,127 @@
     {
       "id": "inventree-db",
       "type": "database",
-      "label": "Postgres",
-      "sublabel": "VLAN30 · 10.10.30.11",
+      "label": "Postgres 15",
+      "sublabel": "VLAN30 · .30.11",
       "tag": "inventree-db",
       "pos": [
-        610,
-        270
+        596,
+        262
       ],
       "size": [
-        180,
+        124,
         58
       ],
       "sources": [
         {
           "path": "docker/pc2-operaciones/docker-compose.yml",
-          "line": 70,
-          "end_line": 82,
+          "line": 77,
+          "end_line": 89,
           "label": "inventree-db"
         }
       ]
     },
     {
-      "id": "erpnext-hr",
+      "id": "inventree-worker",
       "type": "backend",
-      "label": "ERPNext (HR)",
-      "sublabel": "VLAN40 · 10.10.40.10",
-      "tag": "frappe/erpnext",
+      "label": "InvenTree worker",
+      "sublabel": "VLAN30 · .30.12",
+      "tag": "invoke worker",
       "pos": [
-        830,
-        170
+        740,
+        262
       ],
       "size": [
-        190,
+        136,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docker/pc2-operaciones/docker-compose.yml",
+          "line": 124,
+          "end_line": 144,
+          "label": "inventree-worker"
+        }
+      ]
+    },
+    {
+      "id": "erpnext-hr",
+      "type": "frontend",
+      "label": "ERPNext HR (nginx)",
+      "sublabel": "VLAN40 · .40.10:8080",
+      "tag": "frappe/erpnext:v15",
+      "pos": [
+        962,
+        150
+      ],
+      "size": [
+        172,
         58
       ],
       "sources": [
         {
           "path": "docker/pc3-administracion-infra/docker-compose.yml",
-          "line": 31,
-          "end_line": 43,
-          "label": "erpnext-hr"
+          "line": 200,
+          "end_line": 223,
+          "label": "erpnext-hr (frontend)"
+        }
+      ]
+    },
+    {
+      "id": "erpnext-backend",
+      "type": "backend",
+      "label": "ERPNext backend",
+      "sublabel": "VLAN40 · .40.11:8000",
+      "tag": "gunicorn",
+      "pos": [
+        962,
+        262
+      ],
+      "size": [
+        172,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docker/pc3-administracion-infra/docker-compose.yml",
+          "line": 136,
+          "end_line": 149,
+          "label": "erpnext-backend"
+        }
+      ]
+    },
+    {
+      "id": "erpnext-internals",
+      "type": "database",
+      "label": "ERPNext interno",
+      "sublabel": "MariaDB · Redis · workers",
+      "tag": "9 servicios, bridge privado",
+      "pos": [
+        962,
+        374
+      ],
+      "size": [
+        172,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docker/pc3-administracion-infra/docker-compose.yml",
+          "line": 45,
+          "end_line": 79,
+          "label": "erpnext-db + redis"
+        },
+        {
+          "path": "docker/pc3-administracion-infra/docker-compose.yml",
+          "line": 151,
+          "end_line": 197,
+          "label": "websocket/scheduler/colas"
+        },
+        {
+          "path": "docker/pc3-administracion-infra/docker-compose.yml",
+          "line": 82,
+          "end_line": 134,
+          "label": "configurator + create-site"
         }
       ]
     },
@@ -269,21 +370,26 @@
       "type": "security",
       "label": "OpenLDAP",
       "sublabel": "VLAN99 · 10.10.99.10",
-      "tag": "osixia/openldap",
+      "tag": "389 + LDAPS 636",
       "pos": [
-        1060,
-        170
+        1174,
+        150
       ],
       "size": [
-        190,
+        172,
         58
       ],
       "sources": [
         {
           "path": "docker/pc3-administracion-infra/docker-compose.yml",
-          "line": 46,
-          "end_line": 59,
+          "line": 226,
+          "end_line": 252,
           "label": "openldap"
+        },
+        {
+          "path": "scripts/generar-certificados.sh",
+          "line": 1,
+          "label": "CA interna + ldap.crt"
         }
       ]
     },
@@ -291,22 +397,27 @@
       "id": "dns-interno",
       "type": "security",
       "label": "DNS interno",
-      "sublabel": "VLAN99 · 10.10.99.11",
-      "tag": "bind9",
+      "sublabel": "VLAN99 · .99.11:53",
+      "tag": "bind9 9.18",
       "pos": [
-        1060,
-        270
+        1174,
+        262
       ],
       "size": [
-        190,
+        172,
         58
       ],
       "sources": [
         {
           "path": "docker/pc3-administracion-infra/docker-compose.yml",
-          "line": 61,
-          "end_line": 70,
+          "line": 254,
+          "end_line": 263,
           "label": "dns-interno"
+        },
+        {
+          "path": "docker/pc3-administracion-infra/bind/zones/db.reservaviva.local",
+          "line": 1,
+          "label": "zona reservaviva.local"
         }
       ]
     },
@@ -314,21 +425,21 @@
       "id": "ntp-interno",
       "type": "security",
       "label": "NTP interno",
-      "sublabel": "VLAN99 · 10.10.99.12",
+      "sublabel": "VLAN99 · .99.12:123",
       "tag": "cturra/ntp",
       "pos": [
-        1060,
-        380
+        1174,
+        374
       ],
       "size": [
-        190,
+        172,
         58
       ],
       "sources": [
         {
           "path": "docker/pc3-administracion-infra/docker-compose.yml",
-          "line": 72,
-          "end_line": 80,
+          "line": 265,
+          "end_line": 273,
           "label": "ntp-interno"
         }
       ]
@@ -346,21 +457,24 @@
     },
     {
       "kind": "region",
-      "label": "PC-2 · Servidor de Operaciones · puerto TRUNK (VLAN20+30)",
+      "label": "PC-2 · Operaciones · TRUNK (VLAN 20+30)",
       "wraps": [
         "pretix-web",
         "pretix-db",
         "pretix-redis",
         "inventree-app",
-        "inventree-db"
+        "inventree-db",
+        "inventree-worker"
       ],
       "pad": 26
     },
     {
       "kind": "region",
-      "label": "PC-3 · Administración e Infraestructura · puerto TRUNK (VLAN40+99)",
+      "label": "PC-3 · Administración e Infraestructura · TRUNK (VLAN 40+99)",
       "wraps": [
         "erpnext-hr",
+        "erpnext-backend",
+        "erpnext-internals",
         "openldap",
         "dns-interno",
         "ntp-interno"
@@ -417,7 +531,7 @@
       "id": "pretix-sql",
       "from": "pretix-web",
       "to": "pretix-db",
-      "label": "PostgreSQL",
+      "label": "PostgreSQL :5432",
       "fromSide": "bottom",
       "toSide": "top",
       "labelDy": 24
@@ -426,7 +540,7 @@
       "id": "pretix-cache",
       "from": "pretix-web",
       "to": "pretix-redis",
-      "label": "cache",
+      "label": "cache + Celery",
       "variant": "dashed",
       "fromSide": "bottom",
       "toSide": "top",
@@ -436,7 +550,33 @@
       "id": "inventree-sql",
       "from": "inventree-app",
       "to": "inventree-db",
-      "label": "PostgreSQL",
+      "label": "PostgreSQL :5432",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "inventree-jobs",
+      "from": "inventree-app",
+      "to": "inventree-worker",
+      "label": "cola de tareas",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "erpnext-proxy",
+      "from": "erpnext-hr",
+      "to": "erpnext-backend",
+      "label": "HTTP :8000 + WS :9000",
+      "labelDy": 24
+    },
+    {
+      "id": "erpnext-sql",
+      "from": "erpnext-backend",
+      "to": "erpnext-internals",
+      "label": "MariaDB :3306 · Redis :6379",
       "labelDy": 24
     }
   ],
@@ -445,8 +585,7 @@
       "dot": "cyan",
       "title": "3 PCs, 1 switch, sin Internet",
       "items": [
-        "PC-1 va en puerto access (una sola VLAN)",
-        "PC-2 y PC-3 van en puerto trunk 802.1Q (dos VLANs cada uno)",
+        "PC-1 en puerto access; PC-2 y PC-3 en trunk 802.1Q con dos VLANs cada uno",
         "Ningún equipo tiene ruta por defecto a Internet"
       ]
     },
@@ -454,24 +593,24 @@
       "dot": "emerald",
       "title": "Redes macvlan por VLAN",
       "items": [
-        "Cada contenedor tiene IP real dentro de su VLAN (macvlan), no NAT",
-        "Un mismo PC físico puede tener 2 redes macvlan distintas (PC-2 y PC-3)"
+        "Cada contenedor de VLAN tiene IP real dentro de ella, no NAT",
+        "Las piezas internas de ERPNext viven en un bridge privado y no salen al switch"
       ]
     },
     {
       "dot": "violet",
-      "title": "VLAN 99 es transversal",
+      "title": "VLAN 99 transversal",
       "items": [
-        "OpenLDAP, DNS y NTP en PC-3 dan servicio a las 4 VLANs de negocio",
-        "Comparten el mismo enlace trunk que ERPNext hacia el switch"
+        "OpenLDAP (389 y LDAPS 636), bind9 (53) y NTP (123) sirven a las 4 VLANs de negocio",
+        "LDAPS usa una CA interna de scripts/generar-certificados.sh; su ca.crt se copia a PC-1 y PC-2"
       ]
     },
     {
       "dot": "amber",
       "title": "Enrutamiento entre VLANs",
       "items": [
-        "Si el switch es L3: aplica las ACLs con SVIs propias",
-        "Si el switch es L2 puro: PC-3 asume router-on-a-stick para toda la matriz (ver diagrama de flujo de datos)"
+        "Switch L3: aplica las ACLs con SVIs propias",
+        "Switch L2 puro: PC-3 hace de router-on-a-stick para toda la matriz"
       ]
     }
   ]

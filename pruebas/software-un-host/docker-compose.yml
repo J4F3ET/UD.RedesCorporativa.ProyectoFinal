@@ -1,3 +1,14 @@
+# ============================================================================
+# ARCHIVO HISTÓRICO — NO EJECUTAR. Congelado como evidencia de la primera ronda
+# de pruebas. El arnés vigente es pruebas/smoke-test-3-pcs/, que usa los tres
+# docker-compose.yml reales. Ver el README.md de esta carpeta.
+#
+# En particular, `frappe/erpnext:latest` de abajo es EXACTAMENTE el defecto que
+# esta ronda destapó (resultó ser 17.0.0-dev y responde 404 sin site ni MariaDB).
+# Se deja tal cual como registro; el diseño actual usa frappe/erpnext:v15 con el
+# stack completo de frappe_docker en docker/pc3-administracion-infra/.
+# ============================================================================
+
 # Prueba de software en UN SOLO equipo (tu laptop), SIN VLANs ni switch real.
 # Red bridge normal de Docker — el objetivo es validar que Pretix, InvenTree,
 # ERPNext y OpenLDAP/DNS/NTP arrancan y funcionan juntos, antes de llevar el
