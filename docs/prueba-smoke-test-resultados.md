@@ -3,7 +3,7 @@
 > **Estado:** ejecutada en vivo en **dos rondas**. Ronda 1: compose originales (PC-2 con defectos,
 > ERPNext sin site, sin DNS ni OpenVPMS). Ronda 2: con las correcciones de este PR (PC-2 corregido,
 > stack completo de ERPNext, bind9, admins automáticos). Reemplaza el análisis estático previo.
-> **Pendiente de probar:** el build y arranque de `openvpms-app` (PC-1).
+> **OpenVPMS (PC-1)** se probó por separado (ronda 3, ver §2 y §3): build y arranque OK.
 
 **Objetivo:** con los compose reales de `docker/pc1-medica`, `docker/pc2-operaciones` y
 `docker/pc3-administracion-infra`, verificar qué arranca sin configuración extra, qué falla,
@@ -31,7 +31,7 @@ y si cada app alcanza el LDAP por la red de infraestructura.
 | InvenTree | **Crash loop** (11 reinicios) | login API 200; admin por variables; nuevo `inventree-worker` | Ninguno |
 | ERPNext | Contenedor `Up` pero **HTTP 404** (sin site) | site `rrhh.reservaviva.local` creado solo; `/api/method/ping` 200, `/login` 200, login real `Administrator` 200; `create-site` idempotente | Ninguno |
 | MySQL/Postgres/Redis/MariaDB | Arrancan | igual | — |
-| OpenVPMS app | No evaluable: no existía `openvpms/` | Dockerfile y entrypoint escritos, **sin probar** | Por confirmar |
+| OpenVPMS app | No evaluable: no existía `openvpms/` | Ronda 3: build OK (2 min); primer arranque ~5 min; `/openvpms/login` HTTP 200; se recupera al recrear el contenedor | Ninguno (ver límites) |
 
 Tiempos de primer arranque: Pretix e InvenTree **~10 min** (cientos de migraciones); ERPNext
 `create-site` **~9 min**. En arranques posteriores es inmediato.
@@ -59,9 +59,14 @@ DNS verificado (`dns-interno`): `rrhh`→10.10.40.10, `ldap`→10.10.99.10, `pre
   (`latest` apunta a v17-dev). `configurator` y `create-site` terminan con `Exited (0)`: es lo esperado.
 - `bind/named.conf` y `bind/zones/db.reservaviva.local` para el servicio DNS.
 
-**`docker/pc1-medica`** (sin probar): `openvpms/Dockerfile` (Tomcat 9, Java 11, OpenVPMS 2.4.0.1,
+**`docker/pc1-medica`** (probado en ronda 3, con bridge en vez de macvlan): `openvpms/Dockerfile` (Tomcat 9, Java 11, OpenVPMS 2.4.0.1,
 driver MySQL Connector/J 8.0.33) y `entrypoint.sh` que espera a MySQL, crea el esquema, carga datos
 base y genera el WAR en el primer arranque. Variables nuevas: `OPENVPMS_DB_PASSWORD`, `OPENVPMS_ADMIN_PASSWORD`.
+La prueba destapó cuatro defectos de la primera versión del entrypoint, ya corregidos:
+- `openvpms.properties` estaba incompleto (faltaban `reporting.db.*` y `openvpms.key`): ahora se genera con `toolbox configure --default` y se completa.
+- `openvpms.key` cifra datos en la base: el archivo vive en el volumen `openvpms_state` para no perderla al recrear el contenedor (verificado).
+- `toolbox database --create` necesita `--host=%` porque la app se conecta desde otro contenedor.
+- `toolbox user --setpassword` rechaza claves débiles (mín. 8 caracteres con mayúscula, minúscula, número y especial) y, con `set -e`, dejaba la base a medias en bucle de reinicios: ahora se valida antes de tocar la base y la inicialización se reanuda por etapas.
 
 ## 4. Variables nuevas en los `.env.example`
 
@@ -90,11 +95,11 @@ Ninguna variable existente fue renombrada.
   matriz del switch/PC-3).
 - No se probó autenticación LDAP real desde las apps (solo alcance de red y protocolo), ni LDAPS (636).
 - Con `macvlan`, un PC no alcanza sus propios contenedores desde el host: probar desde otro equipo.
-- `openvpms-app` (PC-1) no se ha construido ni arrancado.
+- OpenVPMS: el build necesita Internet (~300 MB). La carga de plantillas de impresión (`toolbox template --load --all`) falla en 2.4.0.1 en la plantilla `Investigation` (referencia el tipo inexistente `act.patientInvestigation`); el entrypoint lo tolera y quedan ~37 plantillas cargadas. No se probó el login con usuario/clave (la UI es Echo, no HTTP simple), solo que `admin` recibió su clave (`Password updated`) y que `/openvpms/login` responde 200.
 
 ## 7. Pendientes
 
-1. Construir y probar `openvpms-app` (~300 MB de descarga; necesita Internet una vez).
+1. Resolver o documentar las plantillas de impresión que no cargan en OpenVPMS 2.4.0.1 y añadir LibreOffice/OpenOffice si se necesita combinar documentos.
 2. Integrar OpenVPMS, Pretix, InvenTree y ERPNext con LDAP (hoy solo hay alcance de red).
 3. Probar LDAPS (636).
 4. Repetir con macvlan real en los 3 PCs + switch; confirmar si es L2 o L3.

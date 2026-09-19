@@ -47,9 +47,12 @@ services:
       LDAP_HOST: 10.10.99.10     # OpenLDAP en PC-3, VLAN99
       DNS_HOST: 10.10.99.10
       NTP_HOST: 10.10.99.10
+    volumes:
+      - openvpms_state:/var/lib/openvpms-state   # openvpms.properties (incluye la clave de cifrado)
     networks:
       vlan10_medica:
         ipv4_address: 10.10.10.10
 
 volumes:
   openvpms_db_data:
+  openvpms_state:

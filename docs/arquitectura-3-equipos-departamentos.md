@@ -141,7 +141,7 @@ Con esto, apagar y prender cualquiera de los 3 equipos ya no requiere que alguie
 
 1. Confirmar con el laboratorio si el switch es L2 o L3 (define si PC-2/PC-3 necesitan `iptables` de router-on-a-stick).
 2. ~~Validar en software puro (un solo host)~~ **Hecho** con `pruebas/smoke-test-3-pcs/` (resultados en [`prueba-smoke-test-resultados.md`](prueba-smoke-test-resultados.md)). Hallazgos que se están cerrando: compose de PC-2 corregido (Pretix e InvenTree responden 200), stack completo de ERPNext y configuración de bind9 en PC-3, superusuarios de Pretix/InvenTree automatizados en `deploy.sh`. **No cubre** macvlan, 802.1Q ni segmentación: eso solo se valida con el switch real.
-3. Construir el Dockerfile custom de OpenVPMS para PC-1 (dejarlo con tiempo suficiente, es el mayor riesgo técnico). Sigue sin haberse ejecutado un build real.
+3. Construir el Dockerfile custom de OpenVPMS para PC-1 (dejarlo con tiempo suficiente, es el mayor riesgo técnico). Ya construido y probado en un host (login HTTP 200, arranque idempotente); ver [`prueba-smoke-test-resultados.md`](prueba-smoke-test-resultados.md) §3.
 4. Cablear los 3 equipos al switch (PC-1 access VLAN10; PC-2 y PC-3 trunk) y correr los scripts de `scripts/` una sola vez por equipo.
 5. `docker compose up -d` en cada PC con su compose correspondiente.
 6. Ejecutar el plan de pruebas de la sección 7 y documentar evidencia (capturas, logs) para la sustentación.
