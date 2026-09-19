@@ -71,10 +71,12 @@ Se abre un editor de texto simple. Vas a ver algo así:
 ```
 IFACE=eth0
 OPENVPMS_DB_ROOT_PASSWORD=cambiar-esta-clave
+OPENVPMS_DB_PASSWORD=cambiar-esta-clave-2
+OPENVPMS_ADMIN_PASSWORD=cambiar-esta-clave-3
 ```
 
 - Si el nombre que anotaste en el Paso 5 **no** era `eth0`, bórralo y escribe el nombre correcto después del `=`.
-- Cambia `cambiar-esta-clave` por una contraseña que tú elijas (sin espacios).
+- Cambia las tres contraseñas (`cambiar-esta-clave...`) por otras que tú elijas, sin espacios. La última, `OPENVPMS_ADMIN_PASSWORD`, es la que se usa para entrar a OpenVPMS con el usuario `admin`: anótala en un lugar seguro.
 
 Para guardar y salir: presiona `Ctrl` + `O`, luego `Enter`, luego `Ctrl` + `X`.
 
@@ -84,7 +86,9 @@ Para guardar y salir: presiona `Ctrl` + `O`, luego `Enter`, luego `Ctrl` + `X`.
 sudo ./deploy.sh
 ```
 
-Esto va a descargar las imágenes de la aplicación (tarda varios minutos la primera vez, depende de la velocidad de Internet) y dejarlas funcionando.
+Esto va a descargar y construir la aplicación (unos 300 MB; tarda varios minutos la primera vez, depende de la velocidad de Internet) y dejarla funcionando. **La primera vez, OpenVPMS además prepara su base de datos y carga los datos iniciales por su cuenta: puede tardar unos minutos más después de que la tabla del Paso 8 diga "Up".** No hace falta que hagas nada; es normal.
+
+> Este paso necesita Internet (Paso 4). Si el PC ya no tiene Internet, la imagen debe construirse antes en otro equipo con Internet y traerse con `docker save` / `docker load`; avisa al equipo técnico.
 
 ## Paso 8 — Verificar que quedó funcionando
 
@@ -98,7 +102,7 @@ openvpms-app    ...            Up
 
 Si ambas filas dicen **"Up"**, quedó funcionando correctamente. Si dice algo distinto (como "Restarting" o "Exited"), ve a la sección "Si algo sale mal" más abajo.
 
-> Nota: que diga "Up" confirma que la aplicación está corriendo y conectada a la red del laboratorio. Terminar de configurar OpenVPMS por dentro (crear usuarios, cargar datos clínicos) es un paso aparte que hace el equipo técnico — no hace falta que lo hagas tú aquí.
+> Nota: que diga "Up" confirma que la aplicación está corriendo y conectada a la red del laboratorio. Para ver la pantalla de inicio, desde **otro** equipo conectado a la VLAN 10 abre `http://10.10.10.10:8080/openvpms/login` e ingresa con el usuario `admin` y la contraseña `OPENVPMS_ADMIN_PASSWORD` del Paso 6 (un PC con red `macvlan` no puede abrir sus propios contenedores desde sí mismo, así que no funcionará desde este mismo PC). Cargar los datos clínicos reales es un paso aparte del equipo técnico.
 
 ## Paso 9 — Dejarlo funcionando aunque el PC se reinicie (recomendado)
 
