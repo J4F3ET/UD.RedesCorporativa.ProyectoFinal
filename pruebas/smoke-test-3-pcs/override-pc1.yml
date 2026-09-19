@@ -1,0 +1,9 @@
+networks:
+  vlan10_medica: !override
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.10.0/24
+          gateway: 10.10.10.1
+services:
+  openvpms-app: !reset null   # sin Dockerfile en el repo (docker/pc1-medica/openvpms no existe)
