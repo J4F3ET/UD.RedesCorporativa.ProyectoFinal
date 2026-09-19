@@ -6,4 +6,8 @@ networks:
         - subnet: 10.10.10.0/24
           gateway: 10.10.10.1
 services:
-  openvpms-app: !reset null   # sin Dockerfile en el repo (docker/pc1-medica/openvpms no existe)
+  openvpms-app:
+    ports: ["18080:8080"]   # solo para sondear desde el host (con macvlan real no aplica)
+    networks:
+      vlan99_infra:
+        ipv4_address: 10.10.99.24

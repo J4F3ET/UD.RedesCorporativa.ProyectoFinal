@@ -26,19 +26,199 @@ networks:
           gateway: 10.10.99.1
           ip_range: 10.10.99.0/28
 
+  # Red privada de ERPNext (MariaDB, Redis, workers). No sale a ninguna VLAN.
+  erpnext_internal:
+    driver: bridge
+
+x-erpnext-volumes: &erpnext_volumes
+  - erpnext_sites:/home/frappe/frappe-bench/sites
+  - erpnext_logs:/home/frappe/frappe-bench/logs
+
 services:
-  # --- Recursos Humanos (VLAN 40) — ERPNext, restringido al módulo HR ---
+  # --- Recursos Humanos (VLAN 40) — ERPNext (stack de frappe_docker) ---
+  # El sitio "rrhh.reservaviva.local" lo crea solo "erpnext-create-site"
+  # (idempotente, sin pasos manuales). Solo el frontend (erpnext-hr, nginx) y el
+  # backend viven en VLAN40; el backend sale por el gateway 10.10.40.1 hacia
+  # LDAP (VLAN99). Acceso restringido a nivel de roles/permisos dentro de
+  # ERPNext: solo se exponen los perfiles y páginas del módulo HR (ver docs,
+  # sección 6).
+  erpnext-db:
+    image: mariadb:10.6
+    container_name: erpnext-db
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+    environment:
+      MARIADB_ROOT_PASSWORD: ${ERPNEXT_DB_ROOT_PASSWORD:?definir ERPNEXT_DB_ROOT_PASSWORD en .env}
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MARIADB_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+    volumes:
+      - erpnext_db_data:/var/lib/mysql
+    networks:
+      - erpnext_internal
+
+  erpnext-redis-cache:
+    image: redis:7
+    container_name: erpnext-redis-cache
+    restart: unless-stopped
+    networks:
+      - erpnext_internal
+
+  erpnext-redis-queue:
+    image: redis:7
+    container_name: erpnext-redis-queue
+    restart: unless-stopped
+    volumes:
+      - erpnext_redis_queue_data:/data
+    networks:
+      - erpnext_internal
+
+  # Job único: escribe la configuración común (BD, Redis, socketio).
+  erpnext-configurator:
+    image: &erpnext_image frappe/erpnext:v15
+    container_name: erpnext-configurator
+    restart: "no"
+    depends_on:
+      erpnext-db:
+        condition: service_healthy
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        ls -1 apps > sites/apps.txt
+        bench set-config -g db_host erpnext-db
+        bench set-config -gp db_port 3306
+        bench set-config -g redis_cache "redis://erpnext-redis-cache:6379"
+        bench set-config -g redis_queue "redis://erpnext-redis-queue:6379"
+        bench set-config -g redis_socketio "redis://erpnext-redis-queue:6379"
+        bench set-config -gp socketio_port 9000
+    volumes: *erpnext_volumes
+    networks:
+      - erpnext_internal
+
+  # Job único e idempotente: crea el sitio solo si todavía no existe.
+  erpnext-create-site:
+    image: *erpnext_image
+    container_name: erpnext-create-site
+    restart: "no"
+    depends_on:
+      erpnext-configurator:
+        condition: service_completed_successfully
+      erpnext-redis-cache:
+        condition: service_started
+      erpnext-redis-queue:
+        condition: service_started
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        if [ -f "sites/$$SITE/site_config.json" ]; then
+          echo "El sitio $$SITE ya existe; nada que hacer."
+          exit 0
+        fi
+        bench new-site "$$SITE" \
+          --mariadb-user-host-login-scope='%' \
+          --db-root-password "$$DB_ROOT_PASSWORD" \
+          --admin-password "$$ADMIN_PASSWORD" \
+          --install-app erpnext \
+          --set-default
+    environment:
+      SITE: ${ERPNEXT_SITE:-rrhh.reservaviva.local}
+      DB_ROOT_PASSWORD: ${ERPNEXT_DB_ROOT_PASSWORD}
+      ADMIN_PASSWORD: ${ERPNEXT_ADMIN_PASSWORD:?definir ERPNEXT_ADMIN_PASSWORD en .env}
+    volumes: *erpnext_volumes
+    networks:
+      - erpnext_internal
+
+  erpnext-backend:
+    image: *erpnext_image
+    container_name: erpnext-backend
+    restart: unless-stopped
+    depends_on:
+      erpnext-create-site:
+        condition: service_completed_successfully
+    environment:
+      LDAP_HOST: 10.10.99.10
+    volumes: *erpnext_volumes
+    networks:
+      erpnext_internal:
+      vlan40_rrhh:
+        ipv4_address: 10.10.40.11
+
+  erpnext-websocket:
+    image: *erpnext_image
+    container_name: erpnext-websocket
+    restart: unless-stopped
+    depends_on:
+      erpnext-create-site:
+        condition: service_completed_successfully
+    command: ["node", "/home/frappe/frappe-bench/apps/frappe/socketio.js"]
+    volumes: *erpnext_volumes
+    networks:
+      - erpnext_internal
+
+  erpnext-scheduler:
+    image: *erpnext_image
+    container_name: erpnext-scheduler
+    restart: unless-stopped
+    depends_on:
+      erpnext-create-site:
+        condition: service_completed_successfully
+    command: ["bench", "schedule"]
+    volumes: *erpnext_volumes
+    networks:
+      - erpnext_internal
+
+  erpnext-queue-short:
+    image: *erpnext_image
+    container_name: erpnext-queue-short
+    restart: unless-stopped
+    depends_on:
+      erpnext-create-site:
+        condition: service_completed_successfully
+    command: ["bench", "worker", "--queue", "short,default"]
+    volumes: *erpnext_volumes
+    networks:
+      - erpnext_internal
+
+  erpnext-queue-long:
+    image: *erpnext_image
+    container_name: erpnext-queue-long
+    restart: unless-stopped
+    depends_on:
+      erpnext-create-site:
+        condition: service_completed_successfully
+    command: ["bench", "worker", "--queue", "long,default,short"]
+    volumes: *erpnext_volumes
+    networks:
+      - erpnext_internal
+
+  # Punto de entrada HTTP de RRHH (nginx, puerto 8080): http://10.10.40.10:8080
   erpnext-hr:
-    image: frappe/erpnext:latest
+    image: *erpnext_image
     container_name: erpnext-hr
     restart: unless-stopped
+    depends_on:
+      erpnext-backend:
+        condition: service_started
+      erpnext-websocket:
+        condition: service_started
+    command: ["nginx-entrypoint.sh"]
     environment:
-      FRAPPE_SITE_NAME_HEADER: rrhh.reservaviva.local
-      LDAP_HOST: 10.10.99.10
-      # Acceso restringido a nivel de roles/permisos dentro de ERPNext:
-      # solo se exponen los perfiles y páginas del módulo HR (ver docs,
-      # sección 6 — gap de alcance de ERPNext pendiente de cerrar en el informe).
+      BACKEND: erpnext-backend:8000
+      SOCKETIO: erpnext-websocket:9000
+      FRAPPE_SITE_NAME_HEADER: ${ERPNEXT_SITE:-rrhh.reservaviva.local}
+      UPSTREAM_REAL_IP_ADDRESS: 127.0.0.1
+      UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
+      UPSTREAM_REAL_IP_RECURSIVE: "off"
+      PROXY_READ_TIMEOUT: "120"
+      CLIENT_MAX_BODY_SIZE: 50m
+    volumes: *erpnext_volumes
     networks:
+      erpnext_internal:
       vlan40_rrhh:
         ipv4_address: 10.10.40.10
 
@@ -51,9 +231,22 @@ services:
       LDAP_ORGANISATION: "Zoologico Reserva Viva"
       LDAP_DOMAIN: reservaviva.local
       LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD}
+      # LDAPS (636) con certificados propios generados por scripts/generar-certificados.sh (lo ejecuta
+      # deploy.sh). Los generados por la imagen usan una CA caducada. Además, LDAP_TLS_VERIFY_CLIENT
+      # por defecto es "demand" (exige certificado al CLIENTE) y hace que slapd corte la conexión de
+      # cualquier cliente sin certificado propio ("TLS negotiation failure").
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: ldap.crt
+      LDAP_TLS_KEY_FILENAME: ldap.key
+      LDAP_TLS_CA_CRT_FILENAME: ca.crt
+      LDAP_TLS_VERIFY_CLIENT: never
     volumes:
       - ldap_data:/var/lib/ldap
       - ldap_config:/etc/ldap/slapd.d
+      # Si faltan, Docker crearía directorios vacíos: ejecutar antes scripts/generar-certificados.sh.
+      - ./certs/ca.crt:/container/service/slapd/assets/certs/ca.crt
+      - ./certs/ldap.crt:/container/service/slapd/assets/certs/ldap.crt
+      - ./certs/ldap.key:/container/service/slapd/assets/certs/ldap.key
     networks:
       vlan99_infra:
         ipv4_address: 10.10.99.10
@@ -80,5 +273,9 @@ services:
         ipv4_address: 10.10.99.12
 
 volumes:
+  erpnext_db_data:
+  erpnext_redis_queue_data:
+  erpnext_sites:
+  erpnext_logs:
   ldap_data:
   ldap_config:

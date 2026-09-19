@@ -27,6 +27,7 @@ scripts/
   setup-vlans-pc2.sh                        # sub-interfaces 802.1Q en PC-2 (idempotente)
   setup-vlans-pc3.sh                        # sub-interfaces 802.1Q en PC-3 (+ fallback L2 completo, idempotente)
   firewall-pc3-matriz.sh                    # nftables con la matriz de segmentación (fallback switch L2)
+  generar-certificados.sh                   # CA interna + certificado de LDAPS (636); lo ejecuta el deploy.sh de PC-3
   systemd/reserva-viva-pc{1,2,3}.service    # persistencia al reiniciar cada PC
 ```
 
@@ -41,6 +42,10 @@ cd docker/pc1-medica && cp .env.example .env && nano .env && sudo ./deploy.sh
 Detalle completo (incluida la instalación de los servicios systemd para que sobreviva a un reinicio) en la sección 8 de [`docs/arquitectura-3-equipos-departamentos.md`](docs/arquitectura-3-equipos-departamentos.md).
 
 **¿Quien va a instalar esto en el laboratorio no es técnico?** Usa los tutoriales paso a paso en [`tutoriales/`](tutoriales/) — uno por PC, con cada comando explicado y qué hacer si algo sale mal.
+
+## Prueba de humo en un solo host
+
+`pruebas/smoke-test-3-pcs/` levanta los 3 compose juntos en una sola máquina (redes `bridge` en lugar de `macvlan`) para comprobar que los servicios arrancan sin configuración extra. Resultados en [`docs/prueba-smoke-test-resultados.md`](docs/prueba-smoke-test-resultados.md). No valida el switch, el trunk 802.1Q ni la segmentación.
 
 ## Pendientes clave
 

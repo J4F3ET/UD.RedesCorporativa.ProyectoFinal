@@ -83,6 +83,8 @@ Notas heredadas del handoff que siguen aplicando sin cambios por el split en 3 e
 
 - **OpenVPMS no tiene imagen Docker oficial** → se debe construir un Dockerfile propio (Tomcat + WAR + MySQL). Como ahora vive solo en PC-1, es el único contenedor de ese equipo — mayor riesgo pero menor superficie de configuración en esa máquina.
 - **ERPNext trae todos los módulos activos**, aunque el informe solo pide el módulo HR → restringir acceso por roles dentro de ERPNext, o aclararlo explícitamente en el informe.
+- **ERPNext no es un solo contenedor** (hallazgo de la prueba de humo, ya resuelto en PC-3): la imagen `frappe/erpnext` sola responde HTTP 404 porque no hay *site* ni MariaDB. El servicio en PC-3 se rediseña con el stack de `frappe_docker` (MariaDB, `redis-cache`, `redis-queue`, `configurator`, `create-site`, `backend`, `frontend`, `scheduler`, `websocket`). Ver [`prueba-smoke-test-resultados.md`](prueba-smoke-test-resultados.md) §4.
+- **Primer arranque lento:** Pretix e InvenTree aplican cientos de migraciones y tardan unos 10 minutos en responder la primera vez; ERPNext suma varios minutos al crear el *site*. Es normal y no requiere intervención; los arranques posteriores son inmediatos. Hay que dar el margen antes de la demostración.
 - **Pretix (backend web) vs. "PretixPOS"** (app de punto de venta) → aclarar en el informe cuál se usa como reemplazo funcional, o sumar el componente POS si el profesor lo exige.
 
 ## 7. Plan de pruebas de fiabilidad (adaptado a 3 equipos)
@@ -99,6 +101,7 @@ Notas heredadas del handoff que siguen aplicando sin cambios por el split en 3 e
 Los `docker-compose.yml` por sí solos **no** son plug-and-play: hace falta que las sub-interfaces VLAN existan antes de que Docker cree las redes `macvlan`, que las contraseñas estén definidas, y que todo eso sobreviva a un reinicio del PC en pleno laboratorio. Para eso cada carpeta de `docker/pcN-*/` trae:
 
 - `.env.example` → copiar a `.env` y definir ahí las contraseñas, el nombre de la tarjeta de red (`IFACE`) y, solo en PC-3, `FALLBACK_L2` (el `.env` real nunca se commitea, ver `.gitignore`). Es el **único** archivo que hay que editar — nada de tocar YAML ni scripts.
+- `scripts/generar-certificados.sh` → crea la CA interna y el certificado de LDAPS (636) de OpenLDAP y los deja en `docker/pc3-administracion-infra/certs/`, donde el compose los monta. El `deploy.sh` de PC-3 lo ejecuta solo (idempotente); la `ca.crt` resultante se copia a PC-1 y PC-2 para que sus clientes confíen en ella.
 - `deploy.sh` → un solo comando que lee ese `.env` y hace, en el orden correcto: crear/validar las sub-interfaces VLAN (si aplica) → aplicar firewall (solo PC-3 si `FALLBACK_L2=true`) → `docker compose up -d`. Es **idempotente**: correrlo dos veces no rompe nada.
 
 Para alguien no técnico ejecutando esto en el laboratorio, ver los tutoriales paso a paso en [`tutoriales/`](../tutoriales/) (uno por PC, con capturas de lo que debe ver en pantalla).
@@ -138,8 +141,8 @@ Con esto, apagar y prender cualquiera de los 3 equipos ya no requiere que alguie
 ## 9. Próximos pasos actualizados
 
 1. Confirmar con el laboratorio si el switch es L2 o L3 (define si PC-2/PC-3 necesitan `iptables` de router-on-a-stick).
-2. Validar en software puro (sin switch, un solo host) que las 4 apps + LDAP levantan bien juntas — puede reutilizarse un compose de un solo equipo si hace falta antes de tener las 3 máquinas físicas disponibles.
-3. Construir el Dockerfile custom de OpenVPMS para PC-1 (dejarlo con tiempo suficiente, es el mayor riesgo técnico).
+2. ~~Validar en software puro (un solo host)~~ **Hecho** con `pruebas/smoke-test-3-pcs/` (resultados en [`prueba-smoke-test-resultados.md`](prueba-smoke-test-resultados.md)). Hallazgos que se están cerrando: compose de PC-2 corregido (Pretix e InvenTree responden 200), stack completo de ERPNext y configuración de bind9 en PC-3, superusuarios de Pretix/InvenTree automatizados en `deploy.sh`. **No cubre** macvlan, 802.1Q ni segmentación: eso solo se valida con el switch real.
+3. Construir el Dockerfile custom de OpenVPMS para PC-1 (dejarlo con tiempo suficiente, es el mayor riesgo técnico). Ya construido y probado en un host (login HTTP 200, arranque idempotente); ver [`prueba-smoke-test-resultados.md`](prueba-smoke-test-resultados.md) §3.
 4. Cablear los 3 equipos al switch (PC-1 access VLAN10; PC-2 y PC-3 trunk) y correr los scripts de `scripts/` una sola vez por equipo.
 5. `docker compose up -d` en cada PC con su compose correspondiente.
 6. Ejecutar el plan de pruebas de la sección 7 y documentar evidencia (capturas, logs) para la sustentación.
