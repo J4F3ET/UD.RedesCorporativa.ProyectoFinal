@@ -3,7 +3,7 @@
 > **Estado:** ejecutada en vivo en **dos rondas**. Ronda 1: compose originales (PC-2 con defectos,
 > ERPNext sin site, sin DNS ni OpenVPMS). Ronda 2: con las correcciones de este PR (PC-2 corregido,
 > stack completo de ERPNext, bind9, admins automáticos). Reemplaza el análisis estático previo.
-> **OpenVPMS (PC-1)** se probó por separado (ronda 3, ver §2 y §3): build y arranque OK.
+> **Ronda 3:** OpenVPMS (PC-1) por separado. **Ronda 4:** prueba completa de los 3 PCs a la vez desde el HEAD de la rama, previa al merge del PR #3 (ver §8).
 
 **Objetivo:** con los compose reales de `docker/pc1-medica`, `docker/pc2-operaciones` y
 `docker/pc3-administracion-infra`, verificar qué arranca sin configuración extra, qué falla,
@@ -98,9 +98,49 @@ Ninguna variable existente fue renombrada.
 - OpenVPMS: el build necesita Internet (~300 MB). La carga de plantillas de impresión (`toolbox template --load --all`) falla en 2.4.0.1 en la plantilla `Investigation` (referencia el tipo inexistente `act.patientInvestigation`); el entrypoint lo tolera y quedan ~37 plantillas cargadas. No se probó el login con usuario/clave (la UI es Echo, no HTTP simple), solo que `admin` recibió su clave (`Password updated`) y que `/openvpms/login` responde 200.
 
 ## 7. Pendientes
+0. **LDAPS (636) no funciona** (defecto abierto, ver §8): bloquea cualquier integración que exija LDAPS.
 
 1. Resolver o documentar las plantillas de impresión que no cargan en OpenVPMS 2.4.0.1 y añadir LibreOffice/OpenOffice si se necesita combinar documentos.
 2. Integrar OpenVPMS, Pretix, InvenTree y ERPNext con LDAP (hoy solo hay alcance de red).
 3. Probar LDAPS (636).
 4. Repetir con macvlan real en los 3 PCs + switch; confirmar si es L2 o L3.
 5. Aclarar en el informe el alcance de ERPNext (solo HR) y Pretix vs. PretixPOS.
+
+## 8. Ronda 4 — prueba completa de los 3 PCs (previa al merge del PR #3)
+
+Arnés `pruebas/smoke-test-3-pcs/` desde cero (sin volúmenes previos), con **OpenVPMS incluido** (antes
+estaba desactivado): 22 contenedores, red `bridge`. Primer arranque completo: **~13 min** (limitado por
+`erpnext-create-site`); OpenVPMS ~5 min (en paralelo). Pico de memoria por contenedor: `openvpms-app` ~750 MB,
+`inventree-app` ~510 MB. Comprobaciones estáticas previas: los 3 `docker-compose.yml` validan con su
+`.env.example` (`docker compose config`) y los 3 `deploy.sh` + 3 scripts de `scripts/` pasan `bash -n`.
+
+| Prueba | Resultado |
+|---|---|
+| HTTP por VLAN: OpenVPMS `:8080/openvpms/login`, Pretix `/` y `/control/login/`, InvenTree `:8000/api/`, ERPNext `:8080/login` y `/api/method/ping` | **200** en todas |
+| LDAP 389: bind crudo desde `pretix-web`, `inventree-app`, `erpnext-backend`; TCP desde `openvpms-app` | **OK** los 4 |
+| LDAP autenticado (`ldapsearch -D cn=admin`): clave correcta / clave errónea | `Success` / `Invalid credentials (49)` |
+| DNS: 7 nombres (`rrhh`, `ldap`, `pretix`, `inventree`, `openvpms`, `ntp`, `dns`) + inexistente | IPs correctas / `NXDOMAIN` |
+| NTP | `healthy` |
+| Login real: ERPNext `Administrator` (y clave errónea) | **200** / **401** |
+| Login real: InvenTree `admin` (API con auth básica) | **200** |
+| Administrador de Pretix: mismo bloque de `deploy.sh`, dos veces | 1ª crea; 2ª no hace nada; clave correcta, superusuario, y `admin@localhost` borrado |
+| **Reinicio simulado** (`docker compose down` sin `-v` y `up -d`) | 20 contenedores arriba + 2 que terminan por diseño (`Exited (0)`); `create-site` dice "ya existe"; OpenVPMS no reinicializa; admin de Pretix, login de ERPNext y DNS persisten |
+| LDAPS 636 | **FALLA** (ver abajo) |
+
+Nota: tras el reinicio, la primera petición a `/login` de ERPNext dio un timeout aislado; las siguientes, 200.
+
+### Defecto abierto: LDAPS no funciona (`osixia/openldap:1.5.0`)
+- El puerto 636 escucha, pero `slapd` corta la conexión: `TLS: can't accept` / `TLS negotiation failure`.
+  Falla con clientes de Python/OpenSSL 3, tanto en TLS 1.2 como en 1.3, y con `ldapsearch -H ldaps://`.
+- Solo un `openssl s_client` antiguo (1.1.1) llega a completar el handshake TLS 1.2. Además, la CA por
+  defecto de la imagen caducó en enero de 2026, así que un cliente que verifique el certificado lo rechazaría.
+- Descartado: no es el tamaño de DH (2048 bits) ni el certificado (ECDSA P-384, válido). Probar
+  `LDAP_TLS_CIPHER_SUITE=NORMAL` hizo que el cliente *creyera* completar TLS 1.3, pero al enviar datos la
+  conexión se rompía (falso positivo); el cambio se revirtió y **no** está en el repo.
+- Ruta sugerida: certificados propios (RSA, CA vigente) montados con `LDAP_TLS_CRT_FILENAME`,
+  `LDAP_TLS_KEY_FILENAME` y `LDAP_TLS_CA_CRT_FILENAME`, o cambiar de imagen de OpenLDAP.
+- Impacto: con LDAP 389 todo lo probado funciona; si el informe o la sustentación exigen LDAPS, hay que resolverlo.
+
+### Lo que esta ronda sigue sin cubrir
+- `deploy.sh` completo, sub-interfaces 802.1Q, `macvlan`, el switch y la matriz de segmentación (requieren Linux con root y el hardware).
+- Login de OpenVPMS con usuario y clave (interfaz Echo), y autenticación LDAP *desde* las aplicaciones (solo alcance de red y protocolo).
