@@ -1,0 +1,41 @@
+# Usuarios de PRUEBA (solo laboratorio; sus claves estan en el README de esta carpeta).
+# Las claves estan guardadas como hash SSHA. Cambiar o borrar estos usuarios en produccion.
+
+# --- ou=medica ---
+dn: uid=vet.prueba,ou=medica,dc=reservaviva,dc=local
+objectClass: inetOrgPerson
+uid: vet.prueba
+cn: Vet Prueba
+givenName: Vet
+sn: Prueba
+mail: vet.prueba@reservaviva.local
+userPassword: {SSHA}pE/zMbOUQerJgne+qER08tvnNqJxdBFc
+
+# --- ou=operaciones ---
+dn: uid=logistica.prueba,ou=operaciones,dc=reservaviva,dc=local
+objectClass: inetOrgPerson
+uid: logistica.prueba
+cn: Logistica Prueba
+givenName: Logistica
+sn: Prueba
+mail: logistica.prueba@reservaviva.local
+userPassword: {SSHA}OkDjBr3K4ZSajJ5pAQR8s1ucOWOhHcUN
+
+dn: uid=taquilla.prueba,ou=operaciones,dc=reservaviva,dc=local
+objectClass: inetOrgPerson
+uid: taquilla.prueba
+cn: Taquilla Prueba
+givenName: Taquilla
+sn: Prueba
+mail: taquilla.prueba@reservaviva.local
+userPassword: {SSHA}OkDjBr3K4ZSajJ5pAQR8s1ucOWOhHcUN
+
+# --- ou=rrhh ---
+dn: uid=rrhh.prueba,ou=rrhh,dc=reservaviva,dc=local
+objectClass: inetOrgPerson
+uid: rrhh.prueba
+cn: RRHH Prueba
+givenName: RRHH
+sn: Prueba
+mail: rrhh.prueba@reservaviva.local
+userPassword: {SSHA}XmcsyIMDJsBLN/f3ySwZx8K6URAZj+1D

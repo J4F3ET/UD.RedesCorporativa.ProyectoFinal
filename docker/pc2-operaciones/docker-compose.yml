@@ -107,6 +107,22 @@ services:
       INVENTREE_ADMIN_USER: ${INVENTREE_ADMIN_USER:-admin}
       INVENTREE_ADMIN_PASSWORD: ${INVENTREE_ADMIN_PASSWORD:?definir INVENTREE_ADMIN_PASSWORD en .env}
       INVENTREE_ADMIN_EMAIL: ${INVENTREE_ADMIN_EMAIL:-admin@reservaviva.local}
+      # Autenticación LDAPS (django-auth-ldap): busca al usuario con la cuenta svc-lectura solo dentro de
+      # ou=operaciones (RRHH y Médica no entran aquí) y luego hace bind con su propia clave. La cadena TLS se
+      # verifica con la CA interna (scripts/generar-certificados.sh la copia a ./certs/ca.crt).
+      # Los usuarios LDAP se crean en InvenTree en el primer login, sin permisos: asignárselos como admin.
+      INVENTREE_LDAP_ENABLED: "True"
+      INVENTREE_LDAP_SERVER_URI: ldaps://ldap.reservaviva.local:636
+      INVENTREE_LDAP_GLOBAL_OPTIONS: '{"OPT_X_TLS_CACERTFILE": "/certs/ca.crt", "OPT_X_TLS_REQUIRE_CERT": "OPT_X_TLS_DEMAND"}'
+      INVENTREE_LDAP_BIND_DN: cn=svc-lectura,ou=servicios,dc=reservaviva,dc=local
+      INVENTREE_LDAP_BIND_PASSWORD: ${INVENTREE_LDAP_BIND_PASSWORD:?definir INVENTREE_LDAP_BIND_PASSWORD en .env}
+      INVENTREE_LDAP_SEARCH_BASE_DN: ou=operaciones,dc=reservaviva,dc=local
+      # El valor por defecto de la imagen es "(uid= %(user)s)" (con espacio) y no encuentra a nadie.
+      INVENTREE_LDAP_SEARCH_FILTER_STR: (uid=%(user)s)
+    # El nombre lo resuelve el DNS interno (PC-3) en el laboratorio; aquí se fija para no depender de él
+    # y para que el nombre coincida con el certificado de OpenLDAP.
+    extra_hosts:
+      - "ldap.reservaviva.local:10.10.99.10"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/', timeout=5)"]
       interval: 15s
@@ -115,6 +131,9 @@ services:
       start_period: 900s
     volumes:
       - inventree_data:/home/inventree/data
+      # CA interna para verificar LDAPS. Si falta, Docker crearía un directorio: ejecutar antes
+      # scripts/generar-certificados.sh (PC-3) y copiar ca.crt aquí si PC-2 es otro equipo.
+      - ./certs/ca.crt:/certs/ca.crt:ro
     networks:
       vlan30_logistica:
         ipv4_address: 10.10.30.10

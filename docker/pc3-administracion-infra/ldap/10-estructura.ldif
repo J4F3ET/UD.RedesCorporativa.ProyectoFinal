@@ -1,0 +1,28 @@
+# Estructura del directorio: una unidad organizativa (OU) por departamento + cuentas de servicio.
+# Se carga UNA sola vez, en el primer arranque de OpenLDAP con el volumen ldap_data vacío.
+dn: ou=medica,dc=reservaviva,dc=local
+objectClass: organizationalUnit
+ou: medica
+description: Veterinaria y Clinica (VLAN 10, OpenVPMS)
+
+dn: ou=operaciones,dc=reservaviva,dc=local
+objectClass: organizationalUnit
+ou: operaciones
+description: Taquilla y Logistica (VLAN 20 y 30, Pretix e InvenTree)
+
+dn: ou=rrhh,dc=reservaviva,dc=local
+objectClass: organizationalUnit
+ou: rrhh
+description: Recursos Humanos (VLAN 40, ERPNext)
+
+dn: ou=servicios,dc=reservaviva,dc=local
+objectClass: organizationalUnit
+ou: servicios
+description: Cuentas de servicio de solo lectura que usan las aplicaciones para buscar usuarios
+
+dn: cn=svc-lectura,ou=servicios,dc=reservaviva,dc=local
+objectClass: inetOrgPerson
+cn: svc-lectura
+sn: svc-lectura
+description: Cuenta de busqueda (bind) de las aplicaciones. Clave de laboratorio: Svc-Lectura1
+userPassword: {SSHA}cAov0GWs3oRuXLVpMN2vmDoKzilaZFGS

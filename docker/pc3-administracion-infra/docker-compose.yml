@@ -133,6 +133,55 @@ services:
     networks:
       - erpnext_internal
 
+  # Job único e idempotente: deja configurado "LDAP Settings" de Frappe (autenticación contra OpenLDAP por
+  # LDAPS, verificando la cadena con /certs/ca.crt). Solo escribe en la base de datos: no valida contra
+  # LDAP (ignore_mandatory), así no necesita alcanzar VLAN 99. Los usuarios se buscan solo en ou=rrhh.
+  erpnext-ldap-config:
+    image: *erpnext_image
+    container_name: erpnext-ldap-config
+    restart: "no"
+    depends_on:
+      erpnext-create-site:
+        condition: service_completed_successfully
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        cd sites && ../env/bin/python - <<'PY'
+        import os, frappe
+        frappe.init(site=os.environ["SITE"], sites_path=".")
+        frappe.connect()
+        d = frappe.get_doc("LDAP Settings")
+        d.update({
+            "enabled": 1,
+            "ldap_server_url": "ldaps://ldap.reservaviva.local:636",
+            "base_dn": "cn=svc-lectura,ou=servicios,dc=reservaviva,dc=local",
+            "password": os.environ["LDAP_BIND_PASSWORD"],
+            "ldap_directory_server": "OpenLDAP",
+            "ldap_search_path_user": "ou=rrhh,dc=reservaviva,dc=local",
+            "ldap_search_path_group": "ou=rrhh,dc=reservaviva,dc=local",
+            "ldap_search_string": "(uid={0})",
+            "ldap_email_field": "mail",
+            "ldap_username_field": "uid",
+            "ldap_first_name_field": "givenName",
+            "ldap_last_name_field": "sn",
+            "ssl_tls_mode": "Off",
+            "require_trusted_certificate": "Yes",
+            "local_ca_certs_file": "/certs/ca.crt",
+            "default_user_type": "System User",
+            "default_role": "Employee",
+        })
+        d.flags.ignore_mandatory = True
+        d.save(ignore_permissions=True)
+        frappe.db.commit()
+        print("LDAP Settings configurado para", os.environ["SITE"])
+        PY
+    environment:
+      SITE: ${ERPNEXT_SITE:-rrhh.reservaviva.local}
+      LDAP_BIND_PASSWORD: ${ERPNEXT_LDAP_BIND_PASSWORD:?definir ERPNEXT_LDAP_BIND_PASSWORD en .env}
+    volumes: *erpnext_volumes
+    networks:
+      - erpnext_internal
+
   erpnext-backend:
     image: *erpnext_image
     container_name: erpnext-backend
@@ -142,7 +191,15 @@ services:
         condition: service_completed_successfully
     environment:
       LDAP_HOST: 10.10.99.10
-    volumes: *erpnext_volumes
+    # El backend es quien habla LDAPS con OpenLDAP (10.10.99.10:636). Se fija el nombre para que
+    # coincida con el certificado sin depender del DNS interno.
+    extra_hosts:
+      - "ldap.reservaviva.local:10.10.99.10"
+    volumes:
+      - erpnext_sites:/home/frappe/frappe-bench/sites
+      - erpnext_logs:/home/frappe/frappe-bench/logs
+      # CA interna para verificar LDAPS (la genera scripts/generar-certificados.sh).
+      - ./certs/ca.crt:/certs/ca.crt:ro
     networks:
       erpnext_internal:
       vlan40_rrhh:
@@ -227,6 +284,8 @@ services:
     image: osixia/openldap:1.5.0
     container_name: openldap
     restart: unless-stopped
+    # --copy-service: la imagen edita los LDIF al cargarlos; así no modifica el montaje.
+    command: ["--copy-service"]
     environment:
       LDAP_ORGANISATION: "Zoologico Reserva Viva"
       LDAP_DOMAIN: reservaviva.local
@@ -247,6 +306,8 @@ services:
       - ./certs/ca.crt:/container/service/slapd/assets/certs/ca.crt
       - ./certs/ldap.crt:/container/service/slapd/assets/certs/ldap.crt
       - ./certs/ldap.key:/container/service/slapd/assets/certs/ldap.key
+      # Estructura por departamento y usuarios de prueba (se cargan solo con ldap_data vacío).
+      - ./ldap:/container/service/slapd/assets/config/bootstrap/ldif/custom
     networks:
       vlan99_infra:
         ipv4_address: 10.10.99.10
