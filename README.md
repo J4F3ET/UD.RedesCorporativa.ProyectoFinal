@@ -27,6 +27,7 @@ scripts/
   setup-vlans-pc2.sh                        # sub-interfaces 802.1Q en PC-2 (idempotente)
   setup-vlans-pc3.sh                        # sub-interfaces 802.1Q en PC-3 (+ fallback L2 completo, idempotente)
   firewall-pc3-matriz.sh                    # nftables con la matriz de segmentación (fallback switch L2)
+  generar-certificados.sh                   # CA interna + certificado de LDAPS (636); lo ejecuta el deploy.sh de PC-3
   systemd/reserva-viva-pc{1,2,3}.service    # persistencia al reiniciar cada PC
 ```
 

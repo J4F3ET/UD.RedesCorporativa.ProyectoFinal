@@ -98,7 +98,7 @@ Ninguna variable existente fue renombrada.
 - OpenVPMS: el build necesita Internet (~300 MB). La carga de plantillas de impresión (`toolbox template --load --all`) falla en 2.4.0.1 en la plantilla `Investigation` (referencia el tipo inexistente `act.patientInvestigation`); el entrypoint lo tolera y quedan ~37 plantillas cargadas. No se probó el login con usuario/clave (la UI es Echo, no HTTP simple), solo que `admin` recibió su clave (`Password updated`) y que `/openvpms/login` responde 200.
 
 ## 7. Pendientes
-0. **LDAPS (636) no funciona** (defecto abierto, ver §8): bloquea cualquier integración que exija LDAPS.
+0. ~~LDAPS (636) no funciona~~ **Resuelto** (ver §8): causa raíz `LDAP_TLS_VERIFY_CLIENT=demand` + CA de la imagen caducada; se generan certificados propios con `scripts/generar-certificados.sh`.
 
 1. Resolver o documentar las plantillas de impresión que no cargan en OpenVPMS 2.4.0.1 y añadir LibreOffice/OpenOffice si se necesita combinar documentos.
 2. Integrar OpenVPMS, Pretix, InvenTree y ERPNext con LDAP (hoy solo hay alcance de red).
@@ -125,21 +125,35 @@ estaba desactivado): 22 contenedores, red `bridge`. Primer arranque completo: **
 | Login real: InvenTree `admin` (API con auth básica) | **200** |
 | Administrador de Pretix: mismo bloque de `deploy.sh`, dos veces | 1ª crea; 2ª no hace nada; clave correcta, superusuario, y `admin@localhost` borrado |
 | **Reinicio simulado** (`docker compose down` sin `-v` y `up -d`) | 20 contenedores arriba + 2 que terminan por diseño (`Exited (0)`); `create-site` dice "ya existe"; OpenVPMS no reinicializa; admin de Pretix, login de ERPNext y DNS persisten |
-| LDAPS 636 | **FALLA** (ver abajo) |
+| LDAPS 636 | **FALLABA** en la primera corrida. Tras la corrección se repitió la prueba **completa desde cero**: LDAPS con cadena y nombre verificados y `BindResponse` real desde `pretix-web`, `inventree-app` y `erpnext-backend`, también tras el reinicio simulado (ver abajo) |
 
 Nota: tras el reinicio, la primera petición a `/login` de ERPNext dio un timeout aislado; las siguientes, 200.
 
-### Defecto abierto: LDAPS no funciona (`osixia/openldap:1.5.0`)
-- El puerto 636 escucha, pero `slapd` corta la conexión: `TLS: can't accept` / `TLS negotiation failure`.
-  Falla con clientes de Python/OpenSSL 3, tanto en TLS 1.2 como en 1.3, y con `ldapsearch -H ldaps://`.
-- Solo un `openssl s_client` antiguo (1.1.1) llega a completar el handshake TLS 1.2. Además, la CA por
-  defecto de la imagen caducó en enero de 2026, así que un cliente que verifique el certificado lo rechazaría.
-- Descartado: no es el tamaño de DH (2048 bits) ni el certificado (ECDSA P-384, válido). Probar
-  `LDAP_TLS_CIPHER_SUITE=NORMAL` hizo que el cliente *creyera* completar TLS 1.3, pero al enviar datos la
-  conexión se rompía (falso positivo); el cambio se revirtió y **no** está en el repo.
-- Ruta sugerida: certificados propios (RSA, CA vigente) montados con `LDAP_TLS_CRT_FILENAME`,
-  `LDAP_TLS_KEY_FILENAME` y `LDAP_TLS_CA_CRT_FILENAME`, o cambiar de imagen de OpenLDAP.
-- Impacto: con LDAP 389 todo lo probado funciona; si el informe o la sustentación exigen LDAPS, hay que resolverlo.
+### Defecto encontrado y corregido: LDAPS no funcionaba (`osixia/openldap:1.5.0`)
+- **Síntoma:** el puerto 636 escuchaba, pero `slapd` cortaba la conexión (`TLS: can't accept` / `TLS negotiation failure`)
+  con cualquier cliente moderno, en TLS 1.2 y 1.3.
+- **Causa raíz** (aislada en un contenedor aparte, con intercambio de datos real): la imagen trae
+  `LDAP_TLS_VERIFY_CLIENT=demand` por defecto, que **exige certificado también al cliente**; con
+  `LDAP_TLS_VERIFY_CLIENT=never` el mismo contenedor responde bien en TLS 1.2 y 1.3. Además, la CA que
+  genera la imagen caducó en enero de 2026, así que ningún cliente que verifique la cadena la aceptaría.
+  Descartados: tamaño de DH, tipo de clave/firma del certificado y `LDAP_TLS_CIPHER_SUITE` (este último daba
+  un falso positivo: en TLS 1.3 el cliente cree terminar el handshake antes que el servidor).
+- **Corrección:** `scripts/generar-certificados.sh` crea una CA interna (10 años) y el certificado de OpenLDAP
+  (825 días; SAN `ldap.reservaviva.local`, `openldap`, `localhost`, `10.10.99.10`, `127.0.0.1`) en
+  `docker/pc3-administracion-infra/certs/` (en `.gitignore`); `docker-compose.yml` los monta en el contenedor y
+  fija `LDAP_TLS_VERIFY_CLIENT=never`; el `deploy.sh` de PC-3 lo ejecuta antes del `docker compose up`. Es
+  idempotente, regenera si al certificado le quedan menos de 30 días o falta la IP, copia `ca.crt` a
+  `docker/pc1-medica/certs/` y `docker/pc2-operaciones/certs/`, y como root la instala en el almacén de confianza
+  del host (`--sin-instalar-ca` lo evita, `--forzar` regenera todo).
+- **Verificado** (cliente Python con cadena y nombre verificados, desde otro segmento): por nombre
+  `ldap.reservaviva.local` y por IP, TLS 1.2 con `BindResponse` real; se **rechaza** un nombre distinto y una CA
+  desconocida; el certificado servido coincide con el archivo; sobrevive a un reinicio y a una **rotación**
+  (`--forzar` + recrear con el volumen `ldap_config` ya existente sirve el certificado nuevo); `ldapsearch` autenticado
+  por `ldaps://10.10.99.10` con verificación completa. Particularidad: `ldapsearch -H ldaps://localhost` con
+  verificación estricta falla en el cliente GnuTLS de la imagen; usar la IP o el nombre.
+- **Sin cubrir:** que las aplicaciones (Pretix, InvenTree, ERPNext, OpenVPMS) usen LDAPS con esa CA (aún no hay
+  integración LDAP en las apps); y `ca.crt` no llega sola a PC-1/PC-2 si son equipos distintos: hay que copiarla
+  (`scp`), el script lo indica al terminar.
 
 ### Lo que esta ronda sigue sin cubrir
 - `deploy.sh` completo, sub-interfaces 802.1Q, `macvlan`, el switch y la matriz de segmentación (requieren Linux con root y el hardware).

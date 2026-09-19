@@ -34,5 +34,8 @@ if [ "${FALLBACK_L2:-false}" = "true" ]; then
   "${REPO_ROOT}/scripts/firewall-pc3-matriz.sh"
 fi
 
+# Certificados de LDAPS (CA interna + certificado de OpenLDAP): idempotente, no regenera si siguen vigentes.
+"${REPO_ROOT}/scripts/generar-certificados.sh"
+
 docker compose up -d
 docker compose ps

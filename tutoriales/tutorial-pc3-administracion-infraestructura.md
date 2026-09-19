@@ -93,6 +93,8 @@ sudo ./deploy.sh
 
 Este comando hace automáticamente todo lo necesario: prepara la red para las VLANs (40, 99, y las adicionales si pusiste `FALLBACK_L2=true`) y luego descarga y arranca las aplicaciones. La primera vez tarda varios minutos, depende de la velocidad de Internet. No necesitas hacer nada manual de redes — el script se encarga.
 
+El instalador también genera solo los certificados de seguridad del directorio de usuarios (LDAPS); no tienes que hacer nada. Quedan en la carpeta `certs/` de este PC y **no se suben a GitHub**.
+
 **Importante:** en el primer arranque, ERPNext crea su sitio y tarda **unos 10 minutos** en responder. Es normal.
 
 ## Paso 8 — Verificar que quedó funcionando

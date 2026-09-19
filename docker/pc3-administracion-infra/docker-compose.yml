@@ -231,9 +231,22 @@ services:
       LDAP_ORGANISATION: "Zoologico Reserva Viva"
       LDAP_DOMAIN: reservaviva.local
       LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD}
+      # LDAPS (636) con certificados propios generados por scripts/generar-certificados.sh (lo ejecuta
+      # deploy.sh). Los generados por la imagen usan una CA caducada. Además, LDAP_TLS_VERIFY_CLIENT
+      # por defecto es "demand" (exige certificado al CLIENTE) y hace que slapd corte la conexión de
+      # cualquier cliente sin certificado propio ("TLS negotiation failure").
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: ldap.crt
+      LDAP_TLS_KEY_FILENAME: ldap.key
+      LDAP_TLS_CA_CRT_FILENAME: ca.crt
+      LDAP_TLS_VERIFY_CLIENT: never
     volumes:
       - ldap_data:/var/lib/ldap
       - ldap_config:/etc/ldap/slapd.d
+      # Si faltan, Docker crearía directorios vacíos: ejecutar antes scripts/generar-certificados.sh.
+      - ./certs/ca.crt:/container/service/slapd/assets/certs/ca.crt
+      - ./certs/ldap.crt:/container/service/slapd/assets/certs/ldap.crt
+      - ./certs/ldap.key:/container/service/slapd/assets/certs/ldap.key
     networks:
       vlan99_infra:
         ipv4_address: 10.10.99.10

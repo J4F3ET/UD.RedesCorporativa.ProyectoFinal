@@ -101,6 +101,7 @@ Notas heredadas del handoff que siguen aplicando sin cambios por el split en 3 e
 Los `docker-compose.yml` por sí solos **no** son plug-and-play: hace falta que las sub-interfaces VLAN existan antes de que Docker cree las redes `macvlan`, que las contraseñas estén definidas, y que todo eso sobreviva a un reinicio del PC en pleno laboratorio. Para eso cada carpeta de `docker/pcN-*/` trae:
 
 - `.env.example` → copiar a `.env` y definir ahí las contraseñas, el nombre de la tarjeta de red (`IFACE`) y, solo en PC-3, `FALLBACK_L2` (el `.env` real nunca se commitea, ver `.gitignore`). Es el **único** archivo que hay que editar — nada de tocar YAML ni scripts.
+- `scripts/generar-certificados.sh` → crea la CA interna y el certificado de LDAPS (636) de OpenLDAP y los deja en `docker/pc3-administracion-infra/certs/`, donde el compose los monta. El `deploy.sh` de PC-3 lo ejecuta solo (idempotente); la `ca.crt` resultante se copia a PC-1 y PC-2 para que sus clientes confíen en ella.
 - `deploy.sh` → un solo comando que lee ese `.env` y hace, en el orden correcto: crear/validar las sub-interfaces VLAN (si aplica) → aplicar firewall (solo PC-3 si `FALLBACK_L2=true`) → `docker compose up -d`. Es **idempotente**: correrlo dos veces no rompe nada.
 
 Para alguien no técnico ejecutando esto en el laboratorio, ver los tutoriales paso a paso en [`tutoriales/`](../tutoriales/) (uno por PC, con capturas de lo que debe ver en pantalla).
