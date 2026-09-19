@@ -23,6 +23,10 @@ docker/
   pc1-medica/            # OpenVPMS (VLAN 10) — docker-compose.yml, deploy.sh, .env.example
   pc2-operaciones/       # Pretix + InvenTree (VLAN 20/30) — docker-compose.yml, deploy.sh, .env.example
   pc3-administracion-infra/  # ERPNext HR + OpenLDAP/DNS/NTP (VLAN 40/99) — docker-compose.yml, deploy.sh, .env.example
+diagramas/               # topología y flujo de datos (HTML interactivo, generados con Archify)
+pruebas/
+  smoke-test-3-pcs/      # arnés vigente: los 3 compose reales en un solo host
+  software-un-host/      # HISTÓRICO, no ejecutar (evidencia de la primera ronda)
 scripts/
   setup-vlans-pc2.sh                        # sub-interfaces 802.1Q en PC-2 (idempotente)
   setup-vlans-pc3.sh                        # sub-interfaces 802.1Q en PC-3 (+ fallback L2 completo, idempotente)
@@ -43,6 +47,11 @@ Detalle completo (incluida la instalación de los servicios systemd para que sob
 
 **¿Quien va a instalar esto en el laboratorio no es técnico?** Usa los tutoriales paso a paso en [`tutoriales/`](tutoriales/) — uno por PC, con cada comando explicado y qué hacer si algo sale mal.
 
+## Diagramas
+
+- [`diagramas/topologia-red.html`](diagramas/topologia-red.html): topología física y lógica: los 3 PCs, el switch, las VLAN y qué servicio vive en cada una.
+- [`diagramas/flujo-datos-segmentacion.html`](diagramas/flujo-datos-segmentacion.html): flujo de datos entre VLAN y matriz de segmentación (qué pasa y qué se bloquea).
+
 ## Prueba de humo en un solo host
 
 `pruebas/smoke-test-3-pcs/` levanta los 3 compose juntos en una sola máquina (redes `bridge` en lugar de `macvlan`) para comprobar que los servicios arrancan sin configuración extra. Resultados en [`docs/prueba-smoke-test-resultados.md`](docs/prueba-smoke-test-resultados.md). No valida el switch, el trunk 802.1Q ni la segmentación.
@@ -50,7 +59,7 @@ Detalle completo (incluida la instalación de los servicios systemd para que sob
 ## Pendientes clave
 
 - Confirmar con el laboratorio de la universidad si el switch soporta L3 (SVIs/ACLs) o es puramente L2 (define quién aplica la matriz de segmentación: el switch o PC-3 como router-on-a-stick).
-- Construir el Dockerfile propio de OpenVPMS (no tiene imagen oficial).
+- ~~Construir el Dockerfile propio de OpenVPMS~~ **Hecho** (`docker/pc1-medica/openvpms/Dockerfile`).
 - Cerrar por escrito en el informe el alcance de ERPNext (solo módulo HR) y la diferencia entre Pretix (backend web) y "PretixPOS".
 
 Detalle completo de decisiones, matriz de segmentación y plan de pruebas de fiabilidad en [`docs/arquitectura-3-equipos-departamentos.md`](docs/arquitectura-3-equipos-departamentos.md).

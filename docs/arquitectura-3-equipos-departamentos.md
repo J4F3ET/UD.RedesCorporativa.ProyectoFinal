@@ -29,6 +29,8 @@ Con 4 áreas de negocio + 1 capa de infraestructura transversal (LDAP/DNS/NTP) y
 | **PC-2** | Servidor de Operaciones | Taquilla y Boletería + Logística y Almacén | Pretix + InvenTree | VLAN 20, VLAN 30 | **Trunk** (802.1Q, VLANs 20 y 30 permitidas) |
 | **PC-3** | Servidor de Administración e Infraestructura | Recursos Humanos + Infraestructura (todas las áreas) | ERPNext (módulo HR) + OpenLDAP + DNS + NTP | VLAN 40, VLAN 99 | **Trunk** (802.1Q, VLANs 40 y 99 permitidas) |
 
+Ver el diagrama interactivo en [`../diagramas/topologia-red.html`](../diagramas/topologia-red.html).
+
 > Si el equipo prefiere otra agrupación (p. ej. RRHH con Taquilla, o Médica con Logística), la tabla es el único punto que cambia — el resto del documento (switch, docker-compose, plan de pruebas) se ajusta reasignando VLANs/puertos.
 
 ## 3. Direccionamiento
@@ -52,6 +54,8 @@ Todos los rangos son privados y **sin salida a Internet**, cumpliendo el requisi
 | **VLAN30 (Logística)** | ❌ Bloqueado | ❌ Bloqueado | — | ❌ Bloqueado | ✅ Permitido |
 | **VLAN40 (RRHH)** | ❌ Bloqueado | ❌ Bloqueado | ❌ Bloqueado | — | ✅ Permitido |
 | **VLAN99 (Infra)** | ✅ (responde) | ✅ (responde) | ✅ (responde) | ✅ (responde) | — |
+
+Ver el diagrama interactivo en [`../diagramas/flujo-datos-segmentacion.html`](../diagramas/flujo-datos-segmentacion.html).
 
 Esta matriz da **dos tipos de evidencia distintos**, que antes con 2 PCs no existían:
 
