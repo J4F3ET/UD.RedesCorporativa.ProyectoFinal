@@ -42,6 +42,10 @@ Detalle completo (incluida la instalación de los servicios systemd para que sob
 
 **¿Quien va a instalar esto en el laboratorio no es técnico?** Usa los tutoriales paso a paso en [`tutoriales/`](tutoriales/) — uno por PC, con cada comando explicado y qué hacer si algo sale mal.
 
+## Prueba de humo en un solo host
+
+`pruebas/smoke-test-3-pcs/` levanta los 3 compose juntos en una sola máquina (redes `bridge` en lugar de `macvlan`) para comprobar que los servicios arrancan sin configuración extra. Resultados en [`docs/prueba-smoke-test-resultados.md`](docs/prueba-smoke-test-resultados.md). No valida el switch, el trunk 802.1Q ni la segmentación.
+
 ## Pendientes clave
 
 - Confirmar con el laboratorio de la universidad si el switch soporta L3 (SVIs/ACLs) o es puramente L2 (define quién aplica la matriz de segmentación: el switch o PC-3 como router-on-a-stick).
