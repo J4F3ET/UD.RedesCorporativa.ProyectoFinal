@@ -105,7 +105,7 @@ Ninguna variable existente fue renombrada.
 2. ~~Integrar OpenVPMS, Pretix, InvenTree y ERPNext con LDAP (hoy solo hay alcance de red).~~ **Resuelto** (ver §9): cierre parcial, 2 de 4 integradas y 2 descartadas con justificación:
    - OpenVPMS y Pretix: cerrados como **no viables** con la versión actual, por decisión razonada ([§9.2](#92-pretix-y-openvpms-no-se-integran-decisión-razonada); detalle en [`ldap-pretix-openvpms.md`](ldap-pretix-openvpms.md)).
    - ERPNext e InvenTree: **integrados** con LDAPS y cadena verificada ([§9.3](#93-erpnext-e-inventree-integrados-con-ldaps); detalle en [`integracion-ldap-erpnext-inventree.md`](integracion-ldap-erpnext-inventree.md)).
-3. ~~Probar LDAPS (636).~~ **Resuelto** (ver §8): el puerto 636 sirve el certificado correcto y se verificó cadena y nombre desde un cliente externo en otro segmento. Lo que sigue pendiente es que las aplicaciones lo usen (punto 2).
+3. ~~Probar LDAPS (636).~~ **Resuelto** (ver §8 y [§9.3](#93-erpnext-e-inventree-integrados-con-ldaps)): el puerto 636 sirve el certificado correcto y se verificó cadena y nombre desde un cliente externo en otro segmento; ERPNext e InvenTree ya lo usan con cadena verificada. Pretix y OpenVPMS no, por lo explicado en §9.2.
 4. Repetir con macvlan real en los 3 PCs + switch; confirmar si es L2 o L3.
 5. Aclarar en el informe el alcance de ERPNext (solo HR) y Pretix vs. PretixPOS.
 
@@ -156,11 +156,11 @@ Nota: tras el reinicio, la primera petición a `/login` de ERPNext dio un timeou
   verificación estricta falla en el cliente GnuTLS de la imagen; usar la IP o el nombre.
 - **Sin cubrir:** que las aplicaciones (Pretix, InvenTree, ERPNext, OpenVPMS) usen LDAPS con esa CA (aún no hay
   integración LDAP en las apps); y `ca.crt` no llega sola a PC-1/PC-2 si son equipos distintos: hay que copiarla
-  (`scp`), el script lo indica al terminar.
+  (`scp`), el script lo indica al terminar. *(Así quedó en la ronda 4; la integración en ERPNext e InvenTree se cubrió después en §9.3 y el descarte de Pretix y OpenVPMS en §9.2.)*
 
 ### Lo que esta ronda sigue sin cubrir
 - `deploy.sh` completo, sub-interfaces 802.1Q, `macvlan`, el switch y la matriz de segmentación (requieren Linux con root y el hardware).
-- Login de OpenVPMS con usuario y clave (interfaz Echo), y autenticación LDAP *desde* las aplicaciones (solo alcance de red y protocolo).
+- Login de OpenVPMS con usuario y clave (interfaz Echo), y autenticación LDAP *desde* las aplicaciones (solo alcance de red y protocolo). *(Así quedó en la ronda 4; la autenticación LDAP desde las aplicaciones se aborda en §9.)*
 
 ## 9. Ronda 5 — integración LDAP en las aplicaciones
 
