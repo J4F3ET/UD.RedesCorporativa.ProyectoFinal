@@ -1,0 +1,13 @@
+networks:
+  vlan20_taquilla: !override
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.20.0/24
+          gateway: 10.10.20.1
+  vlan30_logistica: !override
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.30.0/24
+          gateway: 10.10.30.1
