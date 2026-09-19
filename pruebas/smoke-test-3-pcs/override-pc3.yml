@@ -12,8 +12,7 @@ networks:
         - subnet: 10.10.99.0/24
           gateway: 10.10.99.1
 services:
-  dns: !reset null   # docker/pc3-administracion-infra/bind/ no existe en el repo
-  erpnext-hr:
+  erpnext-backend:
     networks:
       vlan99_infra:
         ipv4_address: 10.10.99.23

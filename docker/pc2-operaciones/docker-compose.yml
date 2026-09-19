@@ -103,11 +103,45 @@ services:
       INVENTREE_DB_PASSWORD: ${INVENTREE_DB_PASSWORD}
       INVENTREE_SITE_URL: http://10.10.30.10:8000
       INVENTREE_AUTO_UPDATE: "True"
+      # InvenTree crea este superusuario solo al arrancar si no existe (idempotente).
+      INVENTREE_ADMIN_USER: ${INVENTREE_ADMIN_USER:-admin}
+      INVENTREE_ADMIN_PASSWORD: ${INVENTREE_ADMIN_PASSWORD:?definir INVENTREE_ADMIN_PASSWORD en .env}
+      INVENTREE_ADMIN_EMAIL: ${INVENTREE_ADMIN_EMAIL:-admin@reservaviva.local}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 900s
     volumes:
       - inventree_data:/home/inventree/data
     networks:
       vlan30_logistica:
         ipv4_address: 10.10.30.10
+
+  # Worker de tareas en segundo plano de InvenTree (correo, importaciones, informes).
+  # Espera a que la app este sana para no competir por la clave secreta ni las migraciones.
+  inventree-worker:
+    image: inventree/inventree:stable
+    container_name: inventree-worker
+    restart: unless-stopped
+    depends_on:
+      inventree-app:
+        condition: service_healthy
+    command: ["invoke", "worker"]
+    environment:
+      INVENTREE_DB_ENGINE: postgresql
+      INVENTREE_DB_HOST: 10.10.30.11
+      INVENTREE_DB_PORT: "5432"
+      INVENTREE_DB_NAME: inventree
+      INVENTREE_DB_USER: inventree
+      INVENTREE_DB_PASSWORD: ${INVENTREE_DB_PASSWORD}
+      INVENTREE_SITE_URL: http://10.10.30.10:8000
+    volumes:
+      - inventree_data:/home/inventree/data
+    networks:
+      vlan30_logistica:
+        ipv4_address: 10.10.30.12
 
 volumes:
   pretix_db_data:
