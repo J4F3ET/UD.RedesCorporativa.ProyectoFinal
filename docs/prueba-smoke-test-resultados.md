@@ -1,94 +1,98 @@
-> **Nota:** la prueba se escribió para el escenario de 2 equipos; los hallazgos sobre la inicialización manual de Pretix, InvenTree y ERPNext siguen siendo válidos para el diseño de 3 equipos.
+# Resultados de la Prueba de Humo — Un Solo Host (Docker Desktop, Windows 11)
 
-# Resultados de la Prueba de Humo — Un Solo Host (Docker)
-Objetivo: verificar que el stack de servicios de Reserva Viva arranca con
-`docker compose up -d` sin pasos manuales de configuración adicionales, como
-paso previo al despliegue físico plug-and-play de 2 equipos.
+> **Estado:** ejecutada en vivo. Reemplaza el análisis estático previo de esta misma ruta
+> (que no se pudo ejecutar porque Docker Desktop no arrancaba). Los hallazgos de aquel
+> análisis se contrastan abajo con datos reales.
 
-## 1. Estado de la prueba: NO se pudo ejecutar en vivo en esta sesión
+**Objetivo:** con los compose reales de `docker/pc1-medica`, `docker/pc2-operaciones` y
+`docker/pc3-administracion-infra`, verificar qué arranca sin configuración extra, qué falla,
+y si cada app alcanza el LDAP por la red de infraestructura.
 
-Docker Desktop no logró iniciar el motor en esta máquina durante la sesión de
-hoy. Causa raíz encontrada en los logs (`%LOCALAPPDATA%\Docker\log\host\`):
+## 1. Método
 
-```
-initializing Ingest server: listening on unix://.../run/sailor-ingest.sock:
-rename .../sailor-ingest.sock .../sailor-ingest.sock.stale:
-The file cannot be accessed by the system.
-```
+- Host único: Docker Desktop 29.x (Windows 11, 8 CPU, ~7 GB RAM para Docker).
+- Arnés: `pruebas/smoke-test-3-pcs/docker-compose.yml` usa `include:` de los 3 compose reales y
+  solo **sobrescribe**: (a) redes `macvlan` → `bridge` con las mismas subredes `10.10.X.0/24`;
+  (b) desactiva lo que no puede arrancar (`openvpms-app`, `dns`); (c) une las apps a la red
+  `vlan99_infra` para simular la ruta hacia LDAP.
+- Las sondas HTTP se hicieron desde contenedores auxiliares dentro de cada red (en Docker Desktop
+  las IP de bridge no son alcanzables desde el host).
+- Reproducir: `cd pruebas/smoke-test-3-pcs && docker compose pull && docker compose up -d`.
 
-Un socket (`sailor-ingest.sock`) quedó de una ejecución anterior y Windows no
-permite renombrarlo ni borrarlo, ni siquiera después de detener todos los
-procesos y el servicio `com.docker.service`. Esto hace que el backend de
-Docker aborte el arranque cada vez.
+## 2. Resultado por servicio
 
-**Solución recomendada (para ti, en tu máquina):**
-1. Reinicia Windows por completo (esto libera el handle atascado del archivo).
-2. Abre Docker Desktop y espera a que la ballena del ícono deje de animarse
-   (motor listo).
-3. Verifica con: `docker info` (no debe dar error).
-4. Ejecuta la prueba con el paquete de la sección 3.
-
-Si el problema persiste tras reiniciar, borra manualmente la carpeta
-`%LOCALAPPDATA%\Docker\run\` con Docker Desktop cerrado, o reinstala Docker
-Desktop.
-
-## 2. Lo que sí se validó (análisis estático, sin ejecutar contenedores)
-
-### 2.1. Sintaxis del compose
-`docker compose config` valida correctamente el archivo consolidado
-(`reserva-viva-test/docker-compose.yml`) — sin errores de sintaxis, redes,
-volúmenes ni variables de entorno faltantes.
-
-### 2.2. ¿Qué servicios son realmente "cero configuración"?
-
-Basado en el comportamiento documentado de cada imagen oficial:
-
-| Servicio | Imagen | ¿Arranca sin pasos manuales? | Detalle |
+| Servicio | Compose original (sin cambios) | Con correcciones de este PR | Paso manual que queda |
 |---|---|---|---|
-| LDAP | `osixia/openldap` | **Sí** | Se auto-inicializa con las variables de entorno (`LDAP_ORGANISATION`, `LDAP_DOMAIN`, `LDAP_ADMIN_PASSWORD`) en el primer arranque. |
-| phpLDAPadmin | `osixia/phpldapadmin` | **Sí** | Solo necesita apuntar al host LDAP. |
-| MySQL / MariaDB / PostgreSQL / Redis | oficiales | **Sí** | Se auto-inicializan con las variables `*_PASSWORD`/`*_DATABASE`. |
-| **Pretix** | `pretix/standalone` | **No del todo** | El contenedor corre migraciones automáticamente, pero requiere crear el **usuario administrador la primera vez** con un comando de gestión (`manage.py createsuperuser` o equivalente) antes de poder iniciar sesión. |
-| **InvenTree** | `inventree/inventree` | **No del todo** | El despliegue oficial usa comandos `invoke` de inicialización (migraciones + creación de superusuario) en el primer arranque; no es un simple "up -d" y ya. |
-| **ERPNext** | `frappe/erpnext` | **No** | Esta imagen espera un *site* de Frappe ya creado. Sin un contenedor/job de "create-site" (`bench new-site ...`) ejecutado una vez, el contenedor no tiene nada que servir. El propio `docker-compose-preproyecto.yml` ya lo advertía: se recomienda usar el repo oficial `frappe/frappe_docker`, que sí incluye ese job de inicialización. |
-| OpenVPMS | *(sin imagen oficial)* | N/A | Requiere Dockerfile propio (Tomcat + WAR); no evaluable con este compose. |
+| OpenLDAP | Arranca solo; bind + búsqueda OK | igual | Ninguno |
+| NTP (`cturra/ntp`) | Arranca, `healthy` | igual | Ninguno |
+| MySQL (OpenVPMS) | Arranca | igual | — |
+| Postgres / Redis (Pretix, InvenTree) | Arrancan | igual | Ninguno |
+| **Pretix** | **HTTP 500** (migración falla: `no password supplied`); además Celery buscaba `amqp://127.0.0.1` | HTTP 200 en `/` y `/control/login/` | `createsuperuser` (1 vez) |
+| **InvenTree** | **Crash loop** (11 reinicios): falta `SITE_URL`/`CSRF_TRUSTED_ORIGINS`; luego `Database Migrations required` | HTTP 200 en `/api/` | `createsuperuser` (1 vez) |
+| **ERPNext** | Contenedor `Up`, gunicorn sirve **HTTP 404** (sin *site*) | sin cambio | Requiere stack completo (ver §4) |
+| OpenVPMS app | No evaluable: `docker/pc1-medica/openvpms/` no existe | — | Escribir Dockerfile |
+| DNS bind9 | No evaluable: `bind/named.conf` y `bind/zones/` no existen | — | Escribir configuración |
 
-**Conclusión honesta:** el proyecto **no es 100% "plug-and-play" a nivel de
-aplicación** con los compose actuales — el switch/red sí puede ser
-plug-and-play (esa es la parte de infraestructura), pero **Pretix, InvenTree
-y ERPNext necesitan un comando de inicialización una sola vez** (crear
-usuario admin / crear site) antes de quedar operativos. Esto es normal y
-esperado para este tipo de aplicaciones; lo importante para el informe es
-dejarlo documentado como "configuración inicial de aplicación" (una vez),
-separada de "arranque de infraestructura de red" (siempre plug-and-play).
+Tiempo de primer arranque: **~10 min** hasta responder HTTP (Pretix e InvenTree aplican cientos
+de migraciones). En arranques posteriores es inmediato.
 
-## 3. Paquete de prueba listo para ejecutar (en cuanto Docker funcione)
+## 3. Correcciones aplicadas a `docker/pc2-operaciones/docker-compose.yml`
 
-Archivo: `reserva-viva-test/docker-compose.yml` (en esta misma carpeta de
-trabajo). Pasos:
+El análisis estático previo solo anticipaba el `createsuperuser`; la prueba real mostró que el
+compose además tenía **defectos propios**:
 
+- **Pretix:** faltaban `PRETIX_DATABASE_NAME/USER/PASSWORD` (sin ellos no conecta a Postgres) y
+  la configuración de Celery (`PRETIX_CELERY_BACKEND/BROKER` → Redis) y `PRETIX_REDIS_SESSIONS`.
+  Añadidos, más `PRETIX_PRETIX_URL`.
+- **InvenTree:** faltaban `INVENTREE_DB_USER/PASSWORD/PORT` y `INVENTREE_SITE_URL`
+  (obligatorio para `CSRF_TRUSTED_ORIGINS`). Se añadió `INVENTREE_AUTO_UPDATE=True`, que elimina
+  el paso manual de migraciones, y el volumen `inventree_data` (antes `/home/inventree/data`
+  —config, media, backups— se perdía al recrear el contenedor).
+
+## 4. Pasos manuales exactos que faltan
+
+**Pretix** (una vez, tras el primer arranque):
 ```bash
-cd reserva-viva-test
-docker compose pull      # descarga las imágenes (~3-5 GB, puede tardar)
-docker compose up -d     # levanta los 4 servicios + LDAP
-docker compose ps        # todos deben quedar "running" o "healthy"
-docker compose logs -f   # revisar que ninguno entre en loop de reinicio
+docker exec -e DJANGO_SUPERUSER_PASSWORD='<clave>' pretix-web \
+  python -m pretix createsuperuser --noinput --email admin@reservaviva.local
 ```
 
-Pruebas de integración sugeridas una vez arriba:
-
+**InvenTree** (una vez):
 ```bash
-# LDAP responde
-docker exec ldap-reservaviva ldapsearch -x -H ldap://localhost -b "dc=reservaviva,dc=local" -D "cn=admin,dc=reservaviva,dc=local" -w CAMBIAR_ESTA_CLAVE
-
-# Pretix responde en su puerto publicado
-curl -I http://localhost:8020
-
-# InvenTree responde
-curl -I http://localhost:8030
-
-# ERPNext (fallará hasta que exista un site — ver §2.2)
-curl -I http://localhost:8040
+docker exec -e DJANGO_SUPERUSER_PASSWORD='<clave>' inventree-app sh -c \
+  'cd /home/inventree/src/backend/InvenTree && python manage.py createsuperuser --noinput --username admin --email admin@reservaviva.local'
 ```
 
-Al terminar: `docker compose down -v` para limpiar los volúmenes de prueba.
+**ERPNext:** no basta con `frappe/erpnext:latest` solo. Evidencia: `sites/common_site_config.json`
+está vacío (`{}`) y `bench new-site` falla con `MySQLdb.OperationalError (2002) Can't connect to
+server on '127.0.0.1'` (no hay MariaDB). Hace falta el stack de `frappe/frappe_docker`:
+MariaDB + `redis-cache` + `redis-queue` + job `configurator` + job `create-site`
+(`bench new-site rrhh.reservaviva.local ...`) + `backend`/`frontend`/`scheduler`/`websocket`.
+Esto rompe el supuesto de "un contenedor ERPNext" del diseño actual y requiere rediseñar el
+servicio en `pc3-administracion-infra`.
+
+## 5. Alcance de LDAP (punto 3 de la solicitud)
+
+- `ldapsearch -x -D cn=admin,dc=reservaviva,dc=local` desde un cliente en `vlan99_infra`
+  contra `10.10.99.10`: **OK** (`dn: dc=reservaviva,dc=local`).
+- Desde dentro de `pretix-web`, `inventree-app` y `erpnext-hr`: conexión TCP a `10.10.99.10:389`
+  y `BindResponse` LDAP válido — **OK** los tres.
+- PC-1: como `openvpms-app` no existe, se usó un contenedor sustituto en `vlan10` (+ `vlan99`):
+  alcanza LDAP **OK** y `openvpms-db:3306` **OK**.
+
+## 6. Límites de esta prueba (qué NO demuestra)
+
+- **No valida macvlan, 802.1Q, ni el switch.** Solo la capa de software.
+- **No valida la segmentación:** para llegar a LDAP las apps se conectaron directamente a
+  `vlan99_infra`; por eso, además, Pretix e InvenTree quedan en el mismo segmento L2 en esa red
+  (en el diseño real ese tráfico lo bloquearía la matriz del switch/PC-3).
+- No se probó autenticación LDAP real desde las apps (solo alcance de red y protocolo).
+
+## 7. Pendientes derivados
+
+1. Rediseñar ERPNext con el stack de `frappe_docker` (bloqueante para PC-3).
+2. Dockerfile de OpenVPMS (`docker/pc1-medica/openvpms/`).
+3. Configuración de bind9 (`docker/pc3-administracion-infra/bind/`); hoy `docker compose up` en
+   PC-3 crearía directorios vacíos en lugar de archivos al montar esas rutas.
+4. Documentar en los tutoriales los pasos manuales de la §4 y el tiempo de primer arranque (~10 min).
+5. Repetir con macvlan real en los 3 PCs + switch.
