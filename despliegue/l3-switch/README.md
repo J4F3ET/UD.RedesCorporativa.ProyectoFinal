@@ -6,9 +6,11 @@ Usa esta receta si el switch tiene interfaces `VlanNN` con IP y enruta ([cómo s
 
 > **Estado: pendiente de hardware.** Nada de esto se ha ejecutado aún contra un switch real. Los tiempos de arranque de las aplicaciones son medidos (en un solo host, ver la sección de tiempos); los de configurar el switch y cablear no están medidos. Si algo no coincide con lo que dice aquí, anótalo: es información valiosa.
 
+> **RIESGO SIN RESOLVER: Internet.** Instalar necesita Internet: Docker, las imágenes de las aplicaciones y el build de OpenVPMS (~300 MB, una sola vez). **Aún no se sabe si el laboratorio da Internet.** Si no lo da, todo eso hay que preparar antes en otro equipo con Internet y llevarlo (`docker save` / `docker load` de las imágenes; el build de OpenVPMS incluido). Es trabajo de un día previo, no un detalle: averígualo antes de ir.
+
 ## Lo que necesitas antes de empezar
 
-- Los 3 PCs con Ubuntu Server, usuario con `sudo` y **Internet solo para instalar** (Docker, imágenes y el build de OpenVPMS, ~300 MB). Si el puerto del laboratorio no da Internet, hazlo en otra red **antes** de conectar al switch. Que el laboratorio permita esto está **pendiente de confirmar**.
+- Los 3 PCs con Ubuntu Server, usuario con `sudo` y **Internet solo para instalar** (Docker, imágenes y el build de OpenVPMS, ~300 MB). Ver el riesgo de Internet justo arriba.
 - El switch, su cable de consola y sus credenciales.
 - Un portátil con Linux y un cable de red (para las pruebas). Necesita `curl`, `dig`, `ldap-utils` y `ntpdate`.
 - Un puerto libre del switch para el portátil (le llamaremos **puerto de pruebas**).

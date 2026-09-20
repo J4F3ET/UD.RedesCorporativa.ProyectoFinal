@@ -72,6 +72,10 @@ Las dos son completas y se siguen de arriba abajo, sin saltar a otros documentos
 
 `PERFIL` va **igual en los tres PCs**. Si lo pones distinto en uno, la red queda a medias.
 
+## Riesgo antes de ir: Internet
+
+Instalar necesita Internet (Docker, imágenes y el build de OpenVPMS, ~300 MB). **Aún no se sabe si el laboratorio lo da.** Si no, hay que preparar todo antes en otro equipo (`docker save` / `docker load`): es un día de trabajo previo. Averígualo antes de ir.
+
 ## Estado de validación
 
 Ninguno de los dos perfiles se ha probado todavía contra un switch real: **pendiente de hardware**. Lo único probado es la capa de software en un solo host (ver [`../docs/prueba-smoke-test-resultados.md`](../docs/prueba-smoke-test-resultados.md)). Por eso cada receta dice, paso a paso, cómo comprobar que salió bien y qué guardar como evidencia.
