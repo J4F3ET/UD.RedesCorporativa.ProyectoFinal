@@ -12,3 +12,5 @@ docker compose pull && docker compose up -d      # primer arranque ~10 min (migr
 docker compose down -v                            # limpiar
 ```
 Resultados y hallazgos: `docs/prueba-smoke-test-resultados.md`.
+
+Verificación de la arquitectura (segmentación, DNS, NTP; NO VERIFICADO contra el arnés): `verificar_arquitectura.md` y `verificar_arquitectura.py`.
