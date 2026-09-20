@@ -36,7 +36,7 @@ esos paquetes no pasan por ninguna regla `drop`.
 ```
 arp -n | grep 10.10.20.1        # (desde un contenedor de PC-2) una sola MAC: la de PC-3
 ```
-PC-2 no debe tener ninguna IPv4 en `<IFACE>.20`/`<IFACE>.30`.
+PC-2 no debe tener ninguna IPv4 en `<IFACE>.20`/`<IFACE>.30`, salvo la `IP_GESTION` opcional (.250) en una sola de las dos.
 
 ## 5. Tabla de resultados esperados
 | Origen -> destino | Resultado | Dónde queda la evidencia |

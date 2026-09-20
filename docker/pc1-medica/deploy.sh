@@ -27,7 +27,11 @@ source .env
 set +a
 REPO_ROOT="$(cd ../.. && pwd)"
 source "${REPO_ROOT}/scripts/perfil.sh"
-echo "PC-1: perfil ${PERFIL} (sin pasos de red propios)."
+echo "PC-1: perfil ${PERFIL} (sin sub-interfaces ni rutas propias)."
+
+# IP de gestión opcional (IP_GESTION del .env; vacía = sin IP) sobre la propia tarjeta. Ver scripts/ip-gestion.sh.
+source "${REPO_ROOT}/scripts/ip-gestion.sh"
+gestion_aplicar "${IP_GESTION:-}" "10:${IFACE:?definir IFACE en .env}"
 
 docker compose up -d
 docker compose ps

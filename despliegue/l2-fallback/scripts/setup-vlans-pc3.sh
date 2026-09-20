@@ -50,6 +50,9 @@ for vlan in 40 99; do
 done
 
 echo 1 > /proc/sys/net/ipv4/ip_forward   # equivale a sysctl -w net.ipv4.ip_forward=1
+if [ -n "${IP_GESTION:-}" ]; then
+  echo "IP_GESTION se ignora en el perfil l2: PC-3 ya es alcanzable por sus gateways (p. ej. 10.10.99.1 desde las demás VLAN)."
+fi
 echo "ip_forward=1. Aplica ahora firewall-pc3-matriz.sh (deploy.sh lo hace solo)."
 
 echo "Interfaces de enrutamiento activas:"

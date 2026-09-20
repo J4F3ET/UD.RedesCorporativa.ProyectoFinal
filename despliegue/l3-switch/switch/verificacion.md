@@ -29,7 +29,7 @@ show ip interface Vlan20 | include access list   ! muestra ACL-VLAN20-IN en "Inb
 ```
 
 ## 3. Sin direcciones duplicadas
-En PC-2 y PC-3 las sub-interfaces no llevan IP; el gateway es solo el switch:
+En PC-2 y PC-3 las sub-interfaces no llevan IP (salvo la `IP_GESTION` opcional, .250, en una sola VLAN); el gateway es solo el switch:
 ```
 ip -brief addr show | grep '\.'      ! (en cada PC) <IFACE>.20/.30 (PC-2) y <IFACE>.40/.99 (PC-3) sin IPv4
 arp -n | grep 10.10.20.1             ! (desde un contenedor) una sola MAC: la de la SVI del switch
