@@ -18,15 +18,17 @@ El diseño de red con VLANs y switch **no se ejecuta en este laboratorio**: se p
 
 No hace falta instalar Docker Desktop ni activar WSL2: los PCs ya los tienen.
 
-El primer día habrá Internet limitada, así que el paquete de preparación previa es una **red de seguridad**, no una condición imprescindible. Conviene llevarlo igualmente; contiene:
+El primer día habrá Internet limitada, así que el paquete de preparación previa es una **red de seguridad**, no una condición imprescindible. Conviene llevarlo igualmente. El USB contiene:
 
-- Las **imágenes** de las aplicaciones guardadas **por etiqueta**, con su fichero de *override* de Compose.
-- El **proyecto** (este repositorio).
-- Los **certificados ya generados** (CA interna y certificado de OpenLDAP): los tres PCs usan **la misma CA**, que viene en el USB. **No hay que copiar `ca.crt` entre PCs por la red.**
+- Las **imágenes** de las aplicaciones en ficheros `.tar`, guardadas **por etiqueta**.
+- El **proyecto** (este repositorio) en un `.zip`.
+- Los **certificados ya generados**: para PC-3, `ca.crt`, `ca.key`, `ldap.crt` y `ldap.key`; para PC-1 y PC-2, solo `ca.crt`. Los tres PCs usan **la misma CA**. **No hay que copiar `ca.crt` entre PCs por la red.**
+- Los ficheros de *override* de Compose de cada PC, generados en la preparación.
+- `MANIFEST.sha256` (para comprobar que nada se corrompió al copiar) e `INVENTARIO.tsv` (qué imagen va con qué perfil).
 - La imagen **`nicolaka/netshoot`** (~900 MB), necesaria solo para la demostración del apartado 7.
-- El instalador de PowerShell: `.\instalar.ps1 -Perfil pc1|pc2|pc3`.
+- El instalador de PowerShell, que se invoca `.\instalar.ps1 -Perfil pc1|pc2|pc3` y **solo carga las imágenes de ese perfil**. Deja en disco el proyecto, las imágenes, los certificados y el override, y remite a este documento; **no arranca los contenedores** (eso lo hace el `deploy.ps1` de cada PC, apartado 4).
 
-> **HUECO: contenido exacto del paquete y del instalador.** Lo define y construye quien prepara el paquete offline. Cuando esté probado, se copia aquí la estructura del USB. Pendiente también: verificar que las imágenes cargadas con `docker load` satisfacen las referencias con digest (`nombre:etiqueta@sha256:…`) de los compose; si no, Docker intentaría descargarlas.
+> **HUECO: nombres y parámetros exactos de `instalar.ps1` y de `deploy.ps1`.** Se copian aquí cuando estén cerrados y probados. Pendiente también: verificar que las imágenes cargadas con `docker load` satisfacen las referencias con digest (`nombre:etiqueta@sha256:…`) de los compose; si no, Docker intentaría descargarlas.
 
 ## 3. La red del laboratorio
 
@@ -50,7 +52,15 @@ Comprueba que los tres se ven entre sí (desde cada PC hacia los otros dos):
 ping <IP-LAN-DE-PC-3>
 ```
 
-Las aplicaciones de PC-1 y PC-2 necesitan la dirección de PC-3 (para llegar al LDAP). Se guarda en el `.env` de cada PC en la variable **`IP_PC3`** (ver apartado 4).
+Cada PC necesita conocer alguna de estas direcciones; se guardan en su `.env` (ver apartado 4):
+
+| PC | Variables de IP que rellena | Para qué |
+|---|---|---|
+| PC-1 | `IP_PC3` | llegar al LDAP de PC-3 |
+| PC-2 | `IP_PC3` y `IP_PC2` | `IP_PC3`: llegar al LDAP. `IP_PC2`: su **propia** IP, que Pretix e InvenTree usan para construir sus URL (`PRETIX_PRETIX_URL`, `INVENTREE_SITE_URL`); si no se rellena, el arranque **falla con un mensaje explícito** en vez de arrancar mal |
+| PC-3 | `DNS_BIND_IP` (su **propia** IP) | publicar el puerto 53 (bind9) solo en esa dirección. Su valor por defecto es `0.0.0.0`, pero conviene poner la IP real: así el puerto 53 no choca con el servicio de «Conexión compartida a Internet» (ICS) de Windows |
+
+PC-3 **no** lee `IP_PC3` (solo aparece en comentarios de su compose).
 
 ## 4. Preparar cada PC (orden recomendado: PC-3, PC-2, PC-1)
 
@@ -62,16 +72,20 @@ Pasos comunes a cada PC:
 2. **Copia el paquete** del USB a una carpeta del PC y abre PowerShell dentro de ella.
 3. **Configura el `.env`** de tu PC (copia `.env.example` a `.env` y edítalo con el Bloc de notas: `notepad .env`):
    - Contraseñas: cámbialas por otras propias, sin espacios, y anótalas.
-   - `IP_PC3=<IP-LAN-DE-PC-3>`: la dirección que apuntaste en el apartado 3 (en PC-1 y PC-2; **HUECO: confirmar si PC-3 también la lee**).
+   - Las variables de IP de la tabla del apartado 3 que correspondan a tu PC, con las direcciones que anotaste (por ejemplo, `IP_PC3=<IP-LAN-DE-PC-3>`). Ahora mismo el `.env.example` trae `SUSTITUIR-POR-LA-IP-REAL-DE-PC2` como marcador: **sustitúyelo**.
    - Ya **no** se usan `IFACE`, `PERFIL` ni `IP_GESTION` (eran del diseño con VLANs).
    - Claves con reglas propias: `OPENVPMS_ADMIN_PASSWORD` (PC-1) mínimo 8 caracteres con mayúscula, minúscula, número y un carácter especial; `INVENTREE_LDAP_BIND_PASSWORD` y `ERPNEXT_LDAP_BIND_PASSWORD` deben quedar en **`Svc-Lectura1`** (es la del LDIF de laboratorio).
-4. **Ejecuta el instalador** del paquete:
+4. **Instala el paquete** (carga las imágenes de tu perfil y deja todo en disco):
 
 ```powershell
 .\instalar.ps1 -Perfil pc3      # o pc2, o pc1
 ```
 
-> **HUECO: qué hace exactamente el instalador y el sustituto de `deploy.sh`.** Hoy `deploy.sh` es lo único que (a) genera los certificados antes del arranque (ahora vienen ya hechos en el USB), (b) arranca los contenedores y (c) **crea el administrador de Pretix** y borra el usuario `admin@localhost`. Falta confirmar cómo hace el sustituto (b) y (c) y qué parámetros lleva. Hasta entonces, no improvises otro procedimiento.
+5. **Arranca los servicios** con el `deploy.ps1` de tu PC. Valida el `.env` y el `ca.crt`, arranca con `docker compose` y espera a que los contenedores estén sanos.
+
+> **HUECO: nombre y parámetros exactos de `deploy.ps1`.** Cuando se cierren, se escribe aquí el comando.
+
+> **MUY IMPORTANTE (solo PC-2): el administrador de Pretix.** Pretix trae por defecto un usuario `admin@localhost` con la clave `admin`. `deploy.sh` lo borraba y creaba el administrador propio; `deploy.ps1` replica ese paso (`init_admins`, incluido el borrado de `admin@localhost`). **Si ese paso no se completa, Pretix queda accesible con credenciales públicas desde toda la red**, porque ahora el puerto 80 se publica en `0.0.0.0`. Tras el arranque de PC-2, **comprueba que ese paso terminó bien** (el script debe decir que creó el administrador) y, si el aviso dice que Pretix no quedó listo a tiempo, **repítelo** antes de dejar el PC conectado a la red. Comprobación manual: intenta entrar en Pretix con `admin@localhost` / `admin`; **debe fallar**.
 
 Tiempos de primer arranque medidos en la prueba de humo (un solo host): **PC-3 ~13 min** (lo marca `erpnext-create-site`), **PC-2 ~10 min** (migraciones de Pretix e InvenTree), **PC-1 ~5 min** (OpenVPMS prepara su base de datos). No lo interrumpas aunque parezca colgado.
 
@@ -106,7 +120,7 @@ Para ver el código de respuesta desde PowerShell:
 (Invoke-WebRequest -UseBasicParsing http://<IP-LAN-DE-PC-3>:8080/api/method/ping).StatusCode
 ```
 
-> **Riesgo por verificar (Pretix e InvenTree):** el compose de PC-2 fija `PRETIX_PRETIX_URL: http://10.10.20.10` y `INVENTREE_SITE_URL: http://10.10.30.10:8000` (direcciones internas de Docker). Pretix usa esa URL para construir enlaces y redirecciones, e InvenTree para los orígenes de confianza CSRF (sin ellos, el inicio de sesión falla). Al entrar por `<IP-LAN-DE-PC-2>` podrían fallar el login o las redirecciones. **HUECO: comprobarlo y, si falla, parametrizar esas dos URLs con la IP del PC** (decisión del responsable de los compose).
+> **Nota (Pretix e InvenTree):** las URL que usan estas dos aplicaciones para enlaces, redirecciones y orígenes de confianza CSRF se construyen con `IP_PC2` (`PRETIX_PRETIX_URL: http://${IP_PC2}:${PRETIX_PORT:-80}`, `INVENTREE_SITE_URL: http://${IP_PC2}:${INVENTREE_PORT:-8000}`). Por eso hay que rellenar `IP_PC2` en el `.env` de PC-2 (apartado 4); sin ella el compose se niega a arrancar. **HUECO: confirmar en el laboratorio que el inicio de sesión de InvenTree y las redirecciones de Pretix funcionan entrando por esa IP.**
 
 ## 6. Comprobaciones entre PCs (desde fuera de los contenedores)
 
@@ -191,7 +205,7 @@ En el perfil L2 con los scripts reales, al final se imprime además la tabla `nf
 ## 8. Que sobreviva a un reinicio
 
 - En Docker Desktop, activa **«Start Docker Desktop when you sign in»** (Configuración → General). Los contenedores llevan `restart: unless-stopped`, así que vuelven a arrancar solos cuando Docker arranca.
-- Docker Desktop arranca al **iniciar sesión** de Windows, no al encender el PC. Si el PC queda en la pantalla de inicio de sesión sin nadie, los contenedores no arrancan. **HUECO: decidir si se configura inicio de sesión automático en los PCs del laboratorio.**
+- Docker Desktop arranca al **iniciar sesión** de Windows, no al encender el PC. **Tras un reinicio, alguien debe iniciar sesión** para que los contenedores vuelvan; si el PC se queda en la pantalla de inicio de sesión, no arrancan. Es una decisión deliberada: no se configura inicio de sesión automático en equipos compartidos del laboratorio, porque sería un problema de seguridad mayor que la molestia que evita. Avisa al operador.
 - Tras un apagón general, enciende **primero PC-3** (LDAP, DNS y NTP), luego PC-2 y PC-1.
 - Los servicios `systemd` del repositorio (`scripts/systemd/`) son del diseño Linux y **no se usan aquí**.
 
@@ -201,7 +215,7 @@ En el perfil L2 con los scripts reales, al final se imprime además la tabla `nf
 |---|---|
 | Desde el propio PC no abre `http://10.10.X.X…` | Es normal: las direcciones `10.10.X.X` son internas de Docker y no se alcanzan desde Windows. Usa `http://localhost:PUERTO` en el propio PC, o la IP de la red desde otro PC. |
 | Otro PC no llega al servicio | El **Firewall de Windows Defender** puede bloquear el puerto publicado. Comprueba la regla de entrada de Docker Desktop; si hace falta, crea una regla de entrada para ese puerto (requiere administrador). |
-| `docker compose` dice que el puerto `53` o `123` ya está en uso (PC-3) | Otro programa de Windows ocupa el puerto UDP. Averígualo con `Get-NetUDPEndpoint -LocalPort 53,123` y avisa al equipo técnico antes de parar nada. |
+| `docker compose` dice que el puerto `53` o `123` ya está en uso (PC-3) | Otro programa de Windows ocupa el puerto UDP (el servicio de «Conexión compartida a Internet» suele ocupar el 53). Comprueba que en el `.env` de PC-3 `DNS_BIND_IP` es la **IP real de PC-3** y no `0.0.0.0`. Averigua qué lo ocupa con `Get-NetUDPEndpoint -LocalPort 53,123` y avisa al equipo técnico antes de parar nada. |
 | Un contenedor aparece `Restarting` | Espera unos minutos si es primer arranque; luego `docker compose logs NOMBRE-DEL-SERVICIO`. |
 | Falla algo relacionado con saltos de línea en un script | El repositorio fuerza `LF` en `*.sh`, `Dockerfile` y `*.service` (`.gitattributes`); si copiaste los ficheros por otra vía (p. ej. editándolos con el Bloc de notas), pueden haberse convertido a `CRLF`. |
 | Docker Desktop va lento o se queda sin memoria | La prueba de humo con los tres PCs en **un solo host** usó ~7 GB de RAM para Docker; cada PC por separado necesita menos. Revisa la memoria asignada en Docker Desktop (Configuración → Resources). |
