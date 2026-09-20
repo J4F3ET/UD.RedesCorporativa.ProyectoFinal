@@ -358,7 +358,11 @@ services:
     container_name: ntp-interno
     restart: unless-stopped
     environment:
-      NTP_SERVERS: "${NET_INFRA:-10.10.99}.12"
+      # NTP_SERVERS son los servidores DE LOS QUE chrony toma la hora. El laboratorio no tiene salida a Internet, asi que no
+      # sirve el valor por defecto de la imagen (time.cloudflare.com). Se usa el reloj local (127.127.1.1, ejemplo
+      # "local (offline)" del README de cturra/docker-ntp): este servidor sirve su propio reloj como referencia de hora comun.
+      # Antes apuntaba a la IP del propio contenedor (.12), una referencia circular que no obtenia la hora de ninguna parte.
+      NTP_SERVERS: "127.127.1.1"
     networks:
       vlan99_infra:
         ipv4_address: ${NET_INFRA:-10.10.99}.12
