@@ -30,8 +30,8 @@ Lo que no se ha comprobado es el comportamiento sobre un switch físico. El esta
 | PC-3 | 8080 (ERPNext), 389 y 636 (OpenLDAP), 53 tcp/udp (bind9), 123/udp (NTP) |
 
 - PC-1 y PC-2 llevan en su `.env` **`IP_PC3`** (IP LAN de PC-3). PC-2 lleva además **`IP_PC2`** (su propia IP, para las URL
-  de Pretix e InvenTree). El `.env.example` trae un valor que **no es una IP** a propósito, para que `docker compose`
-  falle en vez de arrancar mal si no se sustituye.
+  de Pretix e InvenTree). El `.env.example` trae un valor que **no es una IP** a propósito: `deploy.ps1` se niega a
+  arrancar si no se sustituye (`docker compose config` por sí solo no lo detecta, así que no lances `up` a mano sin revisar el `.env`).
 - Puertos y direcciones se parametrizan (`*_PORT`, `PUBLISH_IP`, `DNS_BIND_IP`). Si `10.10.NN.x` choca con la LAN del
   laboratorio, `NET_MEDICA`, `NET_TAQUILLA`, `NET_LOGISTICA`, `NET_RRHH` y `NET_INFRA` cambian el prefijo de cada bridge.
   Comprobar la LAN con `ipconfig` antes del primer arranque.
