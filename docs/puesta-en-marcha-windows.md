@@ -100,6 +100,8 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 
    Qué hace: valida el `.env` (variables presentes, direcciones IPv4 válidas y ninguna que siga con `SUSTITUIR-`), valida los certificados que le tocan a ese PC, arranca con `docker compose up -d --pull never` (sin descargar nada), espera a que los contenedores estén sanos y, en PC-3, a que los tres trabajos de ERPNext terminen con código 0 y genera la zona de bind9. En PC-2 ejecuta además la creación del administrador de Pretix y **comprueba el resultado**.
 
+> **ADVERTENCIA: usa siempre `deploy.ps1`; no arranques a mano con `docker compose up`.** `docker compose config` **no falla** con el `.env.example` sin sustituir: no comprueba que las direcciones IP sean válidas. Quien rechaza los valores `SUSTITUIR-…` (y las IP mal escritas) es `deploy.ps1`. Si se arranca a mano y se salta ese paso, el conjunto se levanta con direcciones inválidas y el fallo aparece **más tarde y de forma confusa** (enlaces, redirecciones o LDAP que no llegan a ninguna parte).
+
 > **Orden de despliegue: PC-3 primero, luego PC-2 y PC-1.**
 
 > **MUY IMPORTANTE (solo PC-2): el administrador de Pretix.** Pretix trae por defecto un usuario `admin@localhost` con la clave `admin`. `deploy.ps1` de PC-2 crea el administrador propio y **borra `admin@localhost`**, y **termina con código 1 si no consigue hacer ambas cosas**. Si eso pasa, Pretix queda accesible con credenciales públicas desde toda la red (el puerto 80 se publica en `0.0.0.0`): **no dejes el PC conectado**; corrige la causa y repite con `-SoloAdmins`. Comprobación manual final: intenta entrar en Pretix con `admin@localhost` / `admin`; **debe fallar**.
