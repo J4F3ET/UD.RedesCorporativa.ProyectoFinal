@@ -1,0 +1,424 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Reserva Viva — Despliegue en Docker Desktop",
+    "output": "despliegue-docker-desktop.html",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1390,
+      500
+    ],
+    "views": [
+      {
+        "id": "completa",
+        "label": "3 PCs Windows",
+        "focus": [
+          "lan",
+          "openvpms-app",
+          "openvpms-db",
+          "pretix-web",
+          "pretix-db",
+          "pretix-redis",
+          "inventree-app",
+          "inventree-db",
+          "inventree-worker",
+          "erpnext-hr",
+          "erpnext-core",
+          "openldap",
+          "dns-interno",
+          "ntp-interno"
+        ],
+        "note": "3 PCs Windows físicos con bridges locales; entre PCs solo puertos publicados en la IP del host (compose del PR #21)."
+      },
+      {
+        "id": "pc3",
+        "label": "PC-3: infraestructura",
+        "focus": [
+          "lan",
+          "erpnext-hr",
+          "erpnext-core",
+          "openldap",
+          "dns-interno",
+          "ntp-interno"
+        ],
+        "note": "PC-3 publica LDAP/LDAPS, DNS, NTP y ERPNext. 53 y 123/udp pueden chocar con Windows: NO VERIFICADO."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "lan",
+      "type": "cloud",
+      "label": "LAN física del laboratorio",
+      "sublabel": "IP LAN de cada host Windows",
+      "tag": "puertos publicados 0.0.0.0",
+      "pos": [
+        576,
+        10
+      ],
+      "size": [
+        224,
+        60
+      ]
+    },
+    {
+      "id": "openvpms-app",
+      "type": "backend",
+      "label": "OpenVPMS",
+      "sublabel": "PC-1 · :8080 publicado",
+      "tag": "sin LDAP",
+      "pos": [
+        30,
+        150
+      ],
+      "size": [
+        184,
+        58
+      ]
+    },
+    {
+      "id": "openvpms-db",
+      "type": "database",
+      "label": "MySQL 8.0",
+      "sublabel": "bridge local de PC-1",
+      "tag": "openvpms-db",
+      "pos": [
+        30,
+        262
+      ],
+      "size": [
+        184,
+        58
+      ]
+    },
+    {
+      "id": "pretix-web",
+      "type": "backend",
+      "label": "Pretix",
+      "sublabel": "PC-2 · :80 publicado",
+      "tag": "sin LDAP",
+      "pos": [
+        322,
+        150
+      ],
+      "size": [
+        178,
+        58
+      ]
+    },
+    {
+      "id": "pretix-db",
+      "type": "database",
+      "label": "Postgres 15",
+      "sublabel": "bridge local",
+      "tag": "pretix-db",
+      "pos": [
+        292,
+        262
+      ],
+      "size": [
+        124,
+        58
+      ]
+    },
+    {
+      "id": "pretix-redis",
+      "type": "database",
+      "label": "Redis 7",
+      "sublabel": "bridge local",
+      "tag": "pretix-redis",
+      "pos": [
+        436,
+        262
+      ],
+      "size": [
+        124,
+        58
+      ]
+    },
+    {
+      "id": "inventree-app",
+      "type": "backend",
+      "label": "InvenTree",
+      "sublabel": "PC-2 · :8000 publicado",
+      "tag": "cliente LDAPS",
+      "pos": [
+        628,
+        150
+      ],
+      "size": [
+        178,
+        58
+      ]
+    },
+    {
+      "id": "inventree-db",
+      "type": "database",
+      "label": "Postgres 15",
+      "sublabel": "bridge local",
+      "tag": "inventree-db",
+      "pos": [
+        596,
+        262
+      ],
+      "size": [
+        124,
+        58
+      ]
+    },
+    {
+      "id": "inventree-worker",
+      "type": "backend",
+      "label": "InvenTree worker",
+      "sublabel": "bridge local",
+      "tag": "invoke worker",
+      "pos": [
+        740,
+        262
+      ],
+      "size": [
+        136,
+        58
+      ]
+    },
+    {
+      "id": "erpnext-hr",
+      "type": "frontend",
+      "label": "ERPNext HR (nginx)",
+      "sublabel": "PC-3 · :8080 publicado",
+      "tag": "cliente LDAPS",
+      "pos": [
+        962,
+        150
+      ],
+      "size": [
+        172,
+        58
+      ]
+    },
+    {
+      "id": "erpnext-core",
+      "type": "backend",
+      "label": "ERPNext núcleo",
+      "sublabel": "backend + 8 servicios más",
+      "tag": "9 perm. + 3 jobs",
+      "pos": [
+        962,
+        262
+      ],
+      "size": [
+        172,
+        58
+      ]
+    },
+    {
+      "id": "openldap",
+      "type": "security",
+      "label": "OpenLDAP",
+      "sublabel": "PC-3 · 389 y 636 publicados",
+      "tag": "LDAPS · CA interna",
+      "pos": [
+        1174,
+        150
+      ],
+      "size": [
+        172,
+        58
+      ]
+    },
+    {
+      "id": "dns-interno",
+      "type": "security",
+      "label": "DNS bind9",
+      "sublabel": "PC-3 · 53 udp+tcp publicado",
+      "tag": "clientes externos",
+      "pos": [
+        1174,
+        262
+      ],
+      "size": [
+        172,
+        58
+      ]
+    },
+    {
+      "id": "ntp-interno",
+      "type": "security",
+      "label": "NTP interno",
+      "sublabel": "PC-3 · 123/udp publicado",
+      "tag": "choca con Windows?",
+      "pos": [
+        1174,
+        374
+      ],
+      "size": [
+        172,
+        58
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "PC-1 · Windows + Docker Desktop · Médica",
+      "wraps": [
+        "openvpms-app",
+        "openvpms-db"
+      ],
+      "pad": 26
+    },
+    {
+      "kind": "region",
+      "label": "PC-2 · Windows + Docker Desktop · Operaciones",
+      "wraps": [
+        "pretix-web",
+        "pretix-db",
+        "pretix-redis",
+        "inventree-app",
+        "inventree-db",
+        "inventree-worker"
+      ],
+      "pad": 26
+    },
+    {
+      "kind": "region",
+      "label": "PC-3 · Windows + Docker Desktop · RR.HH. + infra",
+      "wraps": [
+        "erpnext-hr",
+        "erpnext-core",
+        "openldap",
+        "dns-interno",
+        "ntp-interno"
+      ],
+      "pad": 26
+    }
+  ],
+  "connections": [
+    {
+      "id": "lan-pc1",
+      "from": "lan",
+      "to": "openvpms-app",
+      "label": "8080",
+      "variant": "emphasis"
+    },
+    {
+      "id": "lan-pc2a",
+      "from": "lan",
+      "to": "pretix-web",
+      "label": "80",
+      "variant": "emphasis"
+    },
+    {
+      "id": "lan-pc2b",
+      "from": "lan",
+      "to": "inventree-app",
+      "label": "8000",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "lan-pc3",
+      "from": "lan",
+      "to": "erpnext-hr",
+      "label": "8080",
+      "variant": "emphasis"
+    },
+    {
+      "id": "openvpms-sql",
+      "from": "openvpms-app",
+      "to": "openvpms-db",
+      "label": "MySQL :3306",
+      "labelDy": 24
+    },
+    {
+      "id": "pretix-sql",
+      "from": "pretix-web",
+      "to": "pretix-db",
+      "label": "PostgreSQL :5432",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "pretix-cache",
+      "from": "pretix-web",
+      "to": "pretix-redis",
+      "label": "cache + Celery",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "inventree-sql",
+      "from": "inventree-app",
+      "to": "inventree-db",
+      "label": "PostgreSQL :5432",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "inventree-jobs",
+      "from": "inventree-app",
+      "to": "inventree-worker",
+      "label": "cola de tareas",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "erp-core",
+      "from": "erpnext-hr",
+      "to": "erpnext-core",
+      "label": "bridge interno",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "lan-ldap",
+      "from": "lan",
+      "to": "openldap",
+      "label": "389 / 636",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Sin VLANs ni segmentación",
+      "items": [
+        "Bridges locales por PC; sin macvlan, ACL ni nftables",
+        "NO VERIFICADO: 53 y 123/udp frente a ICS y w32time"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "23 definiciones",
+      "items": [
+        "20 contenedores permanentes + 3 jobs de inicio",
+        "PC-1: 2 · PC-2: 6 · PC-3: 15 (12 ERPNext)"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "IP de cada PC en el .env",
+      "items": [
+        "IP_PC3: PC-1 y PC-2 alcanzan LDAP, DNS y NTP de PC-3",
+        "IP_PC2: URL pública de Pretix e InvenTree (CSRF)"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Quién usa LDAPS",
+      "items": [
+        "InvenTree y ERPNext; OpenVPMS y Pretix no usan LDAP",
+        "Siempre por nombre; con ldaps://<ip> el certificado fallaría"
+      ]
+    }
+  ]
+}
