@@ -29,7 +29,7 @@ networks:
 services:
   # --- Taquilla y Boletería (VLAN 20) ---
   pretix-db:
-    image: postgres:15
+    image: postgres:15.19@sha256:dfbbb0ad8cab91d41e99123664e37a9b25d0413426d4fb3154e4d668e5d35246
     container_name: pretix-db
     restart: unless-stopped
     environment:
@@ -43,7 +43,7 @@ services:
         ipv4_address: 10.10.20.11
 
   pretix-redis:
-    image: redis:7
+    image: redis:7.4.11@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
     container_name: pretix-redis
     restart: unless-stopped
     networks:
@@ -51,7 +51,9 @@ services:
         ipv4_address: 10.10.20.12
 
   pretix-web:
-    image: pretix/standalone:stable
+    # Digest = el que tenia el tag "stable" (pretix 2026.7.0) cuando se probo. Ningun tag de version apunta a el:
+    # "2026.7.0" resuelve a otra compilacion (sha256:5df3b7aa...), asi que el digest es lo que fija la imagen.
+    image: pretix/standalone:stable@sha256:7f8c1b51f0b3e28f7c7a4245e85bcdfcd1e1bef76454dfc8314eda8f4ed596b3
     container_name: pretix-web
     restart: unless-stopped
     depends_on:
@@ -69,13 +71,20 @@ services:
       PRETIX_CELERY_BROKER: redis://10.10.20.12/2
       PRETIX_PRETIX_URL: http://10.10.20.10
       PRETIX_MAIL_FROM: taquilla@reservaviva.local
+    # El primer arranque migra la base (~10 min): start_period largo para no marcarlo unhealthy sin motivo.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1/control/login/', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 900s
     networks:
       vlan20_taquilla:
         ipv4_address: 10.10.20.10
 
   # --- Logística y Almacén (VLAN 30) ---
   inventree-db:
-    image: postgres:15
+    image: postgres:15.19@sha256:dfbbb0ad8cab91d41e99123664e37a9b25d0413426d4fb3154e4d668e5d35246
     container_name: inventree-db
     restart: unless-stopped
     environment:
@@ -89,7 +98,7 @@ services:
         ipv4_address: 10.10.30.11
 
   inventree-app:
-    image: inventree/inventree:stable
+    image: inventree/inventree:1.5.5@sha256:5dc64d7ceee39db7bd98bd4a8a2c6f95dcc7a3e0fc39c4c1ea1efe8ba1c83ea3
     container_name: inventree-app
     restart: unless-stopped
     depends_on:
@@ -141,7 +150,7 @@ services:
   # Worker de tareas en segundo plano de InvenTree (correo, importaciones, informes).
   # Espera a que la app este sana para no competir por la clave secreta ni las migraciones.
   inventree-worker:
-    image: inventree/inventree:stable
+    image: inventree/inventree:1.5.5@sha256:5dc64d7ceee39db7bd98bd4a8a2c6f95dcc7a3e0fc39c4c1ea1efe8ba1c83ea3
     container_name: inventree-worker
     restart: unless-stopped
     depends_on:
