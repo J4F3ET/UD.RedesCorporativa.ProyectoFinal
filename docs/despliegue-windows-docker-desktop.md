@@ -6,11 +6,16 @@
 
 ## Decisión y límite conocido
 
-Los PC del laboratorio son tres equipos **Windows físicos**, cada uno con Docker Desktop (WSL2). Ahí no arrancan ni
-`macvlan` ni las sub-interfaces 802.1Q, así que **se renuncia a VLAN, macvlan y matriz de segmentación**. Es una
-limitación conocida y decidida: el laboratorio ya no demuestra segmentación L2/L3. Los scripts `setup-vlans-*.sh`,
-`firewall-pc3-matriz.sh` y `despliegue/*/` se conservan **como anexo de diseño** (cómo se habría segmentado con hardware
-real); no se ejecutan en Windows.
+Los PC del laboratorio son tres equipos **Windows físicos**, cada uno con Docker Desktop (WSL2), que corre los contenedores en
+una máquina virtual Linux y no expone la tarjeta de red física. Ahí no arrancan ni `macvlan` ni las sub-interfaces 802.1Q, así
+que **el despliegue de las aplicaciones no tiene VLAN ni segmentación**: usa redes `bridge` locales y puertos publicados. Es una
+limitación conocida y decidida.
+
+Lo que **no** se pierde es el diseño: los scripts reales `setup-vlans-*.sh` y `firewall-pc3-matriz.sh` y las recetas de
+`despliegue/*/` se conservan como **anexo de diseño**, y los simuladores de `despliegue/*/pruebas/` los **ejecutan dentro de
+Docker Desktop** (kernel Linux real), de modo que la matriz de segmentación se puede demostrar en vivo con un contador por regla.
+Lo que no se ha comprobado es el comportamiento sobre un switch físico. El estado de cada cosa, en tres niveles de evidencia
+(implementado y ejecutado / simulado en el kernel de Linux / diseñado y no validado en hardware), está en el `README.md` raíz.
 
 ## Cómo queda la red
 
