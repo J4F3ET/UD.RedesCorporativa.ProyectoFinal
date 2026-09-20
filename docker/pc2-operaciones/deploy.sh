@@ -67,6 +67,35 @@ set +a
 # Valida PERFIL (l2|l3) y localiza despliegue/<perfil>/scripts.
 source "${REPO_ROOT}/scripts/perfil.sh"
 "${PERFIL_DIR}/scripts/setup-vlans-pc2.sh"
+
+# ca.crt (CA interna de LDAPS) viene de PC-3 y el compose lo monta como ARCHIVO. Si faltara, Docker crearía un
+# directorio vacío en su lugar y InvenTree arrancaría sin poder verificar LDAPS. Por eso se comprueba aquí,
+# después de la IP de gestión (sin ella no habría por dónde hacer el scp) y antes de "docker compose up".
+# Que falte NO es un error: es el paso que sigue en el primer arranque; se sale con código 0 para relanzar.
+if [ -d certs/ca.crt ]; then rmdir certs/ca.crt 2>/dev/null || true; fi   # resto de un arranque anterior sin el archivo
+if [ ! -s certs/ca.crt ]; then
+  mkdir -p certs
+  case "${PERFIL}" in
+    l3) PC3_IP=10.10.99.250 ;;   # IP_GESTION de PC-3 (VLAN 99); el switch enruta desde la VLAN de PC-2
+    l2) PC3_IP=10.10.99.1 ;;     # gateway de la VLAN 99, que es PC-3
+  esac
+  echo
+  echo "PASO PENDIENTE (no es un error): falta el certificado de la CA interna, certs/ca.crt."
+  echo "Cópialo desde PC-3 con este comando (ajusta usuario y ruta del repositorio en PC-3):"
+  echo
+  echo "  scp <usuario>@${PC3_IP}:<ruta-del-repo-en-PC-3>/docker/pc3-administracion-infra/certs/ca.crt $(pwd)/certs/ca.crt"
+  echo
+  echo "Después vuelve a lanzar:  sudo ./deploy.sh   (continúa desde aquí; es seguro repetirlo)."
+  if [ "${PERFIL}" = "l3" ]; then
+    echo "Nota: en el perfil l3 PC-3 debe tener IP_GESTION=10.10.99.250 en su .env (y haber corrido su deploy.sh)."
+  fi
+  if [ -z "${IP_GESTION:-}" ]; then
+    echo "Nota: IP_GESTION está vacía en este PC, así que no tiene dirección para hacer el scp. Defínela en .env"
+    echo "y relanza sudo ./deploy.sh, o copia el archivo con un USB a $(pwd)/certs/ca.crt."
+  fi
+  exit 0
+fi
+
 docker compose up -d
 init_admins
 docker compose ps

@@ -40,5 +40,11 @@ fi
 # Certificados de LDAPS (CA interna + certificado de OpenLDAP): idempotente, no regenera si siguen vigentes.
 "${REPO_ROOT}/scripts/generar-certificados.sh"
 
+# El compose monta estos archivos; si faltara alguno, Docker crearía un directorio vacío. Con "set -e" el script
+# anterior ya habría abortado, pero se comprueba explícitamente antes del "up".
+for f in certs/ca.crt certs/ldap.crt certs/ldap.key; do
+  [ -s "${f}" ] || { echo "Falta ${f} tras generar-certificados.sh; abortando antes de docker compose up." >&2; exit 1; }
+done
+
 docker compose up -d
 docker compose ps
