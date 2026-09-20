@@ -37,7 +37,7 @@
           "router",
           "bloqueado"
         ],
-        "note": "Entre VLANs de negocio, el forward de PC-3 cae en policy drop: el switch entrega la trama pero no hay ruta permitida."
+        "note": "Entre VLANs de negocio, PC-3 aplica policy ACCEPT + 12 DROP con contador: el switch entrega la trama y muere en el forward.."
       },
       {
         "id": "hairpin",
@@ -154,7 +154,7 @@
       "id": "bloqueado",
       "type": "security",
       "label": "Bloqueado",
-      "sublabel": "política DENY",
+      "sublabel": "regla DROP con contador",
       "tag": "sin respuesta",
       "stage": 4,
       "row": 2,
@@ -165,7 +165,7 @@
       "type": "security",
       "label": "PC-3 router",
       "sublabel": "ip_forward · nftables",
-      "tag": "policy drop",
+      "tag": "policy accept + 12 DROP",
       "stage": 2,
       "row": 1,
       "width": 140
@@ -276,8 +276,8 @@
       "dot": "amber",
       "title": "Quién aplica la política",
       "items": [
-        "PC-3: ip_forward + nftables (policy drop)",
-        "El switch L2 solo conmuta; no tiene ACL"
+        "PC-3: ip_forward + nftables (policy ACCEPT + 12 DROP)",
+        "gwNN deben existir antes de las reglas; el switch no tiene ACL"
       ]
     }
   ]

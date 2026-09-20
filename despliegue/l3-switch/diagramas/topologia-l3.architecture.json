@@ -450,7 +450,7 @@
       "title": "Los PCs no enrutan",
       "items": [
         "PC-1 en access; PC-2 y PC-3 en trunk solo con sus VLANs",
-        "No enrutan ni filtran: solo macvlan por VLAN"
+        "No enrutan ni filtran: eth0.NN sin IP, solo macvlan"
       ]
     },
     {
