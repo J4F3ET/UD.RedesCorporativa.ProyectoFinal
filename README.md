@@ -27,17 +27,18 @@ diagramas/               # topología y flujo de datos (HTML interactivo, genera
 pruebas/
   smoke-test-3-pcs/      # arnés vigente: los 3 compose reales en un solo host
   software-un-host/      # HISTÓRICO, no ejecutar (evidencia de la primera ronda)
+despliegue/
+  README.md              # ¿switch L2 o L3? cómo saberlo y a qué receta ir
+  l3-switch/             # receta completa si el switch enruta (SVIs + ACL en el switch)
+  l2-fallback/           # receta completa si el switch solo conmuta (PC-3 enruta con nftables)
 scripts/
-  setup-vlans-pc2.sh                        # sub-interfaces 802.1Q en PC-2 (idempotente)
-  setup-vlans-pc3.sh                        # sub-interfaces 802.1Q en PC-3 (+ fallback L2 completo, idempotente)
-  firewall-pc3-matriz.sh                    # nftables con la matriz de segmentación (fallback switch L2)
   generar-certificados.sh                   # CA interna + certificado de LDAPS (636); lo ejecuta el deploy.sh de PC-3
   systemd/reserva-viva-pc{1,2,3}.service    # persistencia al reiniciar cada PC
 ```
 
 ## Puesta en marcha rápida
 
-Cada PC trae un `deploy.sh` que hace todo en el orden correcto (VLANs → firewall si aplica → `docker compose up -d`):
+**Antes que nada, averigua si el switch es L2 o L3** y sigue la receta que corresponda: [`despliegue/README.md`](despliegue/README.md). Cada PC trae un `deploy.sh` que hace todo en el orden correcto (VLANs → firewall si aplica → `docker compose up -d`):
 
 ```bash
 cd docker/pc1-medica && cp .env.example .env && nano .env && sudo ./deploy.sh
@@ -58,7 +59,7 @@ Detalle completo (incluida la instalación de los servicios systemd para que sob
 
 ## Pendientes clave
 
-- Confirmar con el laboratorio de la universidad si el switch soporta L3 (SVIs/ACLs) o es puramente L2 (define quién aplica la matriz de segmentación: el switch o PC-3 como router-on-a-stick).
+- Confirmar con el laboratorio de la universidad si el switch soporta L3 (SVIs/ACLs) o es puramente L2. Los dos caminos están preparados (`despliegue/l3-switch/` y `despliegue/l2-fallback/`); falta saber cuál aplica y probarlo con hardware real.
 - ~~Construir el Dockerfile propio de OpenVPMS~~ **Hecho** (`docker/pc1-medica/openvpms/Dockerfile`).
 - Cerrar por escrito en el informe el alcance de ERPNext (solo módulo HR) y la diferencia entre Pretix (backend web) y "PretixPOS".
 
