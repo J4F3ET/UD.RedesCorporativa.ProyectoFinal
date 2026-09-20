@@ -493,3 +493,56 @@ consumo de Pretix, no el de ERPNext, es el dominante en este arnés.
 - El login de ERPNext por navegador, y el acceso desde otro PC de la red.
 - `openvpms-app` y `pretix-web` funcionando (no responden a pruebas útiles en este estado).
 - El paquete offline (Fase 2), incluido el comportamiento de las referencias con digest sin red.
+
+## 11. Arreglos de healthcheck H1, H3 y H4 — SIN VALIDAR EN FRÍO (20/09/2026)
+
+**Estado: cambios escritos y comprobados solo por renderizado y por un experimento parcial. NO VERIFICADO: un arranque
+en frío (`docker compose down -v` + `up -d`) con estos cambios. Un re-arranque sobre volúmenes existentes no valida nada:
+en la ronda 6 `erpnext-db` pasó a `healthy` en segundos precisamente porque su volumen persistía.**
+
+| Defecto | Cambio (rama `fix/healthchecks-arranque-frio`) | Estado |
+|---|---|---|
+| H1 `erpnext-db` sin margen | `docker/pc3-administracion-infra/docker-compose.yml`: `start_period: 420s` (medido ≈ 300 s de inicialización con el datadir en `/mnt/d`) | Sin validar en frío |
+| H3 `pretix-web` sonda con Host `127.0.0.1` → 400 | `docker/pc2-operaciones/docker-compose.yml`: la sonda envía `Host: ${IP_PC2}` (`urllib.request.Request(..., headers={'Host': ...})`); no se tocan los hosts permitidos de Pretix | Sin validar en frío; `start_period` sin cambios (900 s) hasta medir el arranque real |
+| H4 `inventree-app` mismo patrón latente | ídem, `Host: ${IP_PC2}` | Sin validar en frío |
+
+`docker compose config` renderiza las tres sondas correctamente (con `IP_PC2=10.10.30.10`,
+`headers={'Host': '10.10.30.10'}`).
+
+### 11.1 Experimento previo: qué `Host` aceptan Pretix e InvenTree (volúmenes existentes)
+
+Solo `pretix-web` e `inventree-app` (con sus bases y Redis), volúmenes de la ronda 6. `ExecMainStartTimestamp` de
+`docker.service` = `16:57:29` al inicio y al final (16:57:29 → 16:59:59). Se pidió cada URL desde dentro del propio contenedor
+con `urllib` y un `Host` distinto. Salida literal:
+
+```
+--- esperando a que pretix-web responda (max ~4 min)
+pretix-web sin Host explicito: 400
+pretix-web Host=10.10.30.10 -> 200
+pretix-web Host=10.10.30.10:18082 -> 200
+pretix-web Host=10.10.30.10:80 -> 200
+pretix-web Host=localhost -> 200
+pretix-web Host=127.0.0.1:80 -> 400
+--- inventree-app
+inventree-app sin Host explicito: 200
+inventree-app Host=10.10.30.10 -> 200
+inventree-app Host=10.10.30.10:18083 -> 200
+inventree-app Host=10.10.30.10:8000 -> 200
+inventree-app Up About a minute (healthy)
+inventree-db Up 2 minutes
+pretix-db Up 2 minutes
+pretix-redis Up About a minute
+pretix-web Up About a minute (health: starting)
+```
+
+Confirma H3: Pretix devuelve 400 con el `Host` por defecto de la sonda (`127.0.0.1`) y 200 con `Host = IP_PC2`
+(con o sin puerto). InvenTree acepta ambos, así que H4 sigue siendo un riesgo latente, no un fallo actual. Límite: se
+comprobó el código HTTP con volúmenes ya inicializados, **no** el comportamiento del contenedor en un arranque en frío.
+
+### 11.2 Pendiente de esta sección
+
+- Arranque en frío (`down -v` + `up -d`) con EXIT 0 a la primera, 3 jobs en `Exited (0)`, todos los healthchecks en `healthy`
+  (incluido `pretix-web`) y `ldaplogin.py` con PASS: **NO VERIFICADO**.
+- Medir el tiempo real de arranque de Pretix para decidir si se puede reducir su `start_period` de 900 s: **NO VERIFICADO**
+  (se deja en 900 s).
+- Cierre del caso 4 de `ldaplogin.py` (`--persistencia`): **NO VERIFICADO**.

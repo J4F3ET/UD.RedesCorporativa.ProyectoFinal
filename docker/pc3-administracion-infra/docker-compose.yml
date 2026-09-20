@@ -55,6 +55,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 40
+      # La primera inicializacion de la base tarda ~5 min con el datadir sobre /mnt/d (medido); sin start_period
+      # el margen eran 200 s y compose abortaba el `up` con "erpnext-db is unhealthy". Los fallos dentro del
+      # periodo no cuentan y el primer exito lo cierra, asi que un valor holgado no retrasa el arranque.
+      start_period: 420s
     volumes:
       - erpnext_db_data:/var/lib/mysql
     networks:
