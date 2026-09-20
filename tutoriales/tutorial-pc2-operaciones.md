@@ -26,7 +26,7 @@ De aquí en adelante, cada bloque de texto gris es algo que debes **copiar y peg
 
 Docker es el programa que va a correr las aplicaciones. **En el laboratorio no hay Internet**, así que no se descarga aquí: se instala desde el paquete de la Fase 0.
 
-> **HUECO: comandos pendientes.** Los está preparando pepe (paquete offline con `docker save` / `docker load`). Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
+> **HUECO: comandos pendientes.** Los está preparando pepe (`docker save` / `docker load`). El USB de la Fase 0 lleva cuatro cosas: los paquetes de Docker para la versión exacta de Ubuntu Server, el proyecto entero, las imágenes de las aplicaciones y la de OpenVPMS ya construida. Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
 
 Al terminar, comprueba que quedó instalado:
 
@@ -40,7 +40,7 @@ Debe mostrar un número de versión.
 
 El proyecto no se descarga de GitHub (no hay Internet): llega dentro del paquete de la Fase 0.
 
-> **HUECO: comandos pendientes.** Los está preparando pepe (paquete offline con `docker save` / `docker load`). Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
+> **HUECO: comandos pendientes.** Los está preparando pepe (`docker save` / `docker load`). El USB de la Fase 0 lleva cuatro cosas: los paquetes de Docker para la versión exacta de Ubuntu Server, el proyecto entero, las imágenes de las aplicaciones y la de OpenVPMS ya construida. Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
 
 Cuando el proyecto esté en el PC, entra a la carpeta de este equipo:
 
@@ -72,6 +72,7 @@ Se abre un editor de texto simple. Vas a ver algo así:
 ```
 IFACE=eth0
 PERFIL=l3
+IP_GESTION=
 PRETIX_DB_PASSWORD=cambiar-esta-clave
 INVENTREE_DB_PASSWORD=cambiar-esta-clave
 INVENTREE_ADMIN_USER=admin
@@ -83,6 +84,7 @@ PRETIX_ADMIN_PASSWORD=cambiar-esta-clave
 
 - Si el nombre que anotaste en el Paso 5 **no** era `eth0`, bórralo y escribe el nombre correcto después del `=`.
 - `PERFIL`: pon `l3` o `l2`, **el mismo en los tres PCs**. Es el nombre de la receta del switch que el equipo técnico esté siguiendo: `l3` si usa la carpeta `despliegue/l3-switch/` y `l2` si usa `despliegue/l2-fallback/`. Si todavía nadie sabe cuál es, pregúntale al equipo técnico antes de encender: el archivo trae `l3` por defecto y solo sirve si el switch es de ese tipo.
+- `IP_GESTION`: una dirección propia de este PC, necesaria para copiarle el certificado de seguridad desde el PC-3 por la red (si no, hay que llevarlo en un USB). Pon `10.10.20.250` **o** `10.10.30.250`: **una sola, nunca las dos**. Si la pones en las dos redes, este PC empezaría a pasar tráfico entre ellas por sí mismo y se perdería justo lo que el laboratorio quiere demostrar (que ese paso lo decide el switch o el PC-3). El instalador se niega a seguir si la pones en las dos.
 - Cambia cada `cambiar-esta-clave` por una contraseña propia (sin espacios). Pueden ser distintas entre sí.
 - `INVENTREE_ADMIN_PASSWORD` y `PRETIX_ADMIN_PASSWORD` son las contraseñas con las que se entra a InvenTree y a Pretix por primera vez (usuario `admin` en InvenTree, y el correo `PRETIX_ADMIN_EMAIL` en Pretix). Anótalas en un lugar seguro. Los usuarios se crean solos: no hay que crear ningún administrador a mano.
 

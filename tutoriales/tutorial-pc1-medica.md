@@ -26,7 +26,7 @@ De aquí en adelante, cada bloque de texto gris es algo que debes **copiar y peg
 
 Docker es el programa que va a correr las aplicaciones. **En el laboratorio no hay Internet**, así que no se descarga aquí: se instala desde el paquete de la Fase 0.
 
-> **HUECO: comandos pendientes.** Los está preparando pepe (paquete offline con `docker save` / `docker load`). Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
+> **HUECO: comandos pendientes.** Los está preparando pepe (`docker save` / `docker load`). El USB de la Fase 0 lleva cuatro cosas: los paquetes de Docker para la versión exacta de Ubuntu Server, el proyecto entero, las imágenes de las aplicaciones y la de OpenVPMS ya construida. Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
 
 Al terminar, comprueba que quedó instalado:
 
@@ -40,7 +40,7 @@ Debe mostrar un número de versión.
 
 El proyecto no se descarga de GitHub (no hay Internet): llega dentro del paquete de la Fase 0.
 
-> **HUECO: comandos pendientes.** Los está preparando pepe (paquete offline con `docker save` / `docker load`). Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
+> **HUECO: comandos pendientes.** Los está preparando pepe (`docker save` / `docker load`). El USB de la Fase 0 lleva cuatro cosas: los paquetes de Docker para la versión exacta de Ubuntu Server, el proyecto entero, las imágenes de las aplicaciones y la de OpenVPMS ya construida. Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
 
 Cuando el proyecto esté en el PC, entra a la carpeta de este equipo:
 
@@ -72,6 +72,7 @@ Se abre un editor de texto simple. Vas a ver algo así:
 ```
 IFACE=eth0
 PERFIL=l3
+IP_GESTION=
 OPENVPMS_DB_ROOT_PASSWORD=cambiar-esta-clave
 OPENVPMS_DB_PASSWORD=cambiar-esta-clave-2
 OPENVPMS_ADMIN_PASSWORD=Cambiar-Clave-3!
@@ -79,6 +80,7 @@ OPENVPMS_ADMIN_PASSWORD=Cambiar-Clave-3!
 
 - Si el nombre que anotaste en el Paso 5 **no** era `eth0`, bórralo y escribe el nombre correcto después del `=`.
 - `PERFIL`: pon `l3` o `l2`, **el mismo en los tres PCs**. Es el nombre de la receta del switch que el equipo técnico esté siguiendo: `l3` si usa la carpeta `despliegue/l3-switch/` y `l2` si usa `despliegue/l2-fallback/`. Si todavía nadie sabe cuál es, pregúntale al equipo técnico antes de encender: el archivo trae `l3` por defecto y solo sirve si el switch es de ese tipo.
+- `IP_GESTION`: una dirección propia de este PC para poder hacerle `ping` o entrar por `ssh` cuando el equipo técnico lo necesite. Este PC **no** necesita el certificado, así que puedes dejarla **vacía** (`IP_GESTION=`). Si el equipo técnico te pide activarla, pon `10.10.10.250`.
 - Cambia las tres contraseñas (`cambiar-esta-clave...`) por otras que tú elijas, sin espacios. La última, `OPENVPMS_ADMIN_PASSWORD`, es la que se usa para entrar a OpenVPMS con el usuario `admin`: anótala en un lugar seguro. **Esta debe tener mínimo 8 caracteres, con mayúscula, minúscula, número y un carácter especial** (por ejemplo `!`); si no cumple, OpenVPMS se niega a arrancar y lo dice en el mensaje de error.
 
 Para guardar y salir: presiona `Ctrl` + `O`, luego `Enter`, luego `Ctrl` + `X`.

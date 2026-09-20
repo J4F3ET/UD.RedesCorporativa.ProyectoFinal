@@ -6,17 +6,22 @@ Usa esta receta si el switch tiene interfaces `VlanNN` con IP y enruta ([cómo s
 
 > **Estado: pendiente de hardware.** Nada de esto se ha ejecutado aún contra un switch real. Los tiempos de arranque de las aplicaciones son medidos (en un solo host, ver la sección de tiempos); los de configurar el switch y cablear no están medidos. Si algo no coincide con lo que dice aquí, anótalo: es información valiosa.
 
-> **OBLIGATORIO ANTES DE IR: el laboratorio NO tiene Internet** (confirmado por el usuario). Instalar necesita Internet: Docker, las imágenes de las aplicaciones y el build de OpenVPMS (~300 MB de descarga, una sola vez). **Sin la preparación previa no arranca nada.**
+> **OBLIGATORIO ANTES DE IR: el laboratorio NO tiene Internet** (confirmado por el usuario). Sin Internet no falta solo la descarga de imágenes: **faltan Docker mismo y el repositorio**. **Sin la preparación previa no arranca nada.**
 >
-> **Fase 0 — preparación previa (otro día, otra máquina, con Internet).** Se construye y se guarda todo en un paquete que se lleva al laboratorio: Docker instalado en los 3 PCs, todas las imágenes (incluida la de OpenVPMS, que hay que compilar antes) y el repositorio. En el laboratorio se carga ese paquete en cada PC antes del paso 3.
+> **Fase 0 — preparación previa (otro día, otra máquina, con Internet).** El USB (o disco) que se lleva al laboratorio debe contener **cuatro cosas**:
 >
-> **HUECO: comandos de la Fase 0 pendientes.** Los está construyendo pepe (paquete offline con `docker save`/`docker load`); hay una duda abierta sobre si las imágenes fijadas por digest sobreviven a `save`/`load`, y de la respuesta depende el procedimiento. Aquí irán los comandos cuando estén comprobados. **No improvises otro procedimiento.**
+> 1. Los paquetes `.deb` de **Docker Engine para la versión exacta de Ubuntu Server** que tengan los PCs (son específicos de la versión: llevar los equivocados es perder el día). **Pendiente: saber qué versión de Ubuntu tienen los PCs.**
+> 2. El **repositorio entero** del proyecto.
+> 3. Las **imágenes** de todas las aplicaciones, guardadas **por etiqueta** (nunca por digest: una imagen guardada como `repo@sha256:…` queda sin nombre al cargarla y Docker intenta descargarla).
+> 4. La imagen de **OpenVPMS ya construida** (~300 MB de descarga que hay que compilar antes, en la máquina con Internet).
+>
+> **HUECO: comandos de la Fase 0 pendientes.** Los está construyendo pepe (`docker save` / `docker load`). Se escribirán aquí cuando estén comprobados. **No improvises otro procedimiento.**
 
 ## Lo que necesitas antes de empezar
 
 - Los 3 PCs con Ubuntu Server, usuario con `sudo` y **sin Internet en el laboratorio**: todo lo que se instala llega en el paquete de la Fase 0 (recuadro de arriba).
 - El switch, su cable de consola y sus credenciales.
-- Un portátil con Linux y un cable de red (para las pruebas). Necesita `curl`, `dig`, `ldap-utils` y `ntpdate`.
+- Un portátil con Linux y un cable de red (para las pruebas). Necesita `curl`, `dig`, `ldap-utils` y `ntpdate`: instálalos **antes de ir**, con Internet, porque en el laboratorio no habrá.
 - Un puerto libre del switch para el portátil (le llamaremos **puerto de pruebas**).
 - Un USB (alternativa si `scp` no funciona, ver paso 5).
 - Los nombres reales de los puertos del switch de cada PC. Anótalos: `PUERTO-PC1`, `PUERTO-PC2`, `PUERTO-PC3`, `PUERTO-PRUEBAS`.
@@ -117,19 +122,21 @@ Si alguno sale `notconnect`, revisa el cable y el nombre del puerto.
 
 ## Paso 3 — Preparar los 3 PCs
 
-Repite esto en **cada PC**. Si ya tienen Docker y el repo, salta a "Crear el `.env`".
+Repite esto en **cada PC**.
 
-Instalar Docker. **En el laboratorio no hay Internet:** Docker y el repositorio llegan en el paquete de la Fase 0 (comandos pendientes, ver recuadro del inicio). El comando siguiente es el de la máquina **con Internet**, solo para saber qué se prepara; no lo ejecutes en el laboratorio:
-
-```
-curl -fsSL https://get.docker.com | sudo sh
-```
-
-Descargar el proyecto (igual: solo en la máquina con Internet; en el laboratorio el repositorio viene en el paquete):
+**En el laboratorio no hay Internet:** Docker y el repositorio no se descargan aquí. Llegan en el USB de la Fase 0 (recuadro del inicio; comandos pendientes). Cuando estén instalados, comprueba:
 
 ```
-git clone https://github.com/J4F3ET/UD.RedesCorporativaa.ProyectoFinak.git
+docker --version
 ```
+
+Esperado: muestra un número de versión.
+
+```
+ls UD.RedesCorporativaa.ProyectoFinak
+```
+
+Esperado: lista el contenido del proyecto (si el paquete lo dejó en otra ruta, usa esa en los `cd` de más abajo).
 
 Averiguar el nombre real de la tarjeta de red (no uses `lo`; suele ser `enp2s0`, `ens33`, `eth0`…):
 

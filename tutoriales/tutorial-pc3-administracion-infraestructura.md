@@ -27,7 +27,7 @@ De aquí en adelante, cada bloque de texto gris es algo que debes **copiar y peg
 
 Docker es el programa que va a correr las aplicaciones. **En el laboratorio no hay Internet**, así que no se descarga aquí: se instala desde el paquete de la Fase 0.
 
-> **HUECO: comandos pendientes.** Los está preparando pepe (paquete offline con `docker save` / `docker load`). Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
+> **HUECO: comandos pendientes.** Los está preparando pepe (`docker save` / `docker load`). El USB de la Fase 0 lleva cuatro cosas: los paquetes de Docker para la versión exacta de Ubuntu Server, el proyecto entero, las imágenes de las aplicaciones y la de OpenVPMS ya construida. Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
 
 Al terminar, comprueba que quedó instalado:
 
@@ -41,7 +41,7 @@ Debe mostrar un número de versión.
 
 El proyecto no se descarga de GitHub (no hay Internet): llega dentro del paquete de la Fase 0.
 
-> **HUECO: comandos pendientes.** Los está preparando pepe (paquete offline con `docker save` / `docker load`). Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
+> **HUECO: comandos pendientes.** Los está preparando pepe (`docker save` / `docker load`). El USB de la Fase 0 lleva cuatro cosas: los paquetes de Docker para la versión exacta de Ubuntu Server, el proyecto entero, las imágenes de las aplicaciones y la de OpenVPMS ya construida. Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
 
 Cuando el proyecto esté en el PC, entra a la carpeta de este equipo:
 
@@ -73,6 +73,7 @@ Se abre un editor de texto simple. Vas a ver algo así:
 ```
 IFACE=eth0
 PERFIL=l3
+IP_GESTION=
 LDAP_ADMIN_PASSWORD=cambiar-esta-clave
 ERPNEXT_DB_ROOT_PASSWORD=cambiar-esta-clave-db
 ERPNEXT_ADMIN_PASSWORD=cambiar-esta-clave-erp
@@ -81,6 +82,7 @@ ERPNEXT_SITE=rrhh.reservaviva.local
 
 - Si el nombre que anotaste en el Paso 5 **no** era `eth0`, bórralo y escribe el nombre correcto después del `=`.
 - `PERFIL`: pon `l3` o `l2`, **el mismo en los tres PCs**. Es el nombre de la receta del switch que el equipo técnico esté siguiendo: `l3` si usa la carpeta `despliegue/l3-switch/` y `l2` si usa `despliegue/l2-fallback/`. Si todavía nadie sabe cuál es, pregunta antes de seguir; `l3` (el valor que trae el archivo) solo sirve si el switch es L3.
+- `IP_GESTION`: una dirección propia de este PC para que los otros dos puedan copiarle el certificado. Si `PERFIL=l3`, pon `10.10.99.250`. Si `PERFIL=l2`, déjala **vacía** (`IP_GESTION=`): con ese perfil este PC ya se alcanza en `10.10.99.1`.
 - Cambia `cambiar-esta-clave` por una contraseña propia (sin espacios) — esta va a ser la contraseña de administrador del directorio de usuarios (LDAP) de todo el laboratorio, guárdala en un lugar seguro.
 - Cambia también `ERPNEXT_DB_ROOT_PASSWORD` (base de datos de ERPNext) y `ERPNEXT_ADMIN_PASSWORD`. Esta última es la contraseña del usuario `Administrator` con el que se entra a ERPNext; anótala. `ERPNEXT_SITE` déjalo como está. El sitio de ERPNext se crea solo.
 
