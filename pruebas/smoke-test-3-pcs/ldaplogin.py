@@ -13,10 +13,13 @@ Sale con codigo 0 solo si todos los casos ejecutados dan PASS.
 Casos:
   1. Login con usuario LDAP correcto        -> 200 (ERPNext) / 200 + token (InvenTree)
   2. Contrasena erronea                     -> rechazo (401/403; ERPNext devuelve 417)
-  3. ldapsearch por LDAPS con la CA         -> OK con verificacion completa; y FALLA sin la CA
+  3. ldapsearch por LDAPS con la CA         -> OK con verificacion completa (nombre ldap.reservaviva.local);
+                                               y FALLA con una CA ajena por "peer cert untrusted"
   4. Persistencia tras down sin -v + up -d  -> los casos 1-3 dan el mismo resultado
 Las peticiones HTTP se hacen con `docker exec` DENTRO de los contenedores de las apps (con macvlan/bridge
-el host no alcanza esas IP), y ldapsearch dentro de `openldap`.
+el host no alcanza esas IP). El ldapsearch corre en un contenedor efimero (imagen de openldap) unido a la
+red del arnes y con el DNS del laboratorio (dns-interno). Hay que ejecutarlo donde `docker` sea el cliente
+nativo (p. ej. dentro de WSL): `docker` como .cmd no lo resuelve subprocess sin shell.
 """
 import argparse, json, subprocess, sys, time
 from pathlib import Path
@@ -29,8 +32,11 @@ CA_EN_OPENLDAP = "/container/service/slapd/assets/certs/ca.crt"
 ERP_USER, ERP_PASS, ERP_OU = "rrhh.prueba", "Rrhh-Prueba1", "rrhh"
 INV_USER, INV_PASS, INV_OU = "logistica.prueba", "Oper-Prueba1", "operaciones"
 MALA = "clave-incorrecta-xyz"
-# Desde openldap: el certificado incluye SAN localhost, asi que la verificacion de nombre es real.
-LDAP_URI = "ldaps://localhost:636"
+# Nombre real del despliegue (pc2: INVENTREE_LDAP_SERVER_URI) y presente en el SAN del certificado.
+# NO usar ldaps://localhost: libldap canonicaliza el nombre al hostname del contenedor (p. ej.
+# 4f89b94c57b9), que no esta en el SAN, y la verificacion falla aunque LDAPS funcione (ver
+# docs/prueba-smoke-test-resultados.md, ejecucion de 2026-09-20).
+LDAP_URI = "ldaps://ldap.reservaviva.local:636"
 
 # Se ejecuta dentro del contenedor: imprime "<status> <cuerpo recortado>". Sin dependencias externas.
 HTTP_ERP = r"""
@@ -70,13 +76,33 @@ def http(contenedor, script, *args):
     return int(cod), resto
 
 
-def ldapsearch(usuario, ou, clave, con_ca=True):
+def _inspeccionar(contenedor, plantilla):
+    return sh(["docker", "inspect", contenedor, "--format", plantilla], timeout=30).stdout.strip()
+
+
+def ldapsearch(usuario, ou, clave, ca="real"):
+    """ca='real': CA del laboratorio (debe verificar). ca='ajena': una CA valida pero que no firmo el
+    certificado (debe fallar por 'peer cert untrusted', no por nombre ni por fichero ilegible)."""
     dn = f"uid={usuario},ou={ou},{BASE}"
-    env = ["-e", f"LDAPTLS_CACERT={CA_EN_OPENLDAP}"] if con_ca else ["-e", "LDAPTLS_CACERT=/nonexistent"]
-    cmd = ["docker", "exec", *env, "-e", "LDAPTLS_REQCERT=demand", "openldap", "ldapsearch", "-x", "-LLL",
-           "-H", LDAP_URI, "-D", dn, "-w", clave, "-b", dn, "-s", "base", "uid"]
-    r = sh(cmd, timeout=60)
-    return r.returncode, (r.stdout + r.stderr).strip()
+    imagen = _inspeccionar("openldap", "{{.Config.Image}}")
+    red = _inspeccionar("openldap", "{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}").split()[0]
+    dns = _inspeccionar("dns-interno", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}")
+    if ca == "real":
+        pre = f"export LDAPTLS_CACERT={CA_EN_OPENLDAP}"
+    else:
+        pre = ("openssl req -x509 -newkey rsa:2048 -nodes -keyout /dev/null -out /tmp/ajena.crt "
+               "-subj /CN=CA-ajena -days 1 >/dev/null 2>&1; export LDAPTLS_CACERT=/tmp/ajena.crt")
+    # Contenedor efimero con el DNS del laboratorio: ldap.reservaviva.local se resuelve como en produccion.
+    # --volumes-from openldap aporta el volumen de certificados (ca.crt).
+    cmd = ["docker", "run", "--rm", "--network", red, "--dns", dns, "--volumes-from", "openldap",
+           "--entrypoint", "", "-e", "LDAPTLS_REQCERT=demand", imagen, "sh", "-c",
+           f'{pre}; exec ldapsearch "$@"', "_", "-x", "-LLL", "-d1", "-H", LDAP_URI, "-D", dn, "-w", clave,
+           "-b", dn, "-s", "base", "uid"]
+    r = sh(cmd, timeout=120)
+    salida = r.stdout + r.stderr
+    # -d1 es muy verboso: se conservan las lineas utiles (resultado LDAP y errores TLS).
+    utiles = [l for l in salida.splitlines() if l.startswith(("uid:", "dn:", "TLS:", "ldap_bind", "ldap_sasl_bind"))]
+    return r.returncode, " | ".join(utiles)
 
 
 def caso1():
@@ -105,8 +131,9 @@ def caso3():
     res.append(("ldapsearch con CA (logistica.prueba)", rc == 0 and f"uid: {INV_USER}" in out, f"rc={rc} {out[-80:]}"))
     rc, out = ldapsearch(ERP_USER, ERP_OU, MALA)
     res.append(("ldapsearch clave erronea", rc == 49, f"rc={rc} (esperado 49 Invalid credentials)"))
-    rc, out = ldapsearch(ERP_USER, ERP_OU, ERP_PASS, con_ca=False)
-    res.append(("ldapsearch SIN la CA debe fallar", rc != 0, f"rc={rc} {out[-80:]}"))
+    rc, out = ldapsearch(ERP_USER, ERP_OU, ERP_PASS, ca="ajena")
+    res.append(("ldapsearch con CA ajena debe fallar por certificado no confiable",
+                rc != 0 and "untrusted" in out, f"rc={rc} {out[-100:]}"))
     return res
 
 
