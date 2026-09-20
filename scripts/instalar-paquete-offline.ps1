@@ -140,5 +140,5 @@ Ok "docker-compose.override.yml escrito en docker\$($carpetaPc.Name)"
 
 Paso 'Listo'
 Write-Host "Proyecto en: $Destino"
-Write-Host "Siguiente: el tutorial de este PC (despliegue en revision). Comprobacion sin red, en docker\$($carpetaPc.Name):"
+Write-Host "Siguiente: seguir docs/puesta-en-marcha-windows.md (los tutoriales de tutoriales/ NO aplican al laboratorio Windows). Comprobacion sin red, en docker\$($carpetaPc.Name):"
 Write-Host '   docker compose config --quiet; if ($?) { "compose-ok" }'
