@@ -1,0 +1,261 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Reserva Viva — Flujo de datos con switch L3",
+    "output": "flujo-l3.html",
+    "quality_profile": "showcase",
+    "viewBox": [
+      880,
+      500
+    ],
+    "views": [
+      {
+        "id": "permitido",
+        "label": "Camino permitido",
+        "focus": [
+          "vlan10",
+          "vlan2030",
+          "vlan40",
+          "switch",
+          "ldap",
+          "dns",
+          "ntp",
+          "permitido"
+        ],
+        "note": "Las 4 VLANs de negocio solo tienen permitido llegar a LDAP/LDAPS, DNS y NTP en VLAN99."
+      },
+      {
+        "id": "bloqueado",
+        "label": "Camino bloqueado",
+        "focus": [
+          "vlan10",
+          "vlan2030",
+          "vlan40",
+          "switch",
+          "bloqueado"
+        ],
+        "note": "Cualquier intento entre VLANs de negocio se descarta, incluso VLAN20 ↔ VLAN30 en el mismo PC."
+      },
+      {
+        "id": "hairpin",
+        "label": "Hairpin dentro de un PC",
+        "focus": [
+          "vlan2030",
+          "switch",
+          "bloqueado"
+        ],
+        "note": "VLAN20 y VLAN30 comparten PC-2, pero su tráfico mutuo sale al switch y muere en su ACL."
+      }
+    ]
+  },
+  "stages": [
+    {
+      "label": "Origen · VLANs de negocio"
+    },
+    {
+      "label": "Switch L3 · SVI + ACL"
+    },
+    {
+      "label": "VLAN 99 · Infraestructura"
+    },
+    {
+      "label": "Resultado"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "vlan10",
+      "type": "cloud",
+      "label": "PC-1 · VLAN10",
+      "sublabel": "Médica · OpenVPMS",
+      "tag": "puerto access",
+      "stage": 0,
+      "row": 0,
+      "width": 140
+    },
+    {
+      "id": "vlan2030",
+      "type": "cloud",
+      "label": "PC-2 · VLAN20+30",
+      "sublabel": "Taquilla + Logística",
+      "tag": "puerto trunk",
+      "stage": 0,
+      "row": 1,
+      "width": 140
+    },
+    {
+      "id": "vlan40",
+      "type": "cloud",
+      "label": "PC-3 · VLAN40",
+      "sublabel": "RRHH · ERPNext",
+      "tag": "puerto trunk",
+      "stage": 0,
+      "row": 2,
+      "width": 140
+    },
+    {
+      "id": "switch",
+      "type": "security",
+      "label": "Switch L3 / ACL",
+      "sublabel": "SVI .1 · aplica la matriz",
+      "tag": "enruta y filtra",
+      "stage": 1,
+      "row": 1,
+      "width": 140
+    },
+    {
+      "id": "ldap",
+      "type": "security",
+      "label": "OpenLDAP",
+      "sublabel": "10.10.99.10 · 389 y 636",
+      "tag": "CA interna",
+      "stage": 2,
+      "row": 0,
+      "width": 140
+    },
+    {
+      "id": "dns",
+      "type": "backend",
+      "label": "DNS bind9",
+      "sublabel": "10.10.99.11 · 53",
+      "tag": "reservaviva.local",
+      "stage": 2,
+      "row": 1,
+      "width": 140
+    },
+    {
+      "id": "ntp",
+      "type": "backend",
+      "label": "NTP interno",
+      "sublabel": "10.10.99.12 · 123",
+      "tag": "hora común",
+      "stage": 2,
+      "row": 2,
+      "width": 140
+    },
+    {
+      "id": "permitido",
+      "type": "backend",
+      "label": "Permitido",
+      "sublabel": "sesión, nombre y hora",
+      "tag": "fila VLAN99 de la matriz",
+      "stage": 3,
+      "row": 1,
+      "width": 140
+    },
+    {
+      "id": "bloqueado",
+      "type": "security",
+      "label": "Bloqueado",
+      "sublabel": "política DENY",
+      "tag": "sin respuesta",
+      "stage": 3,
+      "row": 2,
+      "width": 140
+    }
+  ],
+  "flows": [
+    {
+      "id": "uplink-vlan10",
+      "from": "vlan10",
+      "to": "switch",
+      "label": "access VLAN10",
+      "variant": "default"
+    },
+    {
+      "id": "uplink-vlan2030",
+      "from": "vlan2030",
+      "to": "switch",
+      "label": "VLAN20+30",
+      "variant": "emphasis",
+      "labelDy": 13
+    },
+    {
+      "id": "uplink-vlan40",
+      "from": "vlan40",
+      "to": "switch",
+      "label": "trunk VLAN40",
+      "variant": "default"
+    },
+    {
+      "id": "permitido-ldaps",
+      "from": "switch",
+      "to": "ldap",
+      "label": "LDAPS 636",
+      "variant": "security"
+    },
+    {
+      "id": "permitido-dns",
+      "from": "switch",
+      "to": "dns",
+      "label": "DNS 53",
+      "variant": "emphasis",
+      "labelDy": 13
+    },
+    {
+      "id": "permitido-ntp",
+      "from": "switch",
+      "to": "ntp",
+      "label": "NTP 123",
+      "variant": "default"
+    },
+    {
+      "id": "ldap-ok",
+      "from": "ldap",
+      "to": "permitido",
+      "label": "cadena verificada",
+      "variant": "security"
+    },
+    {
+      "id": "dns-ok",
+      "from": "dns",
+      "to": "permitido",
+      "label": "resolución",
+      "variant": "emphasis",
+      "labelDy": 13
+    },
+    {
+      "id": "ntp-ok",
+      "from": "ntp",
+      "to": "permitido",
+      "label": "sincronización",
+      "variant": "default"
+    },
+    {
+      "id": "denegado-cruzado",
+      "from": "switch",
+      "to": "bloqueado",
+      "label": "negocio ↔ negocio: descartado por ACL",
+      "variant": "dashed",
+      "route": "bottom-channel",
+      "channelY": 450
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Único destino permitido",
+      "items": [
+        "Cada VLAN de negocio (10/20/30/40) solo llega a VLAN99",
+        "Allí están LDAP (389 / LDAPS 636), bind9 (53) y NTP (123)"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Todo lo demás, bloqueado",
+      "items": [
+        "10↔20, 10↔30, 10↔40, 20↔30, 20↔40, 30↔40: denegado",
+        "VLAN20 y VLAN30 comparten PC-2, pero su tráfico muere en el ACL del switch"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Quién aplica la política",
+      "items": [
+        "El switch L3: SVI por VLAN + ACL propias",
+        "Los PCs no filtran ni enrutan nada"
+      ]
+    }
+  ]
+}
