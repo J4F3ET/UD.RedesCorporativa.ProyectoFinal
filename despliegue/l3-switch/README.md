@@ -45,9 +45,20 @@ Qué se configura:
 - Puerto de PC-2: **trunk** 802.1Q con VLAN 20 y 30.
 - Puerto de PC-3: **trunk** 802.1Q con VLAN 40 y 99.
 - Las ACL de la matriz: cada VLAN de negocio (10, 20, 30, 40) solo habla con VLAN 99; entre ellas, bloqueado; VLAN 99 solo responde.
-- Puerto de pruebas: **access**, empezando en VLAN 10.
+- La VLAN 999 sin uso, como VLAN nativa de los trunks.
+- El **puerto de pruebas** del portátil **no viene en el archivo**: lo añades tú justo después (ver abajo).
 
-Todo eso está escrito para Cisco IOS en `despliegue/l3-switch/switch/config-switch-l3.txt`. Ábrelo, cambia los nombres de puerto (`PUERTO-PC1`, etc.) por los reales, y pégalo en la consola dentro de `configure terminal`. Al inicio del archivo hay un aviso: léelo. Al terminar, guarda la configuración.
+Todo eso está escrito para Cisco IOS en `despliegue/l3-switch/switch/config-switch-l3.txt`. Ábrelo, cambia los nombres de puerto (`GigabitEthernet1/0/1`, `/2` y `/3` son solo **ejemplos**; el cableado propuesto es PC-1 → 1/0/1, PC-2 → 1/0/2, PC-3 → 1/0/3) por los reales (`show interfaces status` te los lista), y pégalo en la consola dentro de `configure terminal`. Al inicio del archivo hay un aviso: léelo. Al terminar, añade el puerto de pruebas (sustituye `PUERTO-PRUEBAS` por el puerto real; es un bloque de configuración, se pega entero):
+
+```
+interface PUERTO-PRUEBAS
+ switchport mode access
+ switchport access vlan 10
+ no shutdown
+end
+```
+
+Y guarda la configuración.
 
 ```
 write memory
@@ -59,7 +70,7 @@ write memory
 show vlan brief
 ```
 
-Esperado: VLAN 10, 20, 30, 40 y 99 activas.
+Esperado: VLAN 10, 20, 30, 40 y 99 activas (más la 999, sin uso).
 
 ```
 show ip interface brief
@@ -78,6 +89,8 @@ show access-lists
 ```
 
 Esperado: las ACL de la matriz, con sus contadores en 0.
+
+Más comandos de evidencia en `despliegue/l3-switch/switch/verificacion.md`.
 
 **Evidencia a guardar:** captura o texto de estos cuatro comandos.
 

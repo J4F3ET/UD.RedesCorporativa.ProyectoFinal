@@ -44,10 +44,21 @@ Aquí el switch **no** enruta ni filtra. Solo se configura:
 - Puerto de PC-1: **access** VLAN 10.
 - Puerto de PC-2: **trunk** 802.1Q con VLAN 20 y 30 (igual que en el perfil L3).
 - Puerto de PC-3: **trunk** 802.1Q con **las 5 VLANs: 10, 20, 30, 40 y 99**. Es la diferencia clave.
-- Puerto de pruebas: **access**, empezando en VLAN 10.
+- La VLAN 999 sin uso, como VLAN nativa de los trunks.
+- El **puerto de pruebas** del portátil **no viene en el archivo**: lo añades tú justo después (ver abajo).
 - **Sin** SVIs, **sin** `ip routing`, **sin** ACL.
 
-Todo eso está escrito para Cisco IOS en `despliegue/l2-fallback/switch/config-switch-l2.txt`. Ábrelo, cambia los nombres de puerto (`PUERTO-PC1`, etc.) por los reales, y pégalo en la consola dentro de `configure terminal`. Al inicio del archivo hay un aviso: léelo. Al terminar, guarda la configuración.
+Todo eso está escrito para Cisco IOS en `despliegue/l2-fallback/switch/config-switch-l2.txt`. Ábrelo, cambia los nombres de puerto (`GigabitEthernet1/0/1`, `/2` y `/3` son solo **ejemplos**; el cableado propuesto es PC-1 → 1/0/1, PC-2 → 1/0/2, PC-3 → 1/0/3) por los reales (`show interfaces status` te los lista), y pégalo en la consola dentro de `configure terminal`. Al inicio del archivo hay un aviso: léelo. Al terminar, añade el puerto de pruebas (sustituye `PUERTO-PRUEBAS` por el puerto real; es un bloque de configuración, se pega entero):
+
+```
+interface PUERTO-PRUEBAS
+ switchport mode access
+ switchport access vlan 10
+ no shutdown
+end
+```
+
+Y guarda la configuración.
 
 ```
 write memory
@@ -59,7 +70,7 @@ write memory
 show vlan brief
 ```
 
-Esperado: VLAN 10, 20, 30, 40 y 99 activas.
+Esperado: VLAN 10, 20, 30, 40 y 99 activas (más la 999, sin uso).
 
 ```
 show interfaces trunk
@@ -72,6 +83,8 @@ show ip interface brief
 ```
 
 Esperado: **ninguna** `Vlan10`…`Vlan99` con IP (como mucho `Vlan1` de gestión). Si aparecen, el switch es L3: cambia a [`../l3-switch/README.md`](../l3-switch/README.md).
+
+Más comandos de evidencia en `despliegue/l2-fallback/switch/verificacion.md`.
 
 **Evidencia a guardar:** captura o texto de estos tres comandos.
 
@@ -490,7 +503,7 @@ Esperado: servicio activo, contenedores `Up`, `ip_forward = 1` y la tabla `inet 
 | No hay ping a `10.10.N.1` desde el portátil | Puerto de pruebas en otra VLAN, o el trunk de PC-3 no permite la VLAN N (`show interfaces trunk`), o PC-3 apagado. |
 | Ni siquiera llega a VLAN 99 | `sysctl net.ipv4.ip_forward` en PC-3 debe dar `1`; revisa `sudo nft -a list ruleset`. |
 | Los `ping` entre VLANs de negocio **responden** (deberían fallar) | La tabla `inet reservaviva` no está cargada en PC-3. Repite `sudo ./deploy.sh` en PC-3. |
-| Todo se bloquea, incluso VLAN → 99 | Los contadores de `nft` te dicen qué regla corta. Para quitar el firewall y descartarlo: `sudo despliegue/l2-fallback/scripts/firewall-pc3-matriz.sh --quitar` (desde la raíz del repo); se vuelve a aplicar con `sudo ./deploy.sh`. |
+| Todo se bloquea, incluso VLAN → 99 | Los contadores de `nft` te dicen qué regla corta. No uses `--quitar` para "descartar" el firewall: también retira la regla de `DOCKER-USER` que deja pasar el tráfico entre VLANs, y el reenvío dejaría de funcionar. |
 | `ldapsearch` falla pero LDAP está `Up` | Confirma que estás en una VLAN 10/20/30/40 con ruta a `10.10.N.1` (PC-3) y que el trunk de PC-3 permite la 99. |
 | Una app da `Restarting` | Espera unos minutos si es primer arranque; luego `docker compose logs NOMBRE-SERVICIO`. |
 | El PC no ve sus propios contenedores | Es normal con `macvlan`: prueba desde el portátil. |
