@@ -1,5 +1,7 @@
 # Receta L3 — el switch enruta y aplica la matriz
 
+> **Documento de diseño: no aplica al laboratorio Windows.** Los PCs del laboratorio son Windows con Docker Desktop, que no permite VLAN 802.1Q ni `macvlan` sobre la tarjeta de red. Este documento describe el diseño de red propuesto (switch con VLANs, PCs Linux): su lógica se validó por simulación (`despliegue/l3-switch/pruebas/`), no sobre un switch real. No sigas estos pasos tal cual en el laboratorio: la guía para Windows está en preparación. Para saber qué está validado y cómo, ver el [README raíz](../../README.md#estado-de-validación).
+
 Usa esta receta si el switch tiene interfaces `VlanNN` con IP y enruta ([cómo saberlo](../README.md)). Síguela de arriba abajo. En cada paso hay una comprobación: **no pases al siguiente hasta que la tuya dé el resultado esperado.**
 
 **Idea en una línea:** el switch es el router. Cada VLAN tiene su gateway `10.10.X.1` en el switch (una SVI) y las ACL de la matriz viven ahí. Los PCs solo crean sus VLANs y no enrutan nada.

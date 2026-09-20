@@ -1,5 +1,7 @@
 # ¿Switch L2 o L3? Averígualo y sigue una sola receta
 
+> **Documento de diseño: no aplica al laboratorio Windows.** Los PCs del laboratorio son Windows con Docker Desktop, que no permite VLAN 802.1Q ni `macvlan` sobre la tarjeta de red. Este documento describe el diseño de red propuesto (switch con VLANs, PCs Linux): su lógica se validó por simulación (`despliegue/*/pruebas/`), no sobre un switch real. No sigas estos pasos tal cual en el laboratorio: la guía para Windows está en preparación. Para saber qué está validado y cómo, ver el [README raíz](../README.md#estado-de-validación).
+
 Tienes dos recetas listas. Cuál te toca depende del switch del laboratorio. Nadie ha confirmado todavía cuál es: esta página te dice cómo saberlo en un minuto.
 
 ## Paso 1 — Entra a la consola del switch

@@ -1,5 +1,7 @@
 # Tutorial PC-1 — Servidor Médico (Unidad Médica Veterinaria)
 
+> **Documento de diseño: no aplica al laboratorio Windows.** Los PCs del laboratorio son Windows con Docker Desktop, que no permite VLAN 802.1Q ni `macvlan` sobre la tarjeta de red. Este documento describe el diseño de red propuesto (switch con VLANs, PCs Linux): su lógica se validó por simulación (`despliegue/*/pruebas/`), no sobre un switch real. No sigas estos pasos tal cual en el laboratorio: la guía para Windows está en preparación. Para saber qué está validado y cómo, ver el [README raíz](../README.md#estado-de-validación).
+
 Este computador va a correr **OpenVPMS**, el programa de historias clínicas de los animales. No necesitas saber nada de redes ni de programación para seguir estos pasos: solo copiar y pegar los comandos exactamente como aparecen.
 
 ## Antes de empezar
