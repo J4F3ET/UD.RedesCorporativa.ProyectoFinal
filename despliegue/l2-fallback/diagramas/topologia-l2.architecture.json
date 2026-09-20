@@ -1,0 +1,467 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Reserva Viva — Topología con switch L2 (PC-3 enruta)",
+    "output": "topologia-l2.html",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1390,
+      500
+    ],
+    "views": [
+      {
+        "id": "topologia-completa",
+        "label": "Topología completa",
+        "focus": [
+          "switch",
+          "openvpms-app",
+          "openvpms-db",
+          "pretix-web",
+          "pretix-db",
+          "pretix-redis",
+          "inventree-app",
+          "inventree-db",
+          "inventree-worker",
+          "erpnext-hr",
+          "pc3-router",
+          "pc3-subifs",
+          "openldap",
+          "dns-interno",
+          "ntp-interno"
+        ],
+        "note": "El switch solo conmuta. PC-3 recibe las 5 VLANs por su trunk y enruta la matriz entera."
+      },
+      {
+        "id": "pc3-router",
+        "label": "PC-3: el que enruta",
+        "focus": [
+          "switch",
+          "pc3-router",
+          "pc3-subifs",
+          "erpnext-hr",
+          "openldap",
+          "dns-interno",
+          "ntp-interno"
+        ],
+        "note": "Trunk de 5 VLANs, tres sub-interfaces extra (.10/.20/.30) solo para enrutar, ip_forward y reglas nftables."
+      },
+      {
+        "id": "pc2-operaciones",
+        "label": "PC-2: Taquilla + Logística",
+        "focus": [
+          "switch",
+          "pretix-web",
+          "pretix-db",
+          "pretix-redis",
+          "inventree-app",
+          "inventree-db",
+          "inventree-worker"
+        ],
+        "note": "Sin cambios respecto a L3: trunk con VLAN 20 y 30. Su gateway ahora es PC-3, no el switch."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "switch",
+      "type": "cloud",
+      "label": "Switch L2 · conmuta",
+      "sublabel": "sin IP · no enruta",
+      "tag": "802.1Q",
+      "pos": [
+        576,
+        10
+      ],
+      "size": [
+        224,
+        60
+      ]
+    },
+    {
+      "id": "openvpms-app",
+      "type": "backend",
+      "label": "OpenVPMS",
+      "sublabel": "VLAN10 · 10.10.10.10:8080",
+      "tag": "Tomcat 9 · build local",
+      "pos": [
+        30,
+        150
+      ],
+      "size": [
+        184,
+        58
+      ]
+    },
+    {
+      "id": "openvpms-db",
+      "type": "database",
+      "label": "MySQL 8.0",
+      "sublabel": "VLAN10 · 10.10.10.11",
+      "tag": "openvpms-db",
+      "pos": [
+        30,
+        262
+      ],
+      "size": [
+        184,
+        58
+      ]
+    },
+    {
+      "id": "pretix-web",
+      "type": "backend",
+      "label": "Pretix",
+      "sublabel": "VLAN20 · .20.10:80",
+      "tag": "pretix/standalone",
+      "pos": [
+        322,
+        150
+      ],
+      "size": [
+        178,
+        58
+      ]
+    },
+    {
+      "id": "pretix-db",
+      "type": "database",
+      "label": "Postgres 15",
+      "sublabel": "VLAN20 · .20.11",
+      "tag": "pretix-db",
+      "pos": [
+        292,
+        262
+      ],
+      "size": [
+        124,
+        58
+      ]
+    },
+    {
+      "id": "pretix-redis",
+      "type": "database",
+      "label": "Redis 7",
+      "sublabel": "VLAN20 · .20.12",
+      "tag": "pretix-redis",
+      "pos": [
+        436,
+        262
+      ],
+      "size": [
+        124,
+        58
+      ]
+    },
+    {
+      "id": "inventree-app",
+      "type": "backend",
+      "label": "InvenTree",
+      "sublabel": "VLAN30 · .30.10:8000",
+      "tag": "inventree/inventree",
+      "pos": [
+        628,
+        150
+      ],
+      "size": [
+        178,
+        58
+      ]
+    },
+    {
+      "id": "inventree-db",
+      "type": "database",
+      "label": "Postgres 15",
+      "sublabel": "VLAN30 · .30.11",
+      "tag": "inventree-db",
+      "pos": [
+        596,
+        262
+      ],
+      "size": [
+        124,
+        58
+      ]
+    },
+    {
+      "id": "inventree-worker",
+      "type": "backend",
+      "label": "InvenTree worker",
+      "sublabel": "VLAN30 · .30.12",
+      "tag": "invoke worker",
+      "pos": [
+        740,
+        262
+      ],
+      "size": [
+        136,
+        58
+      ]
+    },
+    {
+      "id": "erpnext-hr",
+      "type": "frontend",
+      "label": "ERPNext HR",
+      "sublabel": "VLAN40 · .40.10:8080",
+      "tag": "12 servicios",
+      "pos": [
+        962,
+        150
+      ],
+      "size": [
+        172,
+        58
+      ]
+    },
+    {
+      "id": "openldap",
+      "type": "security",
+      "label": "OpenLDAP",
+      "sublabel": "VLAN99 · 10.10.99.10",
+      "tag": "389 + LDAPS 636",
+      "pos": [
+        1174,
+        150
+      ],
+      "size": [
+        172,
+        58
+      ]
+    },
+    {
+      "id": "dns-interno",
+      "type": "security",
+      "label": "DNS interno",
+      "sublabel": "VLAN99 · .99.11:53",
+      "tag": "bind9 9.18",
+      "pos": [
+        1174,
+        262
+      ],
+      "size": [
+        172,
+        58
+      ]
+    },
+    {
+      "id": "ntp-interno",
+      "type": "security",
+      "label": "NTP interno",
+      "sublabel": "VLAN99 · .99.12:123",
+      "tag": "cturra/ntp",
+      "pos": [
+        1174,
+        374
+      ],
+      "size": [
+        172,
+        58
+      ]
+    },
+    {
+      "id": "pc3-router",
+      "type": "security",
+      "label": "PC-3 · router",
+      "sublabel": "ip_forward + nftables",
+      "tag": "política aquí",
+      "pos": [
+        962,
+        262
+      ],
+      "size": [
+        172,
+        58
+      ]
+    },
+    {
+      "id": "pc3-subifs",
+      "type": "backend",
+      "label": "eth0.10 .20 .30",
+      "sublabel": "gateway .1 · sin contenedor",
+      "tag": "solo enrutan",
+      "pos": [
+        962,
+        374
+      ],
+      "size": [
+        172,
+        58
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "PC-1 · Servidor Médico · puerto ACCESS",
+      "wraps": [
+        "openvpms-app",
+        "openvpms-db"
+      ],
+      "pad": 26
+    },
+    {
+      "kind": "region",
+      "label": "PC-2 · Operaciones · TRUNK (VLAN 20+30)",
+      "wraps": [
+        "pretix-web",
+        "pretix-db",
+        "pretix-redis",
+        "inventree-app",
+        "inventree-db",
+        "inventree-worker"
+      ],
+      "pad": 26
+    },
+    {
+      "kind": "region",
+      "label": "PC-3 · Router-on-a-stick · TRUNK (5 VLANs)",
+      "wraps": [
+        "erpnext-hr",
+        "pc3-router",
+        "pc3-subifs",
+        "openldap",
+        "dns-interno",
+        "ntp-interno"
+      ],
+      "pad": 26
+    }
+  ],
+  "connections": [
+    {
+      "id": "switch-vlan10",
+      "from": "switch",
+      "to": "openvpms-app",
+      "label": "ACCESS · VLAN10",
+      "variant": "emphasis"
+    },
+    {
+      "id": "switch-vlan20",
+      "from": "switch",
+      "to": "pretix-web",
+      "label": "TRUNK · VLAN20",
+      "variant": "emphasis"
+    },
+    {
+      "id": "switch-vlan30",
+      "from": "switch",
+      "to": "inventree-app",
+      "label": "TRUNK · VLAN30",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "openvpms-sql",
+      "from": "openvpms-app",
+      "to": "openvpms-db",
+      "label": "MySQL :3306",
+      "labelDy": 24
+    },
+    {
+      "id": "pretix-sql",
+      "from": "pretix-web",
+      "to": "pretix-db",
+      "label": "PostgreSQL :5432",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "pretix-cache",
+      "from": "pretix-web",
+      "to": "pretix-redis",
+      "label": "cache + Celery",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "inventree-sql",
+      "from": "inventree-app",
+      "to": "inventree-db",
+      "label": "PostgreSQL :5432",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "inventree-jobs",
+      "from": "inventree-app",
+      "to": "inventree-worker",
+      "label": "cola de tareas",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "switch-pc3",
+      "from": "switch",
+      "to": "pc3-router",
+      "label": "TRUNK · 10/20/30/40/99",
+      "variant": "emphasis",
+      "toSide": "left"
+    },
+    {
+      "id": "pc3-vlan40",
+      "from": "pc3-router",
+      "to": "erpnext-hr",
+      "label": "VLAN40 · macvlan",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelDy": -24
+    },
+    {
+      "id": "pc3-vlan99",
+      "from": "pc3-router",
+      "to": "dns-interno",
+      "label": "VLAN99",
+      "labelDy": -16
+    },
+    {
+      "id": "pc3-gateways",
+      "from": "pc3-router",
+      "to": "pc3-subifs",
+      "label": "gateway de 10/20/30",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "El switch no enruta",
+      "items": [
+        "Sin IP ni SVI: solo conmuta tramas 802.1Q",
+        "El gateway de cada VLAN (.1) es PC-3"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "PC-3 hace de router",
+      "items": [
+        "Trunk de 5 VLANs; sub-interfaces .10/.20/.30 extra",
+        "ip_forward y matriz con nftables (policy drop)"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "PC-1 y PC-2 sin cambios",
+      "items": [
+        "Mismos puertos y VLANs que con L3",
+        "Solo apuntan a PC-3 como gateway"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "VLAN 99 transversal",
+      "items": [
+        "OpenLDAP (389 y 636), bind9 (53) y NTP (123)",
+        "Alcanzables desde cada VLAN a través de PC-3"
+      ]
+    }
+  ]
+}
