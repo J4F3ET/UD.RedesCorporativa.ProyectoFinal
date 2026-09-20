@@ -30,6 +30,17 @@ services:
       MYSQL_ROOT_PASSWORD: ${OPENVPMS_DB_ROOT_PASSWORD}
       # No se define MYSQL_DATABASE: `toolbox database --create` de OpenVPMS crea la base y su usuario.
     command: ["--character-set-server=utf8mb4", "--max_allowed_packet=16M", "--innodb_file_per_table=1", "--innodb_buffer_pool_size=512M"]
+    # Antes PC-1 no tenía ningún healthcheck, y por eso un bucle de reinicios de openvpms-app pasó por "Up".
+    # Se sonda por TCP (127.0.0.1), no por el socket: durante el primer arranque MySQL 8 levanta un servidor temporal sin
+    # red para inicializar el directorio de datos, y solo cuando escucha el definitivo responde el ping. start_period 180 s
+    # = la espera máxima del entrypoint de openvpms-app (90 intentos x 2 s): no tiene sentido darle menos margen que el
+    # que el propio consumidor tolera. El tiempo real del primer arranque de este MySQL NO está medido.
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
     volumes:
       - openvpms_db_data:/var/lib/mysql
     networks:
@@ -40,8 +51,23 @@ services:
     build: ./openvpms
     container_name: openvpms-app
     restart: unless-stopped
+    # El entrypoint ya espera a MySQL hasta 180 s; `service_healthy` hace explícita la dependencia y evita arrancar la app
+    # (y sus reintentos) antes de que la base acepte conexiones.
     depends_on:
-      - openvpms-db
+      openvpms-db:
+        condition: service_healthy
+    # Tomcat solo arranca cuando TODA la inicialización terminó, así que "healthy" significa que /openvpms/login responde.
+    # `curl -f` falla con cualquier HTTP >= 400. start_period 900 s: el primer arranque (esquema, datos base, clave de admin,
+    # plantillas, generar el WAR y desplegarlo) se midió en ~5 min en las rondas 3 y 4 del smoke test, aisladas; se triplica
+    # el margen porque con el arnés completo y memoria justa otros servicios del mismo host tardaron 1,5-2x más de lo esperado
+    # (erpnext-create-site ~9 min, MariaDB ~5 min). Los fallos dentro del periodo no cuentan y el primer éxito lo cierra.
+    # Un contenedor en bucle de reinicios nunca llega a healthy: pasado el periodo queda unhealthy, ya no pasa por "Up".
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/openvpms/login"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 900s
     environment:
       OPENVPMS_DB_HOST: ${NET_MEDICA:-10.10.10}.11
       OPENVPMS_DB_ROOT_PASSWORD: ${OPENVPMS_DB_ROOT_PASSWORD}

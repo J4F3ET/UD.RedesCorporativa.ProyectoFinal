@@ -27,7 +27,8 @@ RUN curl -fsSL -o "${OPENVPMS_HOME}/lib/mysql-connector-j-${CONNECTOR_VERSION}.j
       "https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/${CONNECTOR_VERSION}/mysql-connector-j-${CONNECTOR_VERSION}.jar" \
  && cp "${OPENVPMS_HOME}/lib/mysql-connector-j-${CONNECTOR_VERSION}.jar" "${CATALINA_HOME}/lib/"
 
-COPY entrypoint.sh /entrypoint.sh
+# init-lib.sh: lógica de inicialización reanudable que entrypoint.sh carga con `source` (probada por test-reanudable.sh).
+COPY entrypoint.sh init-lib.sh /
 RUN chmod +x /entrypoint.sh
 
 # Recomendación oficial: al menos 1 GB de heap para Tomcat.
