@@ -115,18 +115,25 @@ services:
       erpnext-redis-queue:
         condition: service_started
     entrypoint: ["bash", "-c"]
+    # "bench new-site" deja el scheduler APAGADO (System Settings.enable_scheduler = 0, imprime "*** Scheduler is disabled ***"):
+    # comprueba si esta activo antes de que exista el sitio (frappe/installer.py:83), falla, y al terminar hace
+    # toggle_scheduler(False) (installer.py:119). Sin scheduler, erpnext-scheduler queda "Up" pero no encola nada (ni correos
+    # ni recordatorios). Por eso se activa explicitamente. "enable-scheduler" va FUERA del if de la guarda, y no dentro de la
+    # rama de creacion, para que tambien se ejecute cuando el sitio ya existia (volumen anterior con el scheduler a 0);
+    # es idempotente, asi que ejecutarlo siempre es seguro. Si new-site falla se sale con error antes de llegar a el.
     command:
       - |
         if [ -f "sites/$$SITE/site_config.json" ]; then
-          echo "El sitio $$SITE ya existe; nada que hacer."
-          exit 0
+          echo "El sitio $$SITE ya existe; solo se asegura el scheduler."
+        else
+          bench new-site "$$SITE" \
+            --mariadb-user-host-login-scope='%' \
+            --db-root-password "$$DB_ROOT_PASSWORD" \
+            --admin-password "$$ADMIN_PASSWORD" \
+            --install-app erpnext \
+            --set-default || exit 1
         fi
-        bench new-site "$$SITE" \
-          --mariadb-user-host-login-scope='%' \
-          --db-root-password "$$DB_ROOT_PASSWORD" \
-          --admin-password "$$ADMIN_PASSWORD" \
-          --install-app erpnext \
-          --set-default
+        bench --site "$$SITE" enable-scheduler
     environment:
       SITE: ${ERPNEXT_SITE:-rrhh.reservaviva.local}
       DB_ROOT_PASSWORD: ${ERPNEXT_DB_ROOT_PASSWORD}
