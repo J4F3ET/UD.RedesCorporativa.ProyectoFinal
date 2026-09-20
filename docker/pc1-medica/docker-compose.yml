@@ -45,8 +45,8 @@ services:
       OPENVPMS_DB_PASSWORD: ${OPENVPMS_DB_PASSWORD}
       OPENVPMS_ADMIN_PASSWORD: ${OPENVPMS_ADMIN_PASSWORD}
       LDAP_HOST: 10.10.99.10     # OpenLDAP en PC-3, VLAN99
-      DNS_HOST: 10.10.99.10
-      NTP_HOST: 10.10.99.10
+      DNS_HOST: 10.10.99.11     # bind9 en PC-3
+      NTP_HOST: 10.10.99.12     # ntp en PC-3
     volumes:
       - openvpms_state:/var/lib/openvpms-state   # openvpms.properties (incluye la clave de cifrado)
     networks:
