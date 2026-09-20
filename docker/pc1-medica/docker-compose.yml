@@ -1,6 +1,11 @@
 # PC-1 — Servidor Médico
 # Departamento: Unidad Médica Veterinaria (OpenVPMS)
-# Puerto de switch: ACCESS en VLAN 10 (10.10.10.0/24)
+#
+# DESPLIEGUE OFICIAL: Windows + Docker Desktop (WSL2), red bridge. NO hay VLAN ni macvlan; los scripts de VLAN
+# (scripts/setup-vlans-*.sh, firewall-pc3-matriz.sh) son solo anexo de diseño. Ver docs/despliegue-windows-docker-desktop.md.
+# La red 10.10.10.0/24 es un bridge LOCAL de este motor Docker: no la ve ningún otro PC. Otros equipos acceden por la
+# IP LAN de este PC y el puerto publicado (OPENVPMS_PORT); para hablar con PC-3 se usa su IP LAN (IP_PC3, en .env).
+# NO VERIFICADO: adaptación escrita sin poder ejecutarla (Docker no estaba disponible).
 #
 # OpenVPMS no tiene imagen Docker oficial: `docker compose up -d` construye openvpms/Dockerfile
 # (Tomcat 9 + Java 11 + release oficial 2.4.0.1). El build descarga ~300 MB y necesita Internet
@@ -8,15 +13,13 @@
 # (`docker save` / `docker load`). El primer arranque crea el esquema y carga los datos base solo.
 
 networks:
+  # Bridge local. NET_MEDICA solo cambia si 10.10.10.x choca con la LAN del laboratorio (ver .env.example).
   vlan10_medica:
-    driver: macvlan
-    driver_opts:
-      parent: ${IFACE:-eth0}   # nombre de la tarjeta de red de PC-1 (definido en .env), conectada en modo access a VLAN10
+    driver: bridge
     ipam:
       config:
-        - subnet: 10.10.10.0/24
-          gateway: 10.10.10.1
-          ip_range: 10.10.10.0/28   # rango reservado para contenedores (.1-.14)
+        - subnet: ${NET_MEDICA:-10.10.10}.0/24
+          gateway: ${NET_MEDICA:-10.10.10}.1
 
 services:
   openvpms-db:
@@ -31,7 +34,7 @@ services:
       - openvpms_db_data:/var/lib/mysql
     networks:
       vlan10_medica:
-        ipv4_address: 10.10.10.11
+        ipv4_address: ${NET_MEDICA:-10.10.10}.11
 
   openvpms-app:
     build: ./openvpms
@@ -40,18 +43,23 @@ services:
     depends_on:
       - openvpms-db
     environment:
-      OPENVPMS_DB_HOST: 10.10.10.11
+      OPENVPMS_DB_HOST: ${NET_MEDICA:-10.10.10}.11
       OPENVPMS_DB_ROOT_PASSWORD: ${OPENVPMS_DB_ROOT_PASSWORD}
       OPENVPMS_DB_PASSWORD: ${OPENVPMS_DB_PASSWORD}
       OPENVPMS_ADMIN_PASSWORD: ${OPENVPMS_ADMIN_PASSWORD}
-      LDAP_HOST: 10.10.99.10     # OpenLDAP en PC-3, VLAN99
-      DNS_HOST: 10.10.99.11     # bind9 en PC-3
-      NTP_HOST: 10.10.99.12     # ntp en PC-3
+      # Variables informativas: OpenVPMS 2.4.0.1 no tiene soporte LDAP y nada en el repo las lee. OpenLDAP, bind9 y
+      # ntp viven en PC-3 (389/636, 53 y 123/udp publicados en su IP LAN); las tres se alcanzan por IP_PC3.
+      LDAP_HOST: ${IP_PC3:?definir IP_PC3 (IP LAN de PC-3) en .env}
+      DNS_HOST: ${IP_PC3}
+      NTP_HOST: ${IP_PC3}
     volumes:
       - openvpms_state:/var/lib/openvpms-state   # openvpms.properties (incluye la clave de cifrado)
     networks:
       vlan10_medica:
-        ipv4_address: 10.10.10.10
+        ipv4_address: ${NET_MEDICA:-10.10.10}.10
+    # Accesible desde otros equipos de la LAN: http://<IP LAN de PC-1>:${OPENVPMS_PORT:-8080}/openvpms
+    ports:
+      - "${PUBLISH_IP:-0.0.0.0}:${OPENVPMS_PORT:-8080}:8080"
 
 volumes:
   openvpms_db_data:
