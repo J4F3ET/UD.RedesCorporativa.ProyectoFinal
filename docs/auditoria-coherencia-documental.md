@@ -18,7 +18,7 @@
 
 | # | Fichero:línea | Qué dice | Qué dice la realidad | Evidencia (fichero:línea) | Gravedad |
 |---|---|---|---|---|---|
-| B1 | `despliegue/l2-fallback/diagramas/flujo-l2.dataflow.json:40,168,279`; `…/topologia-l2.architecture.json:447`; los HTML generados `flujo-l2.html:5088,5299,5300,5309,5592` y `topologia-l2.html:5643` | PC-3 aplica «nftables (**policy drop**)»; el nodo de PC-3 lleva la etiqueta «policy drop»; «el forward de PC-3 cae en policy drop». | La cadena es `policy accept` con 12 `drop` explícitos con contador (una por pareja de VLAN de negocio, en los dos sentidos). Con `policy accept`, una interfaz `gwNN` mal casada deja pasar tráfico prohibido **sin avisar**: por eso importa. | `despliegue/l2-fallback/scripts/firewall-pc3-matriz.sh:5-7` (cabecera) y `:65` (`policy accept;`); bucle de 4×3 = 12 reglas en `:67-72`. | **Bloqueante** (diagrama que se enseña en la sustentación y contradice al script) |
+| B1 | `despliegue/l2-fallback/diagramas/flujo-l2.dataflow.json:40,168,279`; `…/topologia-l2.architecture.json:447`; los HTML generados `flujo-l2.html:5088,5299,5300,5309,5592` y `topologia-l2.html:5643` | PC-3 aplica «nftables (**policy drop**)»; el nodo de PC-3 lleva la etiqueta «policy drop»; «el forward de PC-3 cae en policy drop». | La cadena es `policy accept` con 12 `drop` explícitos con contador (una por pareja de VLAN de negocio, en los dos sentidos). Con `policy accept`, una interfaz `gwNN` mal casada deja pasar tráfico prohibido **sin avisar**: por eso importa. | `despliegue/l2-fallback/scripts/firewall-pc3-matriz.sh:5-7` (cabecera) y `:65` (`policy accept;`); bucle de 4×3 = 12 reglas en `:67-72`. | **Bloqueante** en master; **ya corregido en el PR #15** (rama docs/diagramas-perfiles-correcciones, sin fusionar): se cierra al fusionarlo. No corregirlo dos veces. |
 | B2 | `despliegue/l2-fallback/README.md:228`; `despliegue/l3-switch/README.md:223`; `tutoriales/tutorial-pc3-administracion-infraestructura.md:116-118` | En PC-3 «todo `Up`, salvo `erpnext-configurator` y `erpnext-create-site`, que deben decir `Exited (0)`». El tutorial añade: si alguna dice `Exited`, ir a «Si algo sale mal» y avisar al equipo técnico. | Hay **tres** jobs de una sola ejecución con `restart: "no"`: `erpnext-configurator`, `erpnext-create-site` y **`erpnext-ldap-config`**. Este último terminará en `Exited (0)` y quien siga la receta lo verá como fallo. También `docs/prueba-smoke-test-resultados.md:59` y `:130` hablan de «2 que terminan por diseño». | `docker/pc3-administracion-infra/docker-compose.yml:85` (configurator), `:107` (create-site), `:139-142` (ldap-config, `restart: "no"`). | **Bloqueante** (falsa alarma a un operador no técnico en el paso de verificación de PC-3) |
 | B3 | `despliegue/README.md:81-82`; `despliegue/l2-fallback/README.md:15-18`; `despliegue/l3-switch/README.md:15-16`; `tutoriales/tutorial-pc1-medica.md:94-96` | Las imágenes se guardan **por etiqueta, nunca por digest** («si no, Docker intenta descargarla») y la de OpenVPMS «llega ya construida». `deploy.sh` «no descarga ni construye nada». | Los compose referencian **todas** las imágenes como `nombre:etiqueta@sha256:…`: una imagen cargada con `docker load` por etiqueta puede no satisfacer esa referencia y Docker intentaría descargarla (**no verificado: Docker está caído**). Además `openvpms-app` no tiene `image:`, solo `build: ./openvpms`; `docker compose up -d` lo construye si no encuentra la imagen del proyecto, y el Dockerfile hace `apt-get` y `curl`. Sin Internet, ambos casos fallan en el laboratorio. | `docker/pc1-medica/docker-compose.yml:23` (digest), `:37` (`build:` sin `image:`); `docker/pc2-operaciones/docker-compose.yml:32,46,56,87,101,153`; `docker/pc3-administracion-infra/docker-compose.yml:46,66,73,83,291,323,334`; `docker/pc1-medica/openvpms/Dockerfile:14-18,26`; `docker/pc1-medica/deploy.sh:36` (`docker compose up -d` sin `--no-build`). | **Bloqueante, a verificar** con Docker en marcha: probar `docker load` + `docker compose up -d --pull never` con la red cortada |
 | B4 | `despliegue/README.md:79,84`; `despliegue/l2-fallback/README.md:13-20,121,340`; `despliegue/l3-switch/README.md:11-18,127,315`; `tutoriales/tutorial-pc1-medica.md:29,43`; `tutoriales/tutorial-pc2-operaciones.md:29,43`; `tutoriales/tutorial-pc3-administracion-infraestructura.md:30,44`; `tutoriales/README.md:17` | «**HUECO: comandos de la Fase 0 pendientes**», «pendiente: saber cuál es [la versión de Ubuntu]», «cómo llega esa imagen ya compilada a PC-1 lo define el paquete offline (pendiente)». | Master no contiene ningún comando de la Fase 0. Sin ellos ninguna receta ni tutorial es ejecutable de principio a fin (ya lo dicen: «sin la preparación previa no arranca nada»). Es un hueco declarado, no una contradicción oculta. | `git ls-tree -r origin/master` no lista ningún script ni documento de paquete offline. (Existe `docs/paquete-offline-fase0.md` en la rama local `test/ldaplogin-revalidacion`, **no en master**; no auditado.) | **Bloqueante** (conocido; depende de la sesión que construye la Fase 0) |
@@ -44,6 +44,83 @@
 | M14 | `tutoriales/tutorial-pc2-operaciones.md:72-83`; `tutoriales/tutorial-pc3-administracion-infraestructura.md:73-81` | El bloque «Vas a ver algo así» del `.env` omite `INVENTREE_LDAP_BIND_PASSWORD` (PC-2) y `ERPNEXT_LDAP_BIND_PASSWORD` (PC-3). | Ambas variables están en los `.env.example` con valor por defecto `Svc-Lectura1`, así que no rompe nada, pero el operador ve un fichero más largo de lo que el tutorial le muestra. La receta L2 sí las explica (`README.md:192`). | `docker/pc2-operaciones/.env.example:36`; `docker/pc3-administracion-infra/.env.example:36`. | Menor |
 | M15 | `README.md:19-39` | «Estructura del repositorio» lista un único documento en `docs/` y omite `docs/borradores/`, `docs/integracion-ldap-erpnext-inventree.md`, `docs/ldap-pretix-openvpms.md`, `docs/prueba-smoke-test-resultados.md` y `plans/`. | Existen todos en master. | `git ls-tree -r origin/master`. | Menor |
 | M16 | `docs/prueba-smoke-test-resultados.md:58-59,130`; `despliegue/l3-switch/README.md:36`, `despliegue/l2-fallback/README.md:37` | Tiempos y recuentos del stack de PC-3 («~13 min», «2 que terminan por diseño») medidos antes de añadir `erpnext-ldap-config`. | Las cifras son de un momento anterior; no se ha vuelto a medir con el compose actual. | `docker/pc3-administracion-infra/docker-compose.yml:139-184`. | Menor (revalidar cuando se pueda arrancar Docker) |
+
+## B5 en profundidad: diagnóstico y propuesta (sin aplicar)
+
+**Qué promete la documentación.** «VLAN 99 solo responde» (`despliegue/l3-switch/README.md:57`); matriz con «✅ Permitido (auth/DNS/NTP)» de negocio a VLAN 99 y «✅ (responde)» de VLAN 99 a negocio (`docs/arquitectura-3-equipos-departamentos.md:52-56`).
+
+**Qué implementa cada perfil.**
+
+| | L3 (switch) | L2 (PC-3) |
+|---|---|---|
+| Negocio↔negocio | 12 `deny` (3 por ACL de entrada), `config-switch-l3.txt:41-60` | 12 `drop` con contador, `firewall-pc3-matriz.sh:67-72` |
+| Negocio → VLAN 99 | Cae en `permit ip any any` (`:45,50,55,60`): **cualquier protocolo y puerto** | No hay regla; `policy accept` (`:65`): **cualquier protocolo y puerto** |
+| VLAN 99 → negocio | `interface Vlan99` sin `ip access-group` (`:84-88`): **puede iniciar** cualquier conexión | Sin regla: **puede iniciar** cualquier conexión |
+
+**Conclusión:** la brecha es **la misma en L2 y en L3**. En ambos perfiles la matriz implementada es «negocio↔negocio bloqueado; todo lo demás abierto». Los comentarios del propio `config-switch-l3.txt:37-40` y de `firewall-pc3-matriz.sh:7` lo reconocen («queda permitido», «no se toca»); lo que no cuadra es la promesa de las recetas y de la matriz.
+
+**Restricciones que la propuesta debe respetar** (si no, rompe pasos documentados):
+- Las pruebas de las recetas usan `ping` a `10.10.99.10/.11` (`verificacion.md`), `ldapsearch -H ldap://…` en **389** en claro (`despliegue/l3-switch/README.md:408`; la L2 igual), `dig @10.10.99.11` (UDP 53) y `ntpdate -q 10.10.99.12` (UDP 123). Las apps usan LDAPS **636** (compose de PC-2 y PC-3).
+- El `scp` de `ca.crt` lo inicia PC-2 hacia `10.10.99.250` (`despliegue/l3-switch/README.md:255,265`): necesita **TCP 22** hacia esa dirección en L3. En L2 va a `10.10.99.1` (tráfico local de PC-3, no pasa por `forward`), así que no necesita regla.
+- `ping 10.10.N.1` al gateway (`README.md:358`) es tráfico hacia la propia SVI y también pasa por la ACL de entrada.
+- El simulador (`despliegue/comun/probar-matriz.sh:5,28,36`) exige que VLAN 99 → negocio **abra conexiones nuevas** (puerto 8080); con la propuesta esa celda pasaría a fallar y habría que cambiarla a «solo respuestas».
+
+**Propuesta L3 (`config-switch-l3.txt`).** Sustituir el `permit ip any any` final de cada ACL de negocio (ejemplo para VLAN 10; repetir con su subred en 20, 30 y 40) y añadir una ACL a la SVI de VLAN 99:
+
+```
+ip access-list extended ACL-VLAN10-IN
+ deny   ip 10.10.10.0 0.0.0.255 10.10.20.0 0.0.0.255      ! (los 3 deny actuales, sin cambios)
+ deny   ip 10.10.10.0 0.0.0.255 10.10.30.0 0.0.0.255
+ deny   ip 10.10.10.0 0.0.0.255 10.10.40.0 0.0.0.255
+ permit icmp 10.10.10.0 0.0.0.255 host 10.10.10.1          ! ping al gateway
+ permit icmp 10.10.10.0 0.0.0.255 10.10.99.0 0.0.0.255 echo
+ permit tcp  10.10.10.0 0.0.0.255 10.10.99.0 0.0.0.255 eq 636   ! LDAPS
+ permit tcp  10.10.10.0 0.0.0.255 10.10.99.0 0.0.0.255 eq 389   ! LDAP (o quitar y cambiar la prueba a ldaps)
+ permit tcp  10.10.10.0 0.0.0.255 10.10.99.0 0.0.0.255 eq 53
+ permit udp  10.10.10.0 0.0.0.255 10.10.99.0 0.0.0.255 eq 53
+ permit udp  10.10.10.0 0.0.0.255 10.10.99.0 0.0.0.255 eq 123   ! NTP
+ permit tcp  10.10.10.0 0.0.0.255 host 10.10.99.250 eq 22       ! solo scp de ca.crt (PC-1/PC-2)
+ deny   ip any any                                              ! explícito, con su contador
+ip access-list extended ACL-VLAN99-IN
+ permit tcp  10.10.99.0 0.0.0.255 any established              ! respuestas TCP
+ permit udp  10.10.99.0 0.0.0.255 eq 53  any                   ! respuestas DNS
+ permit udp  10.10.99.0 0.0.0.255 eq 123 any                   ! respuestas NTP
+ permit icmp 10.10.99.0 0.0.0.255 any echo-reply
+ permit icmp 10.10.99.0 0.0.0.255 host 10.10.99.1
+ deny   ip any any
+interface Vlan99
+ ip access-group ACL-VLAN99-IN in
+```
+
+Notas: las ACL de IOS no guardan estado; por eso VLAN 99 solo puede devolver respuestas (`established`, puertos de origen 53/123, `echo-reply`). Para demostrar que VLAN 99 no inicia nada, un `nc`/`curl` desde un contenedor de VLAN 99 hacia negocio debe fallar y subir el contador del `deny ip any any` de `ACL-VLAN99-IN`. Habría que actualizar `verificacion.md:24-25,43` («sin ACL en Vlan99») y la comprobación de `show access-lists`.
+
+**Propuesta L2 (`firewall-pc3-matriz.sh`).** Dentro de la misma cadena `forward`, **antes** de los 12 `drop` actuales, en la misma tabla `inet reservaviva` (ya casan por `gwNN`):
+
+```
+ct state established,related counter accept comment "est-rel"
+iifname { "gw10","gw20","gw30","gw40" } oifname "gw99" ip protocol icmp icmp type echo-request counter accept
+iifname { "gw10","gw20","gw30","gw40" } oifname "gw99" tcp dport { 53, 389, 636 } counter accept
+iifname { "gw10","gw20","gw30","gw40" } oifname "gw99" udp dport { 53, 123 } counter accept
+iifname { "gw10","gw20","gw30","gw40" } oifname "gw99" counter drop comment "negocio -> 99 fuera de auth/DNS/NTP"
+iifname "gw99" oifname { "gw10","gw20","gw30","gw40" } counter drop comment "99 no inicia"
+```
+
+Efectos a asumir: el «12 reglas `drop`» que citan `despliegue/l2-fallback/README.md:252` y `verificacion.md:19` pasaría a 14; el simulador y `probar-matriz.sh` habría que adaptarlos (VLAN 99 → negocio solo respuestas); y **ninguna de las dos propuestas se ha probado** (Docker y el switch no disponibles). La política sigue en `accept`: solo se añaden reglas entre interfaces de VLAN, así que el tráfico interno de Docker no se toca (lo que busca el diseño actual, `firewall-pc3-matriz.sh:5-9`).
+
+**Alternativa barata (solo texto).** Reescribir la documentación para que diga lo que hay: «se bloquea el tráfico entre VLAN de negocio; el acceso a la VLAN 99 (LDAP/DNS/NTP) no se restringe por servicio». Cambia `despliegue/l3-switch/README.md:57`, `docs/arquitectura-3-equipos-departamentos.md:52-56` y el diagrama de flujo de segmentación. Es la única opción que no exige probar nada en hardware.
+
+## Recomendación de corte (qué arreglar antes de la entrega)
+
+**Arreglar antes de entregar (por este orden):**
+1. **B3, verificar y arreglar** (imágenes por digest y `build:` de OpenVPMS): es lo único que puede impedir que arranque nada en el laboratorio. Cuando Docker esté libre: `docker load` + `docker compose up -d --pull never` con la red cortada.
+2. **B4, comandos de la Fase 0**, integrados en master y coherentes con B3 (mismo trabajo).
+3. **B2**: una frase en tres sitios; evita una falsa alarma en el paso de verificación de PC-3.
+4. **B1**: fusionar el PR #15 (ya arreglado).
+5. **B5**: decidir entre implementar la propuesta o reescribir el texto. Recomendación: **reescribir el texto ahora** (coste mínimo, sin riesgo) y dejar la propuesta como mejora documentada; implementar ACL más estrictas sin poder probarlas contra el switch real arriesga romper el `scp` o el LDAP el día de la práctica. Si hay tiempo de ensayar con los simuladores, implementar L2 primero (es el único que se puede probar en software).
+6. **M7** (`DNS_HOST`/`NTP_HOST`, ya asignado): dos líneas en el compose de PC-1.
+7. **M2, M3, M4, M6, M12**: correcciones de una línea cada una en texto; hacerlas al tocar esos ficheros por otro motivo.
+
+**Puede quedarse como limitación conocida (documentada):** M1 (recuentos de servicios, salvo el diagrama general si se regenera), M5, M8 (evidencias de línea de los diagramas: regenerar solo si sobra tiempo), M9 (redacción «descarga»; los `pull`/`pip` son de desarrollo), M10, M11 (borrador histórico), M13–M16 y `plans/`.
 
 ## Lo comprobado sin discrepancias
 
