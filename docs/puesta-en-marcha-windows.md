@@ -1,6 +1,6 @@
 # Puesta en marcha en el laboratorio: tres PCs Windows con Docker Desktop
 
-> **Estado de este documento: borrador con huecos marcados.** Los huecos (`HUECO:`) son cosas que todavía no están decididas o probadas; **no los rellenes con suposiciones**. Lo único ejecutado hasta ahora son los dos comandos del simulador del apartado 7 (20/09/2026, Docker Desktop 29.8.0 en Windows). **Los `deploy.ps1`, `instalar.ps1` y el resto de comandos de este documento no se han probado aquí.**
+> **Estado de este documento: borrador con huecos marcados.** Los huecos (`HUECO:`) son cosas que todavía no están decididas o probadas; **no los rellenes con suposiciones**. Lo único ejecutado hasta ahora son los dos comandos del simulador del apartado 7 (20/09/2026, Docker Desktop 29.8.0 en Windows). **Los `deploy.ps1`, `instalar.ps1` y el resto de comandos de este documento no se han probado de punta a punta** (estado real en el apartado 5).
 > **Reparto de documentos:** esta es la **guía operativa** (pasos, verificación, demostración). La **referencia técnica y las decisiones** (qué cambió en los compose, choques de puertos con Windows, reglas del cortafuegos) están en [`despliegue-windows-docker-desktop.md`](despliegue-windows-docker-desktop.md), y el paquete de preparación previa en [`paquete-offline-fase0.md`](paquete-offline-fase0.md). Cada dato vive en un solo sitio y aquí se remite.
 
 ## 1. Qué es y qué no es esto
@@ -109,6 +109,11 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 Tiempos de primer arranque medidos en la prueba de humo (un solo host): **PC-3 ~13 min** (lo marca `erpnext-create-site`), **PC-2 ~10 min** (migraciones de Pretix e InvenTree), **PC-1 ~5 min** (OpenVPMS prepara su base de datos). No lo interrumpas aunque parezca colgado.
 
 ## 5. Verificar cada PC
+
+> **Estado de la verificación del despliegue (20/09/2026).** Con los compose nuevos se probó el arnés `pruebas/smoke-test-3-pcs/`, pero el `docker compose up` **se interrumpió por falta de memoria del sistema hacia el minuto 6-7**, así que los servicios que dependen de `erpnext-create-site` nunca arrancaron.
+> - **Verificado:** bind9 con la zona generada por `generar-zona.ps1`, NTP (`healthy`), OpenLDAP, `erpnext-db` (`healthy`), Redis, las bases de datos de Pretix e InvenTree, `openvpms-db` y `openvpms-app`, y `erpnext-configurator` con salida 0.
+> - **No verificado:** el arranque completo de extremo a extremo, el LDAPS real de ERPNext e InvenTree y `ldaplogin.py`.
+> - No hay ningún fallo conocido, pero **tampoco hay prueba completa**: está pendiente de repetir con memoria libre. Los tiempos y los `Exited (0)` que se citan en esta guía proceden de la prueba de humo anterior.
 
 Desde la carpeta del PC, en PowerShell:
 

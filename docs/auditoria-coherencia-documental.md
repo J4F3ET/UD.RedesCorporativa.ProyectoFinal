@@ -230,6 +230,8 @@ Además, **sin cambiar la estructura de carpetas** (evita romper 60+ enlaces): b
 
 ## Análisis de colisiones entre los PR abiertos (#8, #15–#22)
 
+**Nota de numeración:** el PR **#21 se cerró automáticamente** al fusionar #18 con `--delete-branch` (colgaba de esa rama) y se **repuso como #24** desde la misma rama, sin perder contenido. Donde este apartado dice «#21», léase «#21, repuesto como #24».
+
 **Método.** Se fusionaron en un árbol de prueba desechable, a partir de `origin/master` @ 9f58922, las nueve ramas (#18, #21, #8, #15, #16, #17, #19, #20, #22; #21 sobre #18) y se leyó el resultado. Solo lectura: no se corrigió nada.
 
 ### 1. Conflictos de git

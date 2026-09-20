@@ -52,7 +52,7 @@ scripts/
 
 ## Puesta en marcha
 
-**Laboratorio (tres PCs Windows con Docker Desktop):** la guía paso a paso está **en preparación** y sustituirá a los `deploy.sh` y a los tutoriales de `tutoriales/`, que asumen Linux, `sudo`, un switch con VLANs y Ubuntu Server. Hasta que se publique, no sigas esos documentos en el laboratorio. Lo que sí se puede ejecutar hoy en Windows es la prueba de humo (siguiente sección) y los simuladores de segmentación (`despliegue/*/pruebas/`).
+**Laboratorio (tres PCs Windows con Docker Desktop):** sigue la guía [`docs/puesta-en-marcha-windows.md`](docs/puesta-en-marcha-windows.md) (pasos, verificación y demostración de la segmentación con los simuladores). La referencia técnica y las decisiones (qué cambió en los compose, choques de puertos con Windows, cortafuegos) están en [`docs/despliegue-windows-docker-desktop.md`](docs/despliegue-windows-docker-desktop.md). Sustituyen a los `deploy.sh` y a los tutoriales de `tutoriales/`, que asumen Linux, `sudo`, un switch con VLANs y Ubuntu Server; no sigas esos documentos en el laboratorio. **La guía aún no se ha probado de punta a punta** (ver su apartado 5). Lo que sí se puede ejecutar hoy en Windows es la prueba de humo (siguiente sección) y los simuladores de segmentación (`despliegue/*/pruebas/`).
 
 **Diseño con switch (anexo, Linux):** si algún día se dispusiera de un switch con VLANs y PCs Linux, la receta está en [`despliegue/README.md`](despliegue/README.md) (averigua antes si el switch es L2 o L3) y cada PC trae un `deploy.sh` que hace todo en el orden correcto (VLANs → firewall si aplica → `docker compose up -d`):
 
@@ -73,8 +73,8 @@ Detalle de ese camino (incluidos los servicios systemd) en la sección 8 de [`do
 
 ## Pendientes clave
 
-- Guía de puesta en marcha para Windows con Docker Desktop (sustituye a los `deploy.sh` y a los tutoriales), con puertos publicados y la IP de PC-3 parametrizada para que los tres PCs se vean entre sí. En preparación.
-- Paquete de preparación previa (Fase 0) para un laboratorio sin Internet: instalador de Docker Desktop, imágenes de las aplicaciones y la de OpenVPMS ya construida; incluir `nicolaka/netshoot` si se van a demostrar los simuladores.
+- Guía de puesta en marcha para Windows con Docker Desktop: publicada en [`docs/puesta-en-marcha-windows.md`](docs/puesta-en-marcha-windows.md); **pendiente de verificarla de punta a punta** (el arranque completo se interrumpió por falta de memoria del sistema; ver el apartado 5 de la guía).
+- Paquete de preparación previa (Fase 0) para un laboratorio con Internet limitada: imágenes de las aplicaciones por etiqueta, la de OpenVPMS ya construida, certificados ya generados y `nicolaka/netshoot` si se van a demostrar los simuladores. En verificación.
 - Diseño con switch (L2/L3): sin validar contra hardware real. Queda documentado como limitación conocida.
 - ~~Construir el Dockerfile propio de OpenVPMS~~ **Hecho** (`docker/pc1-medica/openvpms/Dockerfile`).
 - Cerrar por escrito en el informe el alcance de ERPNext (solo módulo HR) y la diferencia entre Pretix (backend web) y "PretixPOS".
