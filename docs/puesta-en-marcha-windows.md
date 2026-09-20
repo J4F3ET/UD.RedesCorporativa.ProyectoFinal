@@ -110,10 +110,10 @@ Tiempos de primer arranque medidos en la prueba de humo (un solo host): **PC-3 ~
 
 ## 5. Verificar cada PC
 
-> **Estado de la verificación del despliegue (20/09/2026).** Con los compose nuevos se probó el arnés `pruebas/smoke-test-3-pcs/`, pero el `docker compose up` **se interrumpió por falta de memoria del sistema hacia el minuto 6-7**, así que los servicios que dependen de `erpnext-create-site` nunca arrancaron.
-> - **Verificado:** bind9 con la zona generada por `generar-zona.ps1`, NTP (`healthy`), OpenLDAP, `erpnext-db` (`healthy`), Redis, las bases de datos de Pretix e InvenTree, `openvpms-db` y `openvpms-app`, y `erpnext-configurator` con salida 0.
-> - **No verificado:** el arranque completo de extremo a extremo, el LDAPS real de ERPNext e InvenTree y `ldaplogin.py`.
-> - No hay ningún fallo conocido, pero **tampoco hay prueba completa**: está pendiente de repetir con memoria libre. Los tiempos y los `Exited (0)` que se citan en esta guía proceden de la prueba de humo anterior.
+> **Estado de la verificación del despliegue (20/09/2026, actualizado tras la ronda 6).** El arnés `pruebas/smoke-test-3-pcs/` se ejecutó de extremo a extremo con Docker Engine nativo en WSL (no Docker Desktop). **El arranque completo NO quedó sano**; el detalle, con la salida literal, está en `docs/prueba-smoke-test-resultados.md` §10.
+> - **Verificado:** los 3 jobs de PC-3 (`erpnext-configurator`, `erpnext-create-site`, `erpnext-ldap-config`) terminan en `Exited (0)` (`create-site` tardó ≈ 8,6 min); la autenticación LDAPS de ERPNext e InvenTree (login correcto 200; clave errónea 417 en ERPNext y 401 en InvenTree) y `ldaplogin.py` con PASS y exit 0 **con el script corregido** (`73b3dd6`); la imagen de OpenVPMS se construye desde cero con Internet.
+> - **NO verificado / falla:** el criterio de «~20 contenedores `Up` y `healthy`». `docker compose up -d` **falló en el primer intento** (`erpnext-db` `unhealthy`: falta `start_period` en su healthcheck, hallazgo H1) y solo arrancó al segundo, con la base ya inicializada. `openvpms-app` queda en bucle de reinicios tras una interrupción (el entrypoint no es reanudable, H2) y `pretix-web` queda `unhealthy` (su healthcheck consulta `127.0.0.1` y recibe 400, H3). Tampoco se ejecutó `ldaplogin.py --persistencia`.
+> - Estos defectos **no están corregidos**: en un PC con disco lento y arranque en frío, el primer `up` puede fallar igual. Si ocurre, repetir `docker compose up -d` una vez que `erpnext-db` esté `healthy`.
 
 Desde la carpeta del PC, en PowerShell:
 

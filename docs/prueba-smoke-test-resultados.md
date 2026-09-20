@@ -265,3 +265,231 @@ búsqueda, ese usuario entraría. Aun así es un buen resultado y encaja con el 
 
 > **Confianza:** la verificación es de Juan. Quien consolida este documento revisó su documento y su PR, pero **no
 > reejecutó** sus pruebas.
+
+## 10. Ronda 6 — arranque completo del arnés con Docker Engine nativo en WSL (20/09/2026)
+
+Esta ronda salda la deuda de verificación que dejó la ronda anterior (el arranque completo del arnés y `ldaplogin.py`
+nunca se habían ejecutado). **Resultado: LDAPS y el login contra ERPNext e InvenTree quedan verificados de verdad; el
+arranque completo NO cumple el criterio de «~20 contenedores `Up` y `healthy`»**, por defectos del proyecto que la
+prueba ha sacado a la luz (hallazgos H1–H4). Se anota todo tal cual, incluidos los fallos y las correcciones al script.
+
+### 10.1 Entorno de la prueba (distinto al de las rondas anteriores)
+
+- **No es Docker Desktop.** El usuario lo desinstaló ese día: Docker Engine 29.8.1 + Compose v5.5.1 dentro de la distro WSL
+  `Ubuntu-24.04`, VM con 7,9 GB de RAM (host de 13,9 GB) y 4 GB de swap. El almacén de imágenes estaba **vacío**
+  (0 imágenes, 0 volúmenes), así que hubo que descargar todo. El repo se monta desde `/mnt/d` (los bind mounts cruzan
+  la frontera Windows/WSL y son más lentos).
+- Puertos publicados solo en `127.0.0.1` y desplazados (18080–18083, 1389, 1636, 1053, 1123); `PUBLISH_IP` sin tocar.
+- `ldaplogin.py` se ejecutó con el `python3` de WSL: en Windows `docker` es un `.cmd` y `subprocess` sin shell no lo resuelve
+  (no llegó a probarse en Windows; es una expectativa, no un resultado).
+- Rama `test/arranque-completo-arnes`, desde `origin/master` (`d34f036`).
+
+### 10.2 Cronología
+
+| Paso | Resultado |
+|---|---|
+| Zona de bind9 (`docker\pc3-administracion-infra\bind\generar-zona.ps1`) | generada antes del primer `up` |
+| `docker compose pull` | `EXIT 0`; 10 imágenes, 8,29 GB. Salieron mensajes `Retrying in N seconds` (red irregular) |
+| `docker compose build openvpms-app` | `EXIT 0`, imagen `reservaviva-smoke-openvpms-app` (`sha256:464f70370f93…`). Descargó el zip de `repository.openvpms.org` en 54,3 s y el conector de `repo1.maven.org` en 3,8 s |
+| `docker compose up -d` (1.er intento) | **`EXIT 1`**: `dependency failed to start: container erpnext-db is unhealthy` (ver H1) |
+| `docker compose up -d` (2.º intento, sin `down`) | `EXIT 0`. `erpnext-create-site` empezó 18:42:34Z y terminó 18:51:12Z (≈ 8,6 min), `exit=0` |
+
+**El arnés arrancó al segundo intento, tras un fallo de dependencia en el primero.** El segundo intento funcionó
+precisamente porque la base de datos ya estaba inicializada; **no valida que el defecto H1 esté resuelto**. Salida literal
+del primer intento (final del log):
+
+```
+ Container erpnext-db Waiting
+ Container erpnext-db Error dependency erpnext-db failed to start
+dependency failed to start: container erpnext-db is unhealthy
+EXIT 1
+```
+
+### 10.3 Criterios de aceptación, uno a uno
+
+| # | Criterio | Estado | Evidencia |
+|---|---|---|---|
+| 1 | Los 3 jobs en `Exited (0)` | **Cumple** | `erpnext-configurator`, `erpnext-create-site`, `erpnext-ldap-config`: `Exited (0)` (lectura de las 14:04 y de las 14:38). Son 3, no 2 (hallazgo B2) |
+| 2 | ~20 contenedores permanentes `Up`, los que tienen healthcheck en `healthy` | **NO cumple** | `openvpms-app` en bucle de reinicios (`Restarting (1)`, 40 reinicios; lo paré yo) y `pretix-web` `unhealthy`. `healthy`: `erpnext-db`, `erpnext-hr`, `inventree-app`, `ntp-interno`. Ver H2 y H3 |
+| 3 | `ldaplogin.py` con PASS y exit 0 | **Cumple solo con el script corregido** (ver 10.4) | La 1.ª y la 2.ª ejecución dieron `FAIL` / exit 1; la ejecución con el script corregido dio `PASS` / exit 0 |
+| 4 | Clave errónea rechazada (401/403; ERPNext 417) | **Cumple** | ERPNext 417, InvenTree 401 en las tres ejecuciones |
+| 5 | Resultado real anotado con la salida pegada | **Cumple** | Esta sección |
+
+Lo que la prueba **sí demuestra** (nuevo respecto a la sección 9): que ERPNext e InvenTree autentican contra OpenLDAP con
+las claves del README (los hashes del LDIF corresponden a esas claves), que InvenTree acepta `GET` con Basic auth en
+`/api/user/token/`, que hay `python3` en ambos contenedores (3.11.16 y 3.14.7) y que una clave errónea se rechaza.
+
+### 10.4 `ldaplogin.py`: tres ejecuciones, salida literal
+
+El `ExecMainStartTimestamp` de `docker.service` fue `14:02:41` al inicio y al final de las tres ejecuciones (14:38–14:44),
+es decir, ningún reinicio del daemon a mitad de prueba.
+
+**Ejecución 1 (script original, 14:38)** — `FAIL`, exit 1:
+
+```
+== Caso 1: login LDAP correcto
+  [FAIL] ERPNext rrhh.prueba: status=None Traceback (most recent call last):
+  File "<stdin>", line 8, in <module>
+  File
+  [PASS] InvenTree logistica.prueba: status=200 {"token":"inv-5312...","name":"","expi
+  => Caso 1: login LDAP correcto: FAIL
+
+== Caso 2: contrasena erronea
+  [PASS] ERPNext clave erronea: status=417 (esperado 401/403/417)
+  [PASS] InvenTree clave erronea: status=401 (esperado 401/403)
+  => Caso 2: contrasena erronea: PASS
+
+== Caso 3: ldapsearch LDAPS con CA
+  [FAIL] ldapsearch con CA (rrhh.prueba): rc=255 ldap_sasl_bind(SIMPLE): Can't contact LDAP server (-1)
+  [FAIL] ldapsearch con CA (logistica.prueba): rc=255 ldap_sasl_bind(SIMPLE): Can't contact LDAP server (-1)
+  [FAIL] ldapsearch clave erronea: rc=255 (esperado 49 Invalid credentials)
+  [PASS] ldapsearch SIN la CA debe fallar: rc=255 ldap_sasl_bind(SIMPLE): Can't contact LDAP server (-1)
+  => Caso 3: ldapsearch LDAPS con CA: FAIL
+
+VEREDICTO GLOBAL: FAIL
+EXIT_LDAPLOGIN=1
+```
+
+**Ejecución 2 (script original, 14:40)** — `FAIL`, exit 1. Casos 1 y 2 `PASS` (ERPNext 200 con `full_name` «RRHH Prueba»,
+InvenTree 200 con token, 417 y 401 con clave errónea); el caso 3 falló igual que en la ejecución 1. El fallo de ERPNext de
+la ejecución 1 **fue intermitente y su causa no está determinada**: el script recorta el error a 200 caracteres; la
+sospecha (un timeout en el primer login, que crea el usuario) **no está verificada**. Un login manual con el mismo código
+dio `200`.
+
+**Ejecución 3 (script corregido, 14:44)** — `PASS`, exit 0:
+
+```
+== Caso 1: login LDAP correcto
+  [PASS] ERPNext rrhh.prueba: status=200 {"message":"No App","home_page":"/me","full_name":"RRHH Prueba","_server_message
+  [PASS] InvenTree logistica.prueba: status=200 {"token":"inv-5312...","name":"","expi
+  => Caso 1: login LDAP correcto: PASS
+
+== Caso 2: contrasena erronea
+  [PASS] ERPNext clave erronea: status=417 (esperado 401/403/417)
+  [PASS] InvenTree clave erronea: status=401 (esperado 401/403)
+  => Caso 2: contrasena erronea: PASS
+
+== Caso 3: ldapsearch LDAPS con CA
+  [PASS] ldapsearch con CA (rrhh.prueba): rc=0 =rrhh.prueba,ou=rrhh,dc=reservaviva,dc=local | uid: rrhh.prueba | ldap_sasl_bind
+  [PASS] ldapsearch con CA (logistica.prueba): rc=0 ,ou=operaciones,dc=reservaviva,dc=local | uid: logistica.prueba | ldap_sasl_bind
+  [PASS] ldapsearch clave erronea: rc=49 (esperado 49 Invalid credentials)
+  [PASS] ldapsearch con CA ajena debe fallar por certificado no confiable: rc=255 | TLS: can't connect: (unknown error code). | ldap_sasl_bind(SIMPLE): Can't contact LDAP server (-1)
+  => Caso 3: ldapsearch LDAPS con CA: PASS
+
+VEREDICTO GLOBAL: PASS
+EXIT_LDAPLOGIN=0
+```
+
+(En la última comprobación la línea impresa está recortada por el script a sus últimos 100 caracteres; la condición que
+lo hace `PASS` exige que la salida completa contenga `untrusted`. La prueba manual equivalente, abajo, muestra la línea
+completa `TLS: peer cert untrusted or revoked (0x42)`.)
+
+**Por qué se modificó el script (commit aparte, `73b3dd6`) y por qué no es «forzar un PASS».** El caso 3 original fallaba por
+un defecto del propio script, no de LDAPS:
+
+- Se conectaba a `ldaps://localhost:636` desde dentro de `openldap`. El certificado **sí** incluye `DNS:localhost` en el SAN
+  (`DNS:ldap.reservaviva.local, DNS:openldap, DNS:localhost, IP:10.10.99.10, IP:127.0.0.1`), pero libldap canonicaliza
+  el nombre al hostname del contenedor y rechaza. Literal de `ldapsearch -d1`:
+  `TLS: hostname (4f89b94c57b9) does not match common name in certificate (ldap.reservaviva.local).`
+- El servidor no estaba roto: el log de `slapd` mostraba `TLS established tls_ssf=256` y binds simples con `err=0`
+  de las aplicaciones.
+- **Falso PASS del cuarto check** («SIN la CA debe fallar»): con `LDAPTLS_CACERT=/nonexistent` fallaba por
+  `TLS: could not use CA certificate file '/nonexistent': Error while reading file. (-64)`, es decir, por fichero ilegible,
+  **no** por certificado no verificable. Habría dado `PASS` aunque LDAPS aceptara cualquier certificado.
+- Prueba manual del nombre de producción (`ldap.reservaviva.local` resuelve con el DNS del laboratorio a `10.10.99.10`),
+  desde un contenedor efímero en la red del arnés: con la CA y clave correcta `rc=0`; con clave errónea `rc=49`
+  (`ldap_bind: Invalid credentials (49)`); con una CA válida pero ajena `TLS: peer cert untrusted or revoked (0x42)`,
+  `rc=255`. Con esa última se distingue el rechazo por la razón correcta.
+- Cambio en el script: URI `ldaps://ldap.reservaviva.local:636` (el mismo que usa `INVENTREE_LDAP_SERVER_URI` en pc2),
+  `ldapsearch` en un contenedor efímero con el DNS del laboratorio, y el check negativo con una CA ajena que exige
+  `untrusted` en la salida.
+
+Límite: el script corregido se ejecutó **una sola vez**. No se ejecutó con `--persistencia` (caso 4: `down` sin `-v` +
+`up -d`), así que la persistencia de los usuarios LDAP tras reiniciar **sigue sin verificarse en este arnés** (la sección 9.3
+la había probado en Docker Desktop).
+
+### 10.5 Hallazgos (defectos del proyecto y del entorno)
+
+Ninguno de los ficheros afectados se ha modificado: los compose y el entrypoint están fuera del alcance de esta prueba.
+
+**H1 — `erpnext-db` sin `start_period` (defecto real de robustez, `docker/pc3-administracion-infra/docker-compose.yml:53-57`).**
+Healthcheck `mysqladmin ping`, `interval 5s`, `timeout 5s`, `retries 40` y **sin `start_period`**: 200 s de margen. En el
+primer arranque la base tardó ≈ 5 min en inicializarse (18:28:11Z → 18:33:00Z; el directorio de datos cruza `/mnt/d`; el
+log muestra tres arranques de `mariadbd`), el contenedor pasó a `unhealthy` y `compose up` abortó. Después quedó `healthy`
+(`FailingStreak 0`, `RestartCount 0`). Un PC del laboratorio con disco más lento y arranque en frío puede repetirlo. La
+solución (un `start_period` de unos 300 s o más reintentos) es decisión del usuario y debe validarse con volumen limpio.
+
+**H2 — el entrypoint de OpenVPMS no es reanudable (`docker/pc1-medica/openvpms/entrypoint.sh:60-74`).** El comentario dice que
+la inicialización «se reanuda por etapas»; el código solo borra las marcas cuando la base tiene 0 tablas. Si hay tablas y
+falta la marca `schema`, `step schema` reintenta `toolbox database --create` y muere para siempre con
+`Cannot create openvpms as there are tables already present` (`exit=1`, `OOMKilled=false`, 40 reinicios). Verificado: el
+volumen `reservaviva-smoke_openvpms_state` tiene `/init` **vacío** y la base tiene **49 tablas**. La causa que lo provocó es
+compatible con que los reinicios de `docker.service` (H7) mataran el contenedor antes de guardar la marca, pero eso no
+está demostrado. Descartada la hipótesis de que fuera falta de memoria del heap de Tomcat.
+
+**H3 — el healthcheck de Pretix no puede pasar (`docker/pc2-operaciones/docker-compose.yml:74`).** Consulta
+`http://127.0.0.1/control/login/` y la aplicación responde `HTTP Error 400: Bad Request` (log de Pretix:
+`django.request log Bad Request: /control/login/`, cada ≈ 15 s), mientras `PRETIX_PRETIX_URL` apunta a `IP_PC2`
+(línea 70). Es coherente con un `Host` no permitido, pero **no se ha verificado la causa exacta del 400**. Con
+`start_period: 900s` parece que arranca durante 15 minutos y después queda `unhealthy` para siempre. No depende de la RAM.
+
+**H4 — mismo patrón latente en InvenTree (`docker/pc2-operaciones/docker-compose.yml:137`, hallazgo de la coordinación,
+leído en el código; no reproducido aquí).** Su healthcheck usa `http://127.0.0.1:8000/api/` con `INVENTREE_SITE_URL` apuntando
+a `IP_PC2` (línea 114). Hoy no falla (`inventree-app` está `healthy`), pero es la misma fragilidad.
+
+**H5 — defecto del caso 3 de `ldaplogin.py` y falso PASS.** Ver 10.4.
+
+**H6 — fallo intermitente del primer login de ERPNext en `ldaplogin.py`.** Ver 10.4; causa sin determinar. Además el script
+recorta los errores a 200 caracteres, lo que impidió ver el `Traceback`.
+
+**H7 — entorno: `docker.service` se reinicia solo (no afecta al laboratorio con Docker Desktop, pero invalida
+mediciones).** `containerd` arrancó a las 13:27:07, 13:39:44, 13:40:55, 13:52:37, 13:55:09 y 14:02:41 (hora local) con la
+VM sin reiniciar y `NRestarts=0`; el servicio está activado por socket (`TriggeredBy: docker.socket`). Cada llamada suelta
+`wsl.exe -d Ubuntu-24.04 -- …` desde Windows abre/cierra una sesión de la distro (`wsl: Failed to start the systemd user
+session for 'jafet'`) y parece precipitar el ciclo, pero **no es la única causa**: el de las 14:02 ocurrió sin actividad de
+la otra sesión. Una sesión de WSL persistente (`wsl -d Ubuntu-24.04 -- sleep infinity`) coincidió con que se detuvieran
+(estable desde las 14:02:41 hasta el final de la prueba). Los reinicios relanzaron los contenedores por su política de
+reinicio y explican los `Up` de pocos minutos.
+
+**H8 — entorno: `repository.openvpms.org` inalcanzable de forma intermitente.** Una comprobación temprana falló desde
+Windows (`curl` exit 28 a los 21 s) y desde WSL (`Could not resolve host`, exit 6) y minutos después el `build` lo descargó
+en 54 s. La causa señalada, no verificada por mí, es DNS con Tailscale activo. En el laboratorio conviene construir la imagen
+**antes** de quedarse sin Internet, con márgenes de espera holgados.
+
+**H9 — README del arnés: ruta de `generar-zona.ps1` errónea.** Decía `docker\pc3-administracion-infraind\generar-zona.ps1`;
+el fichero llevaba un carácter de control (retroceso, `\b`) en lugar de `\bind\`, invisible al leerlo. Corregido a
+`docker\pc3-administracion-infra\bind\generar-zona.ps1`.
+
+**H10 — las imágenes van fijadas por digest, y las etiquetas a secas ya no valen (importa para el paquete offline).**
+Al pedir `mariadb:10.6.28` sin digest (para listar un volumen) Docker **descargó** la imagen, aunque el arnés usa esa versión
+fijada como `mariadb:10.6.28@sha256:…`: es una referencia distinta para el almacén. En un PC sin Internet cualquier comando que
+use la etiqueta sin el digest intentará descargar y fallará. Debe tenerse en cuenta al armar y consumir el paquete offline
+(Fase 2), que sigue **NO VERIFICADO**. Por otra parte, la imagen `reservaviva-smoke-openvpms-app` se construye (no se descarga
+de un registro), así que el paquete offline tiene que transportarla con `docker save` / `docker load`. Que el `build` funciona
+desde cero con Internet queda demostrado aquí.
+
+### 10.6 Estado final de los contenedores (lectura de las 14:38, tras parar `openvpms-app`)
+
+```
+dns-interno Up 35 minutes                 | erpnext-backend Up 35 minutes
+erpnext-configurator Exited (0) 55 min    | erpnext-create-site Exited (0) 47 min
+erpnext-db Up 35 min (healthy)            | erpnext-hr Up 35 min (healthy)
+erpnext-ldap-config Exited (0) 46 min     | erpnext-queue-long / -short / scheduler / websocket Up
+erpnext-redis-cache / -queue Up           | inventree-app Up (healthy) · inventree-db · inventree-worker Up
+ntp-interno Up (healthy)                  | openldap Up
+openvpms-db Up                            | openvpms-app Exited (1)  (parado a mano por el bucle de H2)
+pretix-db Up · pretix-redis Up            | pretix-web Up 35 min (unhealthy)  (H3)
+```
+
+Memoria (una lectura, `docker stats --no-stream`, 14:34): `pretix-web` 3,664 GiB, `inventree-worker` 1,053 GiB,
+`openvpms-db` 424,9 MiB, `inventree-app` 321,5 MiB, `erpnext-db` 213 MiB; los nueve contenedores de ERPNext juntos
+(incluidos su MariaDB y sus dos Redis) suman ≈ 0,67 GiB. Dentro de WSL quedaban 1.274 MB disponibles (`free -m`). El
+consumo de Pretix, no el de ERPNext, es el dominante en este arnés.
+
+### 10.7 Lo que sigue sin verificar
+
+- Que el arnés levante **sano** de principio a fin: falta arreglar H1–H3 y repetir con volúmenes limpios.
+- La persistencia LDAP tras `down` sin `-v` + `up -d` en este entorno (no se ejecutó `--persistencia`).
+- El login de ERPNext por navegador, y el acceso desde otro PC de la red.
+- `openvpms-app` y `pretix-web` funcionando (no responden a pruebas útiles en este estado).
+- El paquete offline (Fase 2), incluido el comportamiento de las referencias con digest sin red.
