@@ -6,9 +6,12 @@
 # Variables:
 #   RV_L2_GATEWAY=parent|macvlan  dónde pone PC-3 la IP .1 (por defecto parent: en eth0.NN, como hoy
 #                                 scripts/setup-vlans-pc3.sh). macvlan: en una interfaz macvlan hermana.
-#   RV_FIREWALL_PC3=<ruta>        usa ese script de firewall en vez de las reglas de la biblioteca. Se ejecuta
-#                                 dentro del namespace de PC-3, y como no lleva contadores comentados se
-#                                 desactiva la comprobación de contadores.
+#   RV_SETUP_PC3=<ruta>           usa ese setup-vlans-pc3.sh (perfil L2) en vez de crear los gateways la
+#                                 biblioteca; se ejecuta dentro de PC-3 con IFACE=eth0.
+#   RV_FIREWALL_PC3=<ruta>        usa ese script de firewall en vez de las reglas de la biblioteca; se ejecuta
+#                                 dentro de PC-3 con IFACE=eth0. Se leen los contadores de su tabla
+#                                 (RV_NFT_TABLA, por defecto reservaviva) y se exige que cada bloqueo suba
+#                                 SU regla, igual que con las reglas propias.
 #
 # Debe correr como root dentro de un contenedor --privileged --network none (ver README.md).
 
@@ -26,8 +29,8 @@ topo_crear
 
 if [ -n "${RV_FIREWALL_PC3:-}" ]; then
   echo "--- Aplicando el firewall externo en PC-3: $RV_FIREWALL_PC3 ---"
-  ns pc3 bash "$RV_FIREWALL_PC3"
-  export RV_CHECK_COUNTERS=0
+  export RV_NFT_TABLA="${RV_NFT_TABLA:-reservaviva}"
+  IFACE=eth0 ns pc3 bash "$RV_FIREWALL_PC3"
 else
   matriz_aplicar_nft
 fi
@@ -35,4 +38,11 @@ fi
 echo "--- Puertos del switch (bridge vlan show) ---"
 ns sw bridge vlan show | sed 's/^/  /'
 echo
-bash "$COMUN/probar-matriz.sh"
+rc=0
+bash "$COMUN/probar-matriz.sh" || rc=$?
+if [ -n "${RV_FIREWALL_PC3:-}" ]; then
+  echo
+  echo "--- nft list table inet ${RV_NFT_TABLA} (namespace de PC-3, tras la prueba) ---"
+  ns pc3 nft list table inet "$RV_NFT_TABLA" | sed 's/^/  /'
+fi
+exit $rc

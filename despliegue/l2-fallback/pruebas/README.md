@@ -21,9 +21,32 @@ docker run --rm --privileged --network none -e RV_L2_GATEWAY=macvlan -v "${PWD}:
 docker run --rm --privileged --network none -v "${PWD}:/repo:ro" nicolaka/netshoot@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70 bash /repo/despliegue/l2-fallback/pruebas/simular-l2.sh
 ```
 
-Variables: `RV_L2_GATEWAY=parent|macvlan` (por defecto `parent`) y `RV_FIREWALL_PC3=/repo/ruta/firewall.sh`, que
-ejecuta ese script en el namespace de PC-3 **en vez de** las reglas de la biblioteca (pensado para probar
-`scripts/firewall-pc3-matriz.sh`; desactiva la comprobación de contadores porque sus reglas no los llevan).
+Variables: `RV_L2_GATEWAY=parent|macvlan` (por defecto `parent`), `RV_SETUP_PC3=<ruta>` (usa ese
+`setup-vlans-pc3.sh` de L2 dentro de PC-3, con `IFACE=eth0`, en vez de crear los gateways la biblioteca) y
+`RV_FIREWALL_PC3=<ruta>` (ejecuta ese firewall en PC-3 con `IFACE=eth0` en vez de las reglas de la biblioteca;
+se leen los contadores de su tabla `inet reservaviva` y se exige que cada bloqueo suba **su** regla).
+Al terminar imprime `nft list table inet reservaviva`. Ejemplo con los scripts reales (rama de los perfiles):
+
+```powershell
+docker run --rm --privileged --network none -v "${PWD}:/repo:ro" -v "${PWD}\..\otra-copia:/scripts:ro" `
+  -e RV_SETUP_PC3=/scripts/despliegue/l2-fallback/scripts/setup-vlans-pc3.sh `
+  -e RV_FIREWALL_PC3=/scripts/despliegue/l2-fallback/scripts/firewall-pc3-matriz.sh `
+  nicolaka/netshoot@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70 bash /repo/despliegue/l2-fallback/pruebas/simular-l2.sh
+```
+
+## Verificación con los scripts reales de la rama `feat/perfiles-l2-l3-red` (commit 9d3317c)
+
+Ejecutado el 2026-09-19 (Docker Desktop 29.8, kernel 6.6.87 WSL2):
+
+- **Con `setup-vlans-pc3.sh` + `firewall-pc3-matriz.sh` reales:** las 20 celdas dan lo esperado y **los 12
+  contadores de descarte suben, cada uno en su pareja** (4 paquetes / 240 bytes cada uno, todos con
+  `iifname "gwNN" oifname "gwMM"`); salida 0. No es solo "no llegó": lo paró su regla.
+- **Mutación (mismo firewall, `setup-vlans-pc3.sh` sin las líneas `arp_ignore`/`arp_announce`):** 15
+  comprobaciones fallan. Con `policy accept`, los bloqueos entre VLAN10/20/30 (6 celdas) **dejan pasar el
+  tráfico prohibido en silencio** y sus contadores quedan a 0; solo se bloquean las de VLAN40 (las
+  contadas). Es decir: sin `arp_ignore=1` la segmentación se cae sin error visible.
+- **Perfil L3 frente a `despliegue/l3-switch/scripts/setup-vlans-pc3.sh`:** la topología simulada coincide
+  (PC-3 solo con `eth0.40` y `eth0.99` sin IP, sin `gwNN`; las IP `.1` están en las SVI del switch).
 
 ## Hallazgo: el diseño L2 actual no funciona con macvlan en PC-3
 

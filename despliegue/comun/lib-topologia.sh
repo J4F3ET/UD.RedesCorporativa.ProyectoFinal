@@ -76,6 +76,13 @@ _escucha() { # _escucha vlan puerto
   ns "c$1" socat "TCP-LISTEN:$2,fork,reuseaddr,bind=$(rv_ip "$1")" SYSTEM:"echo ok" >/dev/null 2>&1 &
 }
 
+# Servicios reales: cada contenedor responde "ok" por TCP; el de VLAN99 además en 636 (LDAPS).
+_servicios() {
+  local v
+  for v in "${RV_VLANS[@]}"; do _escucha "$v" "$RV_PUERTO_NEGOCIO"; done
+  _escucha "$RV_INFRA" "$RV_PUERTO_INFRA"
+}
+
 topo_crear() {
   topo_limpiar
   local n v
@@ -115,6 +122,14 @@ topo_crear() {
       RV_ROUTER_NS=sw; RV_IFACE_FMT="vlan%s"
       ;;
     l2)
+      if [ -n "${RV_SETUP_PC3:-}" ]; then
+        # Usa el setup-vlans-pc3.sh REAL (perfil L2) dentro de PC-3: crea eth0.10/20/30, gwNN, ip_forward y arp_*.
+        # Reutiliza eth0.40/eth0.99, que ya existen como parent de los contenedores.
+        IFACE=eth0 ns pc3 bash "$RV_SETUP_PC3" >/dev/null
+        RV_ROUTER_NS=pc3; RV_IFACE_FMT="gw%s"
+        break_l2=1
+      fi
+      [ -z "${break_l2:-}" ] || { _servicios; export RV_PERFIL RV_L2_GATEWAY RV_ROUTER_NS RV_IFACE_FMT; sleep 1; return 0; }
       for v in 10 20 30; do _subif 3 "$v"; done
       for v in "${RV_VLANS[@]}"; do
         if [ "$RV_L2_GATEWAY" = "macvlan" ]; then
@@ -135,9 +150,7 @@ topo_crear() {
     *) echo "RV_PERFIL debe ser l3 o l2" >&2; return 1 ;;
   esac
 
-  # Servicios reales: cada contenedor responde "ok" por TCP; el de VLAN99 además en 636 (LDAPS).
-  for v in "${RV_VLANS[@]}"; do _escucha "$v" "$RV_PUERTO_NEGOCIO"; done
-  _escucha "$RV_INFRA" "$RV_PUERTO_INFRA"
+  _servicios
   export RV_PERFIL RV_L2_GATEWAY RV_ROUTER_NS RV_IFACE_FMT
   sleep 1
 }
@@ -169,8 +182,11 @@ matriz_aplicar_nft() {
   } | ns "$RV_ROUTER_NS" nft -f -
 }
 
-# Salida "comentario paquetes bytes" de cada regla con contador, del router.
+# Salida "comentario paquetes bytes" de cada regla con contador, del router. RV_NFT_TABLA (por defecto matriz)
+# permite leer la tabla de un firewall externo (p. ej. reservaviva); su comentario "VLANa -> VLANb bloqueado"
+# se normaliza a "drop-a-b".
 matriz_contadores() {
-  ns "$RV_ROUTER_NS" nft list chain inet matriz forward 2>/dev/null |
-    sed -n 's/.*packets \([0-9]*\) bytes \([0-9]*\).*comment "\([^"]*\)".*/\3 \1 \2/p'
+  ns "$RV_ROUTER_NS" nft list table inet "${RV_NFT_TABLA:-matriz}" 2>/dev/null |
+    sed -n 's/.*packets \([0-9]*\) bytes \([0-9]*\).*comment "\([^"]*\)".*/\3 \1 \2/p' |
+    sed 's/^VLAN\([0-9]*\) -> VLAN\([0-9]*\) bloqueado /drop-\1-\2 /'
 }
