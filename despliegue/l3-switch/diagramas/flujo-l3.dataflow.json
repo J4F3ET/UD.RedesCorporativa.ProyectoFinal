@@ -148,7 +148,7 @@
       "id": "bloqueado",
       "type": "security",
       "label": "Bloqueado",
-      "sublabel": "política DENY",
+      "sublabel": "ACL deny con contador",
       "tag": "sin respuesta",
       "stage": 3,
       "row": 2,

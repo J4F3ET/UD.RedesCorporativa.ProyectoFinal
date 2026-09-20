@@ -44,7 +44,7 @@
           "dns-interno",
           "ntp-interno"
         ],
-        "note": "Trunk de 5 VLANs, tres sub-interfaces extra (.10/.20/.30) solo para enrutar, ip_forward y reglas nftables."
+        "note": "Trunk de 5 VLANs, gwNN con .1 en las 5 VLAN (padres sin IP, arp_ignore=1, arp_announce=2), ip_forward y 12 DROP."
       },
       {
         "id": "pc2-operaciones",
@@ -276,9 +276,9 @@
     {
       "id": "pc3-subifs",
       "type": "backend",
-      "label": "eth0.10 .20 .30",
-      "sublabel": "gateway .1 · sin contenedor",
-      "tag": "solo enrutan",
+      "label": "gwNN · 10 20 30 40 99",
+      "sublabel": ".1 · padres sin IP",
+      "tag": "macvlan · arp_ignore",
       "pos": [
         962,
         374
@@ -423,7 +423,7 @@
       "id": "pc3-gateways",
       "from": "pc3-router",
       "to": "pc3-subifs",
-      "label": "gateway de 10/20/30",
+      "label": "gwNN (.1) en las 5 VLAN",
       "variant": "dashed",
       "fromSide": "bottom",
       "toSide": "top",
@@ -443,8 +443,8 @@
       "dot": "amber",
       "title": "PC-3 hace de router",
       "items": [
-        "Trunk de 5 VLANs; sub-interfaces .10/.20/.30 extra",
-        "ip_forward y matriz con nftables (policy drop)"
+        "Trunk de 5 VLANs; gwNN con el .1 en 10/20/30/40/99",
+        "Las gwNN existen antes; policy ACCEPT + 12 DROP con contador"
       ]
     },
     {
