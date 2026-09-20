@@ -408,7 +408,7 @@
       "dot": "rose",
       "title": "PROPUESTO, no implementado",
       "items": [
-        "Puertos y IP de PC-3 (.env) aún sin fijar en los compose",
+        "Puertos e IP_PC3 (.env) aún sin fijar en los compose",
         "123/udp y 53/udp vs Windows: NO VERIFICADO"
       ]
     },
@@ -417,7 +417,7 @@
       "title": "Quién usa LDAPS",
       "items": [
         "InvenTree y ERPNext; OpenVPMS y Pretix no usan LDAP",
-        "Clientes apuntan a la IP LAN de PC-3 (.env)"
+        "Por nombre: extra_hosts apunta a IP_PC3 (.env)"
       ]
     }
   ]

@@ -21,16 +21,16 @@
           "host",
           "openldap"
         ],
-        "note": "Sin Internet: la CA la crea PC-3 y ca.crt se copia a mano; el nombre se fija con extra_hosts, no con bind9."
+        "note": "Sin Internet: la CA viene en el paquete de la Fase 0; el nombre se fija con extra_hosts, no con bind9."
       }
     ]
   },
   "stages": [
     {
-      "label": "CA interna · PC-3"
+      "label": "CA interna"
     },
     {
-      "label": "Distribución offline"
+      "label": "Paquete Fase 0 (USB)"
     },
     {
       "label": "Clientes LDAPS"
@@ -57,8 +57,8 @@
       "id": "cacrt",
       "type": "backend",
       "label": "ca.crt",
-      "sublabel": "CA pública",
-      "tag": "copia a mano",
+      "sublabel": "PC-1 y PC-2 solo esto",
+      "tag": "del paquete",
       "stage": 1,
       "row": 1,
       "width": 140
@@ -87,7 +87,7 @@
       "id": "host",
       "type": "cloud",
       "label": "Host de PC-3 :636",
-      "sublabel": "IP LAN del .env",
+      "sublabel": "IP_PC3 del .env",
       "tag": "PROPUESTO",
       "stage": 3,
       "row": 1,
@@ -109,21 +109,21 @@
       "id": "f1",
       "from": "gen",
       "to": "cacrt",
-      "label": "publica la CA",
+      "label": "paquete",
       "variant": "security"
     },
     {
       "id": "f2",
       "from": "cacrt",
       "to": "inventree",
-      "label": "a PC-2",
+      "label": "USB → PC-2",
       "variant": "emphasis"
     },
     {
       "id": "f3",
       "from": "cacrt",
       "to": "erpnext",
-      "label": "./certs",
+      "label": "USB → PC-3",
       "variant": "default"
     },
     {
@@ -169,8 +169,8 @@
       "dot": "amber",
       "title": "Pendiente de fijar",
       "items": [
-        "IP LAN de PC-3 vía .env, hoy 10.10.99.10 en los compose",
-        "NTP 123/udp aporta la hora para validar el certificado"
+        "IP_PC3 en .env; hoy los compose usan 10.10.99.10",
+        "Conectar siempre por nombre: con ldaps://<ip> el certificado fallaría"
       ]
     }
   ]
