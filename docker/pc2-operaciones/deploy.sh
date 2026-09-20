@@ -58,13 +58,15 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-# Carga IFACE (y cualquier otra variable de .env) al entorno, para que la
+# Carga IFACE, PERFIL (y cualquier otra variable de .env) al entorno, para que la
 # use tanto el script de VLANs como docker compose.
 set -a
 source .env
 set +a
 
-"${REPO_ROOT}/scripts/setup-vlans-pc2.sh"
+# Valida PERFIL (l2|l3) y localiza despliegue/<perfil>/scripts.
+source "${REPO_ROOT}/scripts/perfil.sh"
+"${PERFIL_DIR}/scripts/setup-vlans-pc2.sh"
 docker compose up -d
 init_admins
 docker compose ps

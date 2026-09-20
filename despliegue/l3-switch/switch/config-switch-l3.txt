@@ -1,0 +1,124 @@
+! =====================================================================================================
+! PERFIL L3 - Switch que ENRUTA entre VLANs (tiene SVIs) y aplica las ACL de la matriz de segmentación
+! (docs/arquitectura-3-equipos-departamentos.md, secciones 4 y 5).
+!
+! AVISO: la sintaxis es de Cisco IOS. Si el switch es de otro fabricante hay que traducirla; la lógica
+!        (VLANs 10/20/30/40/99, SVI .1 por VLAN, ACL de entrada por SVI) es la misma.
+! AVISO: los nombres de puerto (GigabitEthernet1/0/1..3) son EJEMPLOS. Cámbialos por los puertos donde
+!        se conecte cada PC (show interfaces status) antes de pegar.
+!
+! Cableado:  PC-1 -> Gi1/0/1 (access VLAN 10)
+!            PC-2 -> Gi1/0/2 (trunk 20,30)
+!            PC-3 -> Gi1/0/3 (trunk 40,99)
+! Cada PC debe tener en su .env: PERFIL=l3
+! =====================================================================================================
+
+configure terminal
+hostname SW-RESERVAVIVA
+
+! --- VLANs ----------------------------------------------------------------------------------------
+vlan 10
+ name MEDICA
+vlan 20
+ name TAQUILLA
+vlan 30
+ name LOGISTICA
+vlan 40
+ name RRHH
+vlan 99
+ name INFRA
+vlan 999
+ name NATIVA-SIN-USO
+exit
+
+! --- Enrutamiento ---------------------------------------------------------------------------------
+ip routing
+
+! --- ACL de la matriz (una por VLAN de negocio, aplicada en ENTRADA de su SVI) ------------------------
+! Cada "deny" corresponde a una celda "Bloqueado" de la matriz y tiene su propio contador
+! (show access-lists). VLAN de negocio -> VLAN 99 queda permitido por el "permit ip any any" final.
+! VLAN 99 -> negocio no lleva ACL (respuestas y servicios de infraestructura permitidos).
+ip access-list extended ACL-VLAN10-IN
+ deny   ip 10.10.10.0 0.0.0.255 10.10.20.0 0.0.0.255
+ deny   ip 10.10.10.0 0.0.0.255 10.10.30.0 0.0.0.255
+ deny   ip 10.10.10.0 0.0.0.255 10.10.40.0 0.0.0.255
+ permit ip any any
+ip access-list extended ACL-VLAN20-IN
+ deny   ip 10.10.20.0 0.0.0.255 10.10.10.0 0.0.0.255
+ deny   ip 10.10.20.0 0.0.0.255 10.10.30.0 0.0.0.255
+ deny   ip 10.10.20.0 0.0.0.255 10.10.40.0 0.0.0.255
+ permit ip any any
+ip access-list extended ACL-VLAN30-IN
+ deny   ip 10.10.30.0 0.0.0.255 10.10.10.0 0.0.0.255
+ deny   ip 10.10.30.0 0.0.0.255 10.10.20.0 0.0.0.255
+ deny   ip 10.10.30.0 0.0.0.255 10.10.40.0 0.0.0.255
+ permit ip any any
+ip access-list extended ACL-VLAN40-IN
+ deny   ip 10.10.40.0 0.0.0.255 10.10.10.0 0.0.0.255
+ deny   ip 10.10.40.0 0.0.0.255 10.10.20.0 0.0.0.255
+ deny   ip 10.10.40.0 0.0.0.255 10.10.30.0 0.0.0.255
+ permit ip any any
+exit
+
+! --- SVIs: el gateway .1 de cada VLAN es el switch (los PC NO llevan esta IP) ----------------------------
+interface Vlan10
+ description Gateway VLAN10 MEDICA
+ ip address 10.10.10.1 255.255.255.0
+ ip access-group ACL-VLAN10-IN in
+ no shutdown
+interface Vlan20
+ description Gateway VLAN20 TAQUILLA
+ ip address 10.10.20.1 255.255.255.0
+ ip access-group ACL-VLAN20-IN in
+ no shutdown
+interface Vlan30
+ description Gateway VLAN30 LOGISTICA
+ ip address 10.10.30.1 255.255.255.0
+ ip access-group ACL-VLAN30-IN in
+ no shutdown
+interface Vlan40
+ description Gateway VLAN40 RRHH
+ ip address 10.10.40.1 255.255.255.0
+ ip access-group ACL-VLAN40-IN in
+ no shutdown
+interface Vlan99
+ description Gateway VLAN99 INFRA
+ ip address 10.10.99.1 255.255.255.0
+ no shutdown
+exit
+
+! --- Puertos --------------------------------------------------------------------------------------
+! PC-1: puerto ACCESS en VLAN 10 (el PC no etiqueta).
+interface GigabitEthernet1/0/1
+ description PC-1 MEDICA (access VLAN10)
+ switchport mode access
+ switchport access vlan 10
+ spanning-tree portfast
+ no shutdown
+
+! PC-2: trunk 802.1Q, solo VLAN 20 y 30.
+! Si el switch responde "Invalid input" a la línea "switchport trunk encapsulation dot1q", bórrala:
+! significa que ese modelo solo soporta 802.1Q y no la necesita.
+interface GigabitEthernet1/0/2
+ description PC-2 OPERACIONES (trunk 20,30)
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ switchport trunk native vlan 999
+ switchport trunk allowed vlan 20,30
+ spanning-tree portfast trunk
+ no shutdown
+
+! PC-3: trunk 802.1Q, solo VLAN 40 y 99 (en este perfil el switch enruta, PC-3 no).
+interface GigabitEthernet1/0/3
+ description PC-3 ADMIN-INFRA (trunk 40,99)
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ switchport trunk native vlan 999
+ switchport trunk allowed vlan 40,99
+ spanning-tree portfast trunk
+ no shutdown
+exit
+
+end
+! Guardar y comprobar (ver verificacion.md):
+!   write memory

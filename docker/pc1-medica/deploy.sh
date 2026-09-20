@@ -19,5 +19,15 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+# Carga IFACE, PERFIL (y el resto de .env). PC-1 no crea sub-interfaces ni rutas en ningún perfil (puerto
+# access: su gateway 10.10.10.1 es la SVI del switch en l3 y PC-3 en l2); solo se valida PERFIL para
+# detectar un .env mal configurado.
+set -a
+source .env
+set +a
+REPO_ROOT="$(cd ../.. && pwd)"
+source "${REPO_ROOT}/scripts/perfil.sh"
+echo "PC-1: perfil ${PERFIL} (sin pasos de red propios)."
+
 docker compose up -d
 docker compose ps

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Un solo comando para dejar arriba PC-3 (Servidor de Administración e Infraestructura).
-# Orden obligatorio: sub-interfaces 802.1Q (VLAN40/99, +10/20/30 si aplica
-# el fallback L2) -> reglas de firewall (solo si FALLBACK_L2=true) -> docker compose.
+# Orden obligatorio: sub-interfaces 802.1Q (VLAN40/99; en PERFIL=l2 también 10/20/30 y el enrutamiento)
+# -> reglas de firewall (solo PERFIL=l2) -> certificados -> docker compose.
 #
-# Requiere root (crea interfaces de red y, en el fallback, reglas nft).
+# Requiere root (crea interfaces de red y, en el perfil l2, reglas nft).
 # Ejecutar con: sudo ./deploy.sh
-# (IFACE y FALLBACK_L2 se leen del archivo .env de esta carpeta)
+# (IFACE y PERFIL se leen del archivo .env de esta carpeta; PERFIL=l3 o PERFIL=l2, ver .env.example)
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -22,16 +22,19 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-# Carga IFACE, FALLBACK_L2 (y el resto de .env) al entorno, para que las
+# Carga IFACE, PERFIL (y el resto de .env) al entorno, para que las
 # use tanto los scripts de VLANs/firewall como docker compose.
 set -a
 source .env
 set +a
 
-"${REPO_ROOT}/scripts/setup-vlans-pc3.sh"
+# Valida PERFIL (l2|l3) y localiza despliegue/<perfil>/scripts.
+source "${REPO_ROOT}/scripts/perfil.sh"
 
-if [ "${FALLBACK_L2:-false}" = "true" ]; then
-  "${REPO_ROOT}/scripts/firewall-pc3-matriz.sh"
+"${PERFIL_DIR}/scripts/setup-vlans-pc3.sh"
+
+if [ "${PERFIL}" = "l2" ]; then
+  "${PERFIL_DIR}/scripts/firewall-pc3-matriz.sh"
 fi
 
 # Certificados de LDAPS (CA interna + certificado de OpenLDAP): idempotente, no regenera si siguen vigentes.
