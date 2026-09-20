@@ -43,7 +43,7 @@ services:
   # ERPNext: solo se exponen los perfiles y páginas del módulo HR (ver docs,
   # sección 6).
   erpnext-db:
-    image: mariadb:10.6
+    image: mariadb:10.6.28@sha256:40153feb479c0da88b5cfe3f50f44c91f7baf05a1b7bcc5beb7eb37a890a8f16
     container_name: erpnext-db
     restart: unless-stopped
     command:
@@ -63,14 +63,14 @@ services:
       - erpnext_internal
 
   erpnext-redis-cache:
-    image: redis:7
+    image: redis:7.4.11@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
     container_name: erpnext-redis-cache
     restart: unless-stopped
     networks:
       - erpnext_internal
 
   erpnext-redis-queue:
-    image: redis:7
+    image: redis:7.4.11@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
     container_name: erpnext-redis-queue
     restart: unless-stopped
     volumes:
@@ -80,7 +80,7 @@ services:
 
   # Job único: escribe la configuración común (BD, Redis, socketio).
   erpnext-configurator:
-    image: &erpnext_image frappe/erpnext:v15
+    image: &erpnext_image frappe/erpnext:v15.121.3@sha256:7b52acb52af9ac1721aa9922e06fab198e608bc748d3d3adae388aba364243fb
     container_name: erpnext-configurator
     restart: "no"
     depends_on:
@@ -273,6 +273,13 @@ services:
       UPSTREAM_REAL_IP_RECURSIVE: "off"
       PROXY_READ_TIMEOUT: "120"
       CLIENT_MAX_BODY_SIZE: 50m
+    # /api/method/ping devuelve 404 hasta que erpnext-create-site termina (~9 min la primera vez).
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/api/method/ping', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 900s
     volumes: *erpnext_volumes
     networks:
       erpnext_internal:
@@ -281,7 +288,7 @@ services:
 
   # --- Infraestructura transversal (VLAN 99) ---
   openldap:
-    image: osixia/openldap:1.5.0
+    image: osixia/openldap:1.5.0@sha256:18742e9c449c9c1afe129d3f2f3ee15fb34cc43e5f940a20f3399728f41d7c28
     container_name: openldap
     restart: unless-stopped
     # --copy-service: la imagen edita los LDIF al cargarlos; así no modifica el montaje.
@@ -313,7 +320,7 @@ services:
         ipv4_address: 10.10.99.10
 
   dns:
-    image: internetsystemsconsortium/bind9:9.18
+    image: internetsystemsconsortium/bind9:9.18@sha256:1ffb29c718ee2540c5643c1e8166629a07bbd505f99107baae535e9f86eb7eef
     container_name: dns-interno
     restart: unless-stopped
     volumes:
@@ -324,7 +331,7 @@ services:
         ipv4_address: 10.10.99.11
 
   ntp:
-    image: cturra/ntp:latest
+    image: cturra/ntp:latest@sha256:7224d4e7c7833aabbcb7dd70c46c8a8dcccda365314c6db047b9b10403ace3bc
     container_name: ntp-interno
     restart: unless-stopped
     environment:
