@@ -1,5 +1,7 @@
 # Receta L2 — el switch solo conmuta; PC-3 enruta y aplica la matriz
 
+> **Documento de diseño: no aplica al laboratorio Windows.** Los PCs del laboratorio son Windows con Docker Desktop, que no permite VLAN 802.1Q ni `macvlan` sobre la tarjeta de red. Este documento describe el diseño de red propuesto (switch con VLANs, PCs Linux): su lógica se validó por simulación (`despliegue/l2-fallback/pruebas/`), no sobre un switch real. No sigas estos pasos tal cual en el laboratorio: la guía para Windows está en preparación. Para saber qué está validado y cómo, ver el [README raíz](../../README.md#estado-de-validación).
+
 Usa esta receta si el switch **no** tiene interfaces `VlanNN` con IP y no acepta `ip routing` ([cómo saberlo](../README.md)). Síguela de arriba abajo. En cada paso hay una comprobación: **no pases al siguiente hasta que la tuya dé el resultado esperado.**
 
 **Idea en una línea:** el switch solo reparte tramas por VLAN. Ningún PC toca las 5 VLANs por sí solo, así que **PC-3 se convierte en el router** (router-on-a-stick): su trunk lleva las 5 VLANs, tiene la IP `10.10.X.1` de cada una, y una tabla `nftables` aplica la matriz. El gateway de cada VLAN deja de ser el switch y pasa a ser PC-3.
