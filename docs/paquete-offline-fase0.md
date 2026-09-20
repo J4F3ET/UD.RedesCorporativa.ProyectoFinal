@@ -1,7 +1,7 @@
 # Paquete offline de la Fase 0
 
-> **NO VERIFICADO — pendiente de ejecutar con el motor Docker sano.**
-> Los scripts y este documento se escribieron sin poder ejecutar Docker. Lo único comprobado: sintaxis de bash (`bash -n`) y de PowerShell (analizador del lenguaje), ASCII puro y LF, y que el analizador de compose (`preparar-paquete-offline.sh --listar`) extrae bien las imágenes de los tres compose reales (tabla de abajo). **Todo lo demás está sin ejecutar**: `docker pull/save/load`, el `build` de OpenVPMS, la generación de certificados dentro del script, `Expand-Archive`, y el comportamiento de los `docker-compose.override.yml`. Cuando se pruebe, anotar el resultado en "Registro de verificación".
+> **PARCIALMENTE VERIFICADO. ANTES DE IR AL LABORATORIO hay que probar, en este orden: (1) ejecutar `preparar-paquete-offline.sh` de nuevo y comprobar que el paquete trae `overrides/`; (2) en una máquina de prueba, `instalar.ps1 -Perfil pcN` con el paquete; (3) `docker load` + `docker compose up -d` **con la red cortada** (prueba B3). Sin esas tres pruebas el paquete NO está garantizado.**
+> La preparación (lado con Internet) sí se ejecutó una vez de punta a punta; la instalación (lado laboratorio) **no se ha ejecutado nunca**. Detalle en "Registro de verificación" al final.
 
 **Situación (decidida por el usuario):** tres PCs **Windows físicos** con **Docker Desktop y WSL2 ya instalados**, cada uno con su propio motor Docker, y **sin Internet** en el laboratorio (habrá Internet limitado el primer día: el paquete completo es la hipótesis segura). Por eso el paquete **no lleva** `.deb`, ni instalador de Docker, ni `apt`. Se renuncia a VLAN 802.1Q y macvlan (Docker Desktop no las soporta); el despliegue en Windows lo define juan, y este paquete **no lo escribe**: deja el proyecto, las imágenes, los certificados y el override.
 
@@ -95,8 +95,23 @@ Hace, y se detiene en el primer fallo: (1) Docker Desktop responde y la arquitec
 
 ## Registro de verificación
 
-| Fecha | Quién | Qué se ejecutó | Resultado |
-|---|---|---|---|
-| — | — | *Nada aún: pendiente de Docker sano.* | — |
+Prueba del 2026-09-20 en la máquina de preparación (Docker 29.8.0), sobre esta rama fusionada con la rama de los compose para Docker Desktop (#21, commit `28b60d1` del árbol de prueba). Salida en disco D:.
 
-Lista mínima para cerrar la verificación: (a) `docker info -f '{{.DriverStatus}}'` en los PCs para saber el almacén; (b) ejecutar `preparar-paquete-offline.sh` de punta a punta; (c) en un PC **sin red**, `instalar.ps1 -Perfil pcN`, luego `docker compose config --quiet` y `up -d` sin ninguna descarga; (d) repetir en un Docker Desktop con almacén clásico si existe uno; (e) actualizar tutoriales y runbooks (los "HUECO: comandos pendientes", hoy escritos para Ubuntu) con los comandos comprobados.
+**VERIFICADO (ejecutado y observado):**
+
+- `docker info` devuelve el almacén `io.containerd.snapshotter.v1` (Docker 29.8.0, x86_64).
+- `preparar-paquete-offline.sh` terminó de punta a punta con **EXIT 0** y **3,4 GB** de salida.
+- Los **11 `docker pull` por digest**, el `docker tag` y el `docker save` por etiqueta de cada imagen (ntp, erpnext, bind9, inventree, mariadb, mysql, netshoot, openldap, postgres, pretix, redis) y el **`docker build` de OpenVPMS** (descargó el release y el driver JDBC).
+- **Certificados** con el SAN esperado (`DNS:ldap.reservaviva.local`, `DNS:openldap`, `DNS:localhost`, `IP:10.10.99.10`, `IP:127.0.0.1`) y el reparto correcto por PC: `certs/pc1` y `certs/pc2` solo con `ca.crt`; `certs/pc3` con `ca.crt`, `ca.key`, `ldap.crt` y `ldap.key`.
+- **`proyecto.zip`** contiene `docker/pc3-administracion-infra/bind/generar-zona.ps1` y `bind/zones/db.reservaviva.local.tpl`, y no contiene `.git` ni `.env`.
+- `MANIFEST.sha256` generado; `INVENTARIO.tsv` con la columna de perfiles correcta (redis en pc2 y pc3, netshoot en `simuladores`).
+
+**NO VERIFICADO (y por qué):**
+
+- **Que se genere la carpeta `overrides/`.** La ejecución completa salió **sin** esa carpeta, por un **accidente mío, no por un fallo del script**: borré el directorio de salida mientras otra ejecución anterior seguía viva escribiendo en él, y eso eliminó los overrides ya escritos. La segunda ejecución, limpia, que iba a confirmarlo, la mató el sistema por memoria agotada y no se relanzó. El código que los genera (paso 1 del script) está sin comprobar en ejecución.
+- **Que `instalar.ps1` funcione.** Solo se comprobó que su sintaxis es válida; no se ha ejecutado nunca (Get-FileHash contra el manifiesto, `docker load`, `Expand-Archive`, copia de certificados y override).
+- **La prueba clave, `docker load` + `docker compose up` sin red (B3).** No se hizo: es la que decide si el override hace falta (almacén clásico) o sobra (containerd, el de la máquina de preparación), y si `pull_policy: never` se comporta como se espera.
+- **Que `proyecto.zip` conserve LF en los `.sh`.** Se miró con `od` sin resultado concluyente; el script fuerza `core.autocrlf=false` en `git archive`, pero no se confirmó sobre el zip resultante.
+- El almacén de imágenes de los **PCs del laboratorio** (no se sabe si es clásico o containerd) y que el motor de cada PC arranque las apps con las imágenes cargadas.
+
+Lista mínima para cerrar la verificación: (a) `docker info -f '{{.DriverStatus}}'` en los PCs para saber el almacén; (b) repetir `preparar-paquete-offline.sh` y comprobar que aparece `overrides/*.yml`; (c) en un PC **sin red**, `instalar.ps1 -Perfil pcN`, luego `docker compose config --quiet` y `up -d` sin ninguna descarga; (d) repetir en un Docker Desktop con almacén clásico si existe uno; (e) actualizar tutoriales y runbooks con los comandos comprobados.

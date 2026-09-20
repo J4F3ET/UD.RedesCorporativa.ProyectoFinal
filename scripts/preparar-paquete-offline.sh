@@ -4,10 +4,9 @@
 # y en cada uno se instala con instalar.ps1 -Perfil pc1|pc2|pc3 (= scripts/instalar-paquete-offline.ps1).
 #
 # ============================================================================================
-# NO VERIFICADO — pendiente de ejecutar con el motor Docker sano.
-# Este script se escribio sin poder ejecutar Docker. Solo esta comprobado que la sintaxis es valida y que
-# el analizador de compose (funcion listar_compose, abajo) extrae bien las imagenes de los tres compose
-# reales. Falta ejecutarlo entero y despues probar el paquete en un PC sin red.
+# PARCIALMENTE VERIFICADO (2026-09-20): este script corrio de punta a punta con Docker 29.8.0 (EXIT 0, 3,4 GB); en esa
+# ejecucion NO se comprobo que se genere overrides/ (se perdio por un accidente al borrar la salida). Falta repetirlo y
+# probar el paquete en un PC sin red. Detalle en docs/paquete-offline-fase0.md, "Registro de verificacion".
 # ============================================================================================
 #
 # Contenido del paquete (todo se genera en SALIDA):
