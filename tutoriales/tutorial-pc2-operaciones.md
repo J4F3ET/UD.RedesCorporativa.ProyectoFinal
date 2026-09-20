@@ -70,6 +70,7 @@ Se abre un editor de texto simple. Vas a ver algo así:
 
 ```
 IFACE=eth0
+PERFIL=l3
 PRETIX_DB_PASSWORD=cambiar-esta-clave
 INVENTREE_DB_PASSWORD=cambiar-esta-clave
 INVENTREE_ADMIN_USER=admin
@@ -80,6 +81,7 @@ PRETIX_ADMIN_PASSWORD=cambiar-esta-clave
 ```
 
 - Si el nombre que anotaste en el Paso 5 **no** era `eth0`, bórralo y escribe el nombre correcto después del `=`.
+- `PERFIL`: pon `l3` o `l2`, **el mismo en los tres PCs**. Es el nombre de la receta del switch que el equipo técnico esté siguiendo: `l3` si usa la carpeta `despliegue/l3-switch/` y `l2` si usa `despliegue/l2-fallback/`. Si todavía nadie sabe cuál es, pregúntale al equipo técnico antes de encender: el archivo trae `l3` por defecto y solo sirve si el switch es de ese tipo.
 - Cambia cada `cambiar-esta-clave` por una contraseña propia (sin espacios). Pueden ser distintas entre sí.
 - `INVENTREE_ADMIN_PASSWORD` y `PRETIX_ADMIN_PASSWORD` son las contraseñas con las que se entra a InvenTree y a Pretix por primera vez (usuario `admin` en InvenTree, y el correo `PRETIX_ADMIN_EMAIL` en Pretix). Anótalas en un lugar seguro. Los usuarios se crean solos: no hay que crear ningún administrador a mano.
 

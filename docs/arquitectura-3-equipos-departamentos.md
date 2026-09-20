@@ -64,20 +64,26 @@ Esta matriz da **dos tipos de evidencia distintos**, que antes con 2 PCs no exis
 
 ## 5. Routing/ACL: host vs. switch
 
-Igual que en el diseño híbrido anterior, esto depende de si el switch soporta **SVIs/ACLs L3** (pregunta abierta #1 del handoff, aún sin confirmar con el laboratorio). A diferencia del diseño de 2 PCs, aquí **ningún PC toca las 5 VLANs a la vez**, así que si el switch es puramente L2 no basta con que cada PC enrute solo sus propias VLANs: nadie podría enrutar, por ejemplo, VLAN10 (PC-1) hacia VLAN99 (PC-3). Hay que resolverlo así:
+Quién enruta entre VLANs y quién aplica la matriz de la sección 4 depende de si el switch del laboratorio es **L3** (tiene una SVI por VLAN) o **L2** (solo conmuta). **Falta confirmar con el laboratorio de la universidad cuál es.** Como ningún PC toca las 5 VLANs a la vez, en un switch L2 no basta con que cada PC enrute lo suyo: nadie podría enrutar, por ejemplo, VLAN10 (PC-1) hacia VLAN99 (PC-3).
 
-- **Si el switch es L3 (preferido):** el switch tiene una SVI por VLAN y aplica directamente las ACLs de la matriz de la sección 4. Cada PC solo necesita macvlan/sub-interfaces para las VLANs que efectivamente hospeda (tal como están definidos los tres `docker-compose.yml`), sin `iptables` de por medio. Es la opción más limpia porque deja toda la evidencia de la demo en el propio switch — más alineado con "demostrar que la comunicación entre el switch y la red interna es fiable".
+Los dos caminos están preparados, cada uno como una carpeta autónoma con su receta paso a paso. El día de la instalación se mira el switch y se sigue una sola:
 
-- **Si el switch es solo L2 (fallback):** se necesita un único router-on-a-stick central que vea las 5 VLANs. Se designa a **PC-3** (ya es la máquina de infraestructura) para esa función adicional:
-  - El puerto trunk de PC-3 pasa de permitir solo VLAN 40/99 a permitir **las 5 VLANs (10, 20, 30, 40, 99)**.
-  - El puerto trunk de PC-2 sigue permitiendo solo VLAN 20/30 (sin cambios) — el switch puede repetir las mismas etiquetas VLAN en varios puertos, eso es normal en 802.1Q.
-  - PC-3 crea sub-interfaces adicionales `eth0.10`, `eth0.20`, `eth0.30` (solo para enrutar, sin contenedores enganchados ahí) además de sus `eth0.40`/`eth0.99` habituales, habilita `ip_forward`, y aplica en `nftables`/`iptables` exactamente la matriz de la sección 4.
-  - El gateway de cada VLAN (10.10.X.1) pasa a ser la IP de PC-3 en la sub-interfaz correspondiente, en vez de una SVI del switch.
-  - PC-1 y PC-2 no necesitan `ip_forward` propio en este escenario: solo enrutan hacia PC-3 como gateway.
+| Perfil | Cuándo | Quién enruta y aplica la matriz | Receta |
+|---|---|---|---|
+| **L3** | El switch tiene SVIs (`Vlan10`, `Vlan20`… con IP) | El switch: una SVI `10.10.X.1` por VLAN y las ACL de la matriz. Los PCs solo crean sus sub-interfaces/macvlan, sin `ip_forward` ni `nftables`. La evidencia de la demo queda en el propio switch. | [`../despliegue/l3-switch/`](../despliegue/l3-switch/README.md) |
+| **L2** | El switch solo conmuta VLANs | **PC-3** como router-on-a-stick (ver abajo) | [`../despliegue/l2-fallback/`](../despliegue/l2-fallback/README.md) |
 
-Ver `scripts/setup-vlans-pc3.sh` (crea las sub-interfaces, con las 3 adicionales comentadas para activarlas solo si aplica el fallback L2) y `scripts/firewall-pc3-matriz.sh` (reglas `nftables` que implementan la matriz de la sección 4).
+Para saber cuál es, [`../despliegue/README.md`](../despliegue/README.md) da el procedimiento de comprobación en la consola del switch.
 
-**Acción pendiente igual que antes:** confirmar con el laboratorio de la universidad la capacidad real del switch — de eso depende cuál de las dos opciones se implementa.
+**Qué cambia en el perfil L2:**
+
+- El puerto trunk de PC-3 pasa de permitir VLAN 40/99 a permitir **las 5 VLANs (10, 20, 30, 40, 99)**.
+- El trunk de PC-2 sigue permitiendo solo VLAN 20/30 y el puerto de PC-1 sigue siendo access VLAN 10; el switch puede repetir las mismas etiquetas VLAN en varios puertos, eso es normal en 802.1Q.
+- PC-3 crea sub-interfaces adicionales `eth0.10`, `eth0.20`, `eth0.30` (solo para enrutar, sin contenedores enganchados), habilita `ip_forward` y aplica con `nftables` exactamente la matriz de la sección 4.
+- El gateway de cada VLAN (`10.10.X.1`) pasa a ser la IP de PC-3 en la sub-interfaz correspondiente, en vez de una SVI del switch.
+- PC-1 y PC-2 no enrutan: usan a PC-3 como gateway.
+
+**Estado de la validación:** ninguno de los dos perfiles se ha probado todavía contra un switch real (macvlan, 802.1Q y la matriz siguen pendientes de hardware). Lo que sí está probado es la capa de software en un solo host (ver [`prueba-smoke-test-resultados.md`](prueba-smoke-test-resultados.md)).
 
 ## 6. Aplicaciones y contenedores por PC
 
@@ -104,9 +110,9 @@ Notas heredadas del handoff que siguen aplicando sin cambios por el split en 3 e
 
 Los `docker-compose.yml` por sí solos **no** son plug-and-play: hace falta que las sub-interfaces VLAN existan antes de que Docker cree las redes `macvlan`, que las contraseñas estén definidas, y que todo eso sobreviva a un reinicio del PC en pleno laboratorio. Para eso cada carpeta de `docker/pcN-*/` trae:
 
-- `.env.example` → copiar a `.env` y definir ahí las contraseñas, el nombre de la tarjeta de red (`IFACE`) y, solo en PC-3, `FALLBACK_L2` (el `.env` real nunca se commitea, ver `.gitignore`). Es el **único** archivo que hay que editar — nada de tocar YAML ni scripts.
+- `.env.example` → copiar a `.env` y definir ahí las contraseñas, el nombre de la tarjeta de red (`IFACE`) y `PERFIL` (`l3` o `l2`, según el switch; ver sección 5) (el `.env` real nunca se commitea, ver `.gitignore`). Es el **único** archivo que hay que editar — nada de tocar YAML ni scripts.
 - `scripts/generar-certificados.sh` → crea la CA interna y el certificado de LDAPS (636) de OpenLDAP y los deja en `docker/pc3-administracion-infra/certs/`, donde el compose los monta. El `deploy.sh` de PC-3 lo ejecuta solo (idempotente); la `ca.crt` resultante se copia a PC-1 y PC-2 para que sus clientes confíen en ella.
-- `deploy.sh` → un solo comando que lee ese `.env` y hace, en el orden correcto: crear/validar las sub-interfaces VLAN (si aplica) → aplicar firewall (solo PC-3 si `FALLBACK_L2=true`) → `docker compose up -d`. Es **idempotente**: correrlo dos veces no rompe nada.
+- `deploy.sh` → un solo comando que lee ese `.env` y hace, en el orden correcto: validar `PERFIL` → crear las sub-interfaces VLAN con los scripts de `despliegue/<perfil>/scripts/` → aplicar el firewall (solo PC-3 con `PERFIL=l2`) → `docker compose up -d`. Es **idempotente**: correrlo dos veces no rompe nada.
 
 Para alguien no técnico ejecutando esto en el laboratorio, ver los tutoriales paso a paso en [`tutoriales/`](../tutoriales/) (uno por PC, con capturas de lo que debe ver en pantalla).
 
@@ -121,7 +127,7 @@ sudo ./deploy.sh
 cd docker/pc2-operaciones && cp .env.example .env && nano .env
 sudo ./deploy.sh
 
-# PC-3 (dejar FALLBACK_L2=false en .env salvo que el switch sea L2 puro)
+# PC-3 (PERFIL=l3 o PERFIL=l2 en .env, según el switch)
 cd docker/pc3-administracion-infra && cp .env.example .env && nano .env
 sudo ./deploy.sh
 ```
@@ -138,16 +144,16 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now reserva-viva-pc1.service   # el que corresponda
 ```
 
-En PC-3, `FALLBACK_L2` se sigue leyendo del `.env` de esa carpeta — no hay que tocar el `.service`.
+`PERFIL` se lee del `.env` de cada carpeta — no hay que tocar el `.service`.
 
 Con esto, apagar y prender cualquiera de los 3 equipos ya no requiere que alguien recuerde los pasos manuales — es la definición real de "plug-and-play" para este laboratorio.
 
 ## 9. Próximos pasos actualizados
 
-1. Confirmar con el laboratorio si el switch es L2 o L3 (define si PC-2/PC-3 necesitan `iptables` de router-on-a-stick).
+1. Confirmar con el laboratorio si el switch es L2 o L3 y seguir la receta del perfil que toque (sección 5): [`despliegue/l3-switch/`](../despliegue/l3-switch/README.md) o [`despliegue/l2-fallback/`](../despliegue/l2-fallback/README.md). Ambos están preparados; solo falta saber cuál aplica.
 2. ~~Validar en software puro (un solo host)~~ **Hecho** con `pruebas/smoke-test-3-pcs/` (resultados en [`prueba-smoke-test-resultados.md`](prueba-smoke-test-resultados.md)). Hallazgos que se están cerrando: compose de PC-2 corregido (Pretix e InvenTree responden 200), stack completo de ERPNext y configuración de bind9 en PC-3, superusuarios de Pretix/InvenTree automatizados en `deploy.sh`. **No cubre** macvlan, 802.1Q ni segmentación: eso solo se valida con el switch real.
 3. Construir el Dockerfile custom de OpenVPMS para PC-1 (dejarlo con tiempo suficiente, es el mayor riesgo técnico). Ya construido y probado en un host (login HTTP 200, arranque idempotente); ver [`prueba-smoke-test-resultados.md`](prueba-smoke-test-resultados.md) §3.
-4. Cablear los 3 equipos al switch (PC-1 access VLAN10; PC-2 y PC-3 trunk) y correr los scripts de `scripts/` una sola vez por equipo.
-5. `docker compose up -d` en cada PC con su compose correspondiente.
+4. Cablear los 3 equipos al switch (PC-1 access VLAN10; PC-2 y PC-3 trunk), configurar el switch según el perfil (`despliegue/l3-switch/` o `despliegue/l2-fallback/`) y correr el `deploy.sh` de cada equipo.
+5. Comprobar que cada PC quedó arriba (el `deploy.sh` ya ejecuta `docker compose up -d` con su compose).
 6. Ejecutar el plan de pruebas de la sección 7 y documentar evidencia (capturas, logs) para la sustentación.
 7. Cerrar por escrito los gaps de alcance de ERPNext y Pretix vs. PretixPOS en el informe.

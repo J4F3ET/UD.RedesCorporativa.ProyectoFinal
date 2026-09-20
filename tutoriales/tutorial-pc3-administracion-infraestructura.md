@@ -8,11 +8,11 @@ Este computador va a correr **ERPNext** (el módulo de Recursos Humanos) y los t
 - [ ] Tienes la contraseña de administrador del PC.
 - [ ] Tienes el cable de red a la mano.
 - [ ] Hay Internet disponible (solo para esta instalación inicial).
-- [ ] **Pregúntale al equipo técnico si el switch del laboratorio es "L2" o "L3"** (esto define un valor que vas a poner en el Paso 6). Si nadie lo sabe todavía, deja la opción por defecto (`false`) y sigue — se puede ajustar después.
+- [ ] **Pregúntale al equipo técnico si el switch del laboratorio es "L2" o "L3"** (esto define un valor, `PERFIL`, que vas a poner en el Paso 6, y es el mismo en los tres PCs). Si nadie lo sabe todavía, espera a saberlo antes de encender: el archivo trae `l3` por defecto y solo sirve si el switch es L3.
 
 ## Paso 1 — Conectar el cable de red
 
-Conecta el cable de red de este PC al puerto del switch marcado como **"Administración" / "Infraestructura" / TRUNK**. Este puerto debe estar configurado por el compañero de redes como **trunk permitiendo las VLAN 40 y 99** (y además las VLAN 10, 20 y 30 si el switch es L2 puro — pregúntale al equipo técnico). Si tienes dudas de cuál es, pregunta antes de continuar.
+Conecta el cable de red de este PC al puerto del switch marcado como **"Administración" / "Infraestructura" / TRUNK**. Este puerto debe estar configurado por el compañero de redes como **trunk permitiendo las VLAN 40 y 99** (y además las VLAN 10, 20 y 30 si el switch es L2 — pregúntale al equipo técnico; en ese caso este PC hace de router de toda la red). Si tienes dudas de cuál es, pregunta antes de continuar.
 
 ## Paso 2 — Abrir una terminal
 
@@ -71,7 +71,7 @@ Se abre un editor de texto simple. Vas a ver algo así:
 
 ```
 IFACE=eth0
-FALLBACK_L2=false
+PERFIL=l3
 LDAP_ADMIN_PASSWORD=cambiar-esta-clave
 ERPNEXT_DB_ROOT_PASSWORD=cambiar-esta-clave-db
 ERPNEXT_ADMIN_PASSWORD=cambiar-esta-clave-erp
@@ -79,7 +79,7 @@ ERPNEXT_SITE=rrhh.reservaviva.local
 ```
 
 - Si el nombre que anotaste en el Paso 5 **no** era `eth0`, bórralo y escribe el nombre correcto después del `=`.
-- `FALLBACK_L2`: déjalo en `false` si el equipo técnico confirmó que el switch soporta VLANs con enrutamiento ("L3"), o si todavía no lo saben. Cámbialo a `true` **solo** si te confirmaron que el switch es "L2 puro" (sin esa capacidad).
+- `PERFIL`: pon `l3` o `l2`, **el mismo en los tres PCs**. Es el nombre de la receta del switch que el equipo técnico esté siguiendo: `l3` si usa la carpeta `despliegue/l3-switch/` y `l2` si usa `despliegue/l2-fallback/`. Si todavía nadie sabe cuál es, pregunta antes de seguir; `l3` (el valor que trae el archivo) solo sirve si el switch es L3.
 - Cambia `cambiar-esta-clave` por una contraseña propia (sin espacios) — esta va a ser la contraseña de administrador del directorio de usuarios (LDAP) de todo el laboratorio, guárdala en un lugar seguro.
 - Cambia también `ERPNEXT_DB_ROOT_PASSWORD` (base de datos de ERPNext) y `ERPNEXT_ADMIN_PASSWORD`. Esta última es la contraseña del usuario `Administrator` con el que se entra a ERPNext; anótala. `ERPNEXT_SITE` déjalo como está. El sitio de ERPNext se crea solo.
 
@@ -91,7 +91,7 @@ Para guardar y salir: presiona `Ctrl` + `O`, luego `Enter`, luego `Ctrl` + `X`.
 sudo ./deploy.sh
 ```
 
-Este comando hace automáticamente todo lo necesario: prepara la red para las VLANs (40, 99, y las adicionales si pusiste `FALLBACK_L2=true`) y luego descarga y arranca las aplicaciones. La primera vez tarda varios minutos, depende de la velocidad de Internet. No necesitas hacer nada manual de redes — el script se encarga.
+Este comando hace automáticamente todo lo necesario: prepara la red para las VLANs (40 y 99, y además 10, 20 y 30 si pusiste `PERFIL=l2`, porque entonces este PC hace de router) y luego descarga y arranca las aplicaciones. La primera vez tarda varios minutos, depende de la velocidad de Internet. No necesitas hacer nada manual de redes — el script se encarga.
 
 El instalador también genera solo los certificados de seguridad del directorio de usuarios (LDAPS); no tienes que hacer nada. Quedan en la carpeta `certs/` de este PC y **no se suben a GitHub**.
 
@@ -129,7 +129,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now reserva-viva-pc3.service
 ```
 
-Listo. De ahora en adelante, cada vez que este PC se encienda, ERPNext (RRHH), LDAP, DNS y NTP van a quedar funcionando solos, sin que nadie tenga que hacer nada. Si más adelante el equipo técnico confirma que hay que cambiar `FALLBACK_L2`, solo hace falta editar el `.env` (Paso 6) y volver a correr `sudo ./deploy.sh` — no hay que tocar nada más.
+Listo. De ahora en adelante, cada vez que este PC se encienda, ERPNext (RRHH), LDAP, DNS y NTP van a quedar funcionando solos, sin que nadie tenga que hacer nada. Si más adelante el equipo técnico confirma que hay que cambiar `PERFIL`, solo hace falta editar el `.env` (Paso 6) y volver a correr `sudo ./deploy.sh` — no hay que tocar nada más.
 
 ## Si algo sale mal
 
