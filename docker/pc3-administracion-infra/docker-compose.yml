@@ -81,8 +81,14 @@ services:
       - erpnext_internal
 
   # Job único: escribe la configuración común (BD, Redis, socketio).
+  # Imagen oficial de Frappe (la publica el workflow del repo frappe/hrms), no de un tercero. Sustituye a
+  # frappe/erpnext:v15.121.3: trae las MISMAS versiones (frappe 15.121.0, erpnext 15.121.3) y añade hrms 15.64.1.
+  # Hace falta porque desde la v14 la gestión de turnos NO está en ERPNext sino en la app hrms, y el entregable
+  # promete "programación de turnos 24/7": sin ella no existen shift_type, shift_assignment ni shift_schedule.
+  # Viene de ghcr.io, no de Docker Hub; para el laboratorio sin red hay que transportarla igual que las demás.
+  # El ancla la reutilizan los otros 8 servicios de ERPNext (*erpnext_image).
   erpnext-configurator:
-    image: &erpnext_image frappe/erpnext:v15.121.3@sha256:7b52acb52af9ac1721aa9922e06fab198e608bc748d3d3adae388aba364243fb
+    image: &erpnext_image ghcr.io/frappe/hrms:v15.64.1@sha256:b7ba52bc9aeb288f47d0aea9dc94635843ea1a7a83c45df724449f613b2f6395
     container_name: erpnext-configurator
     restart: "no"
     depends_on:
@@ -131,6 +137,7 @@ services:
             --db-root-password "$$DB_ROOT_PASSWORD" \
             --admin-password "$$ADMIN_PASSWORD" \
             --install-app erpnext \
+            --install-app hrms \
             --set-default || exit 1
         fi
         bench --site "$$SITE" enable-scheduler
