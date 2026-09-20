@@ -43,8 +43,8 @@ Ejecutado el 2026-09-19 (Docker Desktop 29.8, kernel 6.6.87 WSL2):
   `iifname "gwNN" oifname "gwMM"`); salida 0. No es solo "no llegó": lo paró su regla.
 - **Mutación (mismo firewall, `setup-vlans-pc3.sh` sin las líneas `arp_ignore`/`arp_announce`):** 15
   comprobaciones fallan. Con `policy accept`, los bloqueos entre VLAN10/20/30 (6 celdas) **dejan pasar el
-  tráfico prohibido en silencio** y sus contadores quedan a 0; solo se bloquean las de VLAN40 (las
-  contadas). Es decir: sin `arp_ignore=1` la segmentación se cae sin error visible.
+  tráfico prohibido en silencio** y sus contadores quedan a 0; solo siguen bloqueadas las 6 celdas que
+  tocan VLAN40, y los únicos contadores que suben son los de origen VLAN40. Es decir: sin `arp_ignore=1` la segmentación se cae sin error visible.
 - **Perfil L3 frente a `despliegue/l3-switch/scripts/setup-vlans-pc3.sh`:** la topología simulada coincide
   (PC-3 solo con `eth0.40` y `eth0.99` sin IP, sin `gwNN`; las IP `.1` están en las SVI del switch).
 
