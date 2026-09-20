@@ -7,7 +7,7 @@ Este computador va a correr **OpenVPMS**, el programa de historias clínicas de 
 - [ ] El PC tiene Ubuntu Server ya instalado.
 - [ ] Tienes la contraseña de administrador del PC.
 - [ ] Tienes el cable de red a la mano.
-- [ ] Hay Internet disponible (solo para esta instalación inicial).
+- [ ] Tienes el **paquete de la Fase 0** (preparación previa, hecha en otra máquina con Internet: Docker, las imágenes y el proyecto). **El laboratorio no tiene Internet.** Ver [`despliegue/README.md`](../despliegue/README.md).
 
 ## Paso 1 — Conectar el cable de red
 
@@ -24,30 +24,31 @@ De aquí en adelante, cada bloque de texto gris es algo que debes **copiar y peg
 
 ## Paso 3 — Instalar Docker
 
-Docker es el programa que va a correr la aplicación. Se instala una sola vez, copiando y pegando esto:
+Docker es el programa que va a correr las aplicaciones. **En el laboratorio no hay Internet**, así que no se descarga aquí: se instala desde el paquete de la Fase 0.
+
+> **HUECO: comandos pendientes.** Los está preparando pepe (`docker save` / `docker load`). El USB de la Fase 0 lleva cuatro cosas: los paquetes de Docker para la versión exacta de Ubuntu Server, el proyecto entero, las imágenes de las aplicaciones y la de OpenVPMS ya construida. Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
+
+Al terminar, comprueba que quedó instalado:
 
 ```bash
-curl -fsSL https://get.docker.com | sudo sh
+docker --version
 ```
 
-Te va a pedir la contraseña del PC (la del administrador) — escríbela y presiona `Enter`. No vas a ver los caracteres mientras escribes la contraseña, eso es normal, sigue escribiendo y da `Enter`.
+Debe mostrar un número de versión.
 
-Espera a que termine (puede tardar unos minutos). Al final debería decir algo como "Docker Engine v... is installed".
+## Paso 4 — Dejar el proyecto en el PC
 
-## Paso 4 — Descargar el proyecto
+El proyecto no se descarga de GitHub (no hay Internet): llega dentro del paquete de la Fase 0.
+
+> **HUECO: comandos pendientes.** Los está preparando pepe (`docker save` / `docker load`). El USB de la Fase 0 lleva cuatro cosas: los paquetes de Docker para la versión exacta de Ubuntu Server, el proyecto entero, las imágenes de las aplicaciones y la de OpenVPMS ya construida. Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
+
+Cuando el proyecto esté en el PC, entra a la carpeta de este equipo:
 
 ```bash
-git clone https://github.com/J4F3ET/UD.RedesCorporativaa.ProyectoFinak.git
 cd UD.RedesCorporativaa.ProyectoFinak/docker/pc1-medica
 ```
 
-Si tu equipo te indicó una rama de trabajo distinta a la principal, después del `git clone` ejecuta también:
-
-```bash
-git checkout NOMBRE-DE-LA-RAMA
-```
-
-(reemplaza `NOMBRE-DE-LA-RAMA` por el nombre real que te dieron).
+(Si el paquete lo dejó en otra ruta, entra a esa carpeta y luego a `docker/pc1-medica`.)
 
 ## Paso 5 — Identificar el nombre de tu tarjeta de red
 
@@ -71,6 +72,7 @@ Se abre un editor de texto simple. Vas a ver algo así:
 ```
 IFACE=eth0
 PERFIL=l3
+IP_GESTION=
 OPENVPMS_DB_ROOT_PASSWORD=cambiar-esta-clave
 OPENVPMS_DB_PASSWORD=cambiar-esta-clave-2
 OPENVPMS_ADMIN_PASSWORD=Cambiar-Clave-3!
@@ -78,6 +80,7 @@ OPENVPMS_ADMIN_PASSWORD=Cambiar-Clave-3!
 
 - Si el nombre que anotaste en el Paso 5 **no** era `eth0`, bórralo y escribe el nombre correcto después del `=`.
 - `PERFIL`: pon `l3` o `l2`, **el mismo en los tres PCs**. Es el nombre de la receta del switch que el equipo técnico esté siguiendo: `l3` si usa la carpeta `despliegue/l3-switch/` y `l2` si usa `despliegue/l2-fallback/`. Si todavía nadie sabe cuál es, pregúntale al equipo técnico antes de encender: el archivo trae `l3` por defecto y solo sirve si el switch es de ese tipo.
+- `IP_GESTION`: una dirección propia de este PC para poder hacerle `ping` o entrar por `ssh` cuando el equipo técnico lo necesite. Este PC **no** necesita el certificado, así que puedes dejarla **vacía** (`IP_GESTION=`). Si el equipo técnico te pide activarla, pon `10.10.10.250`.
 - Cambia las tres contraseñas (`cambiar-esta-clave...`) por otras que tú elijas, sin espacios. La última, `OPENVPMS_ADMIN_PASSWORD`, es la que se usa para entrar a OpenVPMS con el usuario `admin`: anótala en un lugar seguro. **Esta debe tener mínimo 8 caracteres, con mayúscula, minúscula, número y un carácter especial** (por ejemplo `!`); si no cumple, OpenVPMS se niega a arrancar y lo dice en el mensaje de error.
 
 Para guardar y salir: presiona `Ctrl` + `O`, luego `Enter`, luego `Ctrl` + `X`.
@@ -88,9 +91,9 @@ Para guardar y salir: presiona `Ctrl` + `O`, luego `Enter`, luego `Ctrl` + `X`.
 sudo ./deploy.sh
 ```
 
-Esto va a descargar y construir la aplicación (unos 300 MB; tarda varios minutos la primera vez, depende de la velocidad de Internet) y dejarla funcionando. **La primera vez, OpenVPMS además prepara su base de datos y carga los datos iniciales por su cuenta: puede tardar unos minutos más después de que la tabla del Paso 8 diga "Up".** No hace falta que hagas nada; es normal.
+Esto va a arrancar la aplicación con la imagen que ya viene construida en el paquete de la Fase 0 (aquí no se descarga ni se construye nada) y dejarla funcionando. **La primera vez, OpenVPMS además prepara su base de datos y carga los datos iniciales por su cuenta: puede tardar unos minutos más después de que la tabla del Paso 8 diga "Up".** No hace falta que hagas nada; es normal.
 
-> Este paso necesita Internet (Paso 4). Si el PC ya no tiene Internet, la imagen debe construirse antes en otro equipo con Internet y traerse con `docker save` / `docker load`; avisa al equipo técnico.
+> La imagen de OpenVPMS (unos 300 MB) se construye **antes**, en otra máquina con Internet, y llega en el paquete. Si `deploy.sh` intenta descargar o construir algo y falla por falta de Internet, no lo repitas: avisa al equipo técnico (cómo se carga esa imagen lo define el paquete, todavía pendiente).
 
 ## Paso 8 — Verificar que quedó funcionando
 
@@ -129,6 +132,5 @@ Listo. De ahora en adelante, cada vez que este PC se encienda, OpenVPMS va a que
 | `Cannot connect to the Docker daemon` | Docker no terminó de instalarse. Repite el Paso 3 y espera a que termine sin errores. |
 | Al correr `sudo ./deploy.sh` dice `Falta .env` | Se te olvidó el Paso 6 (crear el archivo `.env`). Vuelve a hacerlo. |
 | Alguna fila de la tabla del Paso 8 dice `Exited` o `Restarting` | Copia el mensaje de error con: `docker compose logs` y muéstraselo al equipo técnico. |
-| No hay Internet para el Paso 3 o el Paso 4 | Conéctate temporalmente a una red con Internet (Wi-Fi u otro cable) solo para instalar, y luego vuelve a conectar el cable del switch para el Paso 1. |
 
 Si nada de esto resuelve el problema, avisa al equipo técnico indicando en qué paso te quedaste y adjuntando una foto de la pantalla.

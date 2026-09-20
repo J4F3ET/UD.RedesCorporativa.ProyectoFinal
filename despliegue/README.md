@@ -74,9 +74,14 @@ Las dos son completas y se siguen de arriba abajo, sin saltar a otros documentos
 
 ## Obligatorio antes de ir: el laboratorio NO tiene Internet
 
-Confirmado por el usuario. Instalar necesita Internet (Docker, imágenes y el build de OpenVPMS, ~300 MB). **Sin una preparación previa no arranca nada.** Esa preparación (Fase 0) se hace otro día, en otra máquina con Internet: se guardan las imágenes (`docker save`), se compila OpenVPMS y se lleva todo al laboratorio para cargarlo (`docker load`).
+Confirmado por el usuario. Sin Internet no falta solo la descarga de imágenes: **faltan Docker mismo y el repositorio**. **Sin una preparación previa no arranca nada.** Esa preparación (Fase 0) se hace otro día, en otra máquina con Internet, y el USB debe llevar cuatro cosas:
 
-**Comandos de la Fase 0: pendientes.** Los construye pepe; hay una duda abierta sobre si las imágenes fijadas por digest sobreviven a `save`/`load`. Cuando estén comprobados se escribirán aquí. Mientras tanto, cada receta marca el hueco.
+1. Los `.deb` de Docker Engine **para la versión exacta de Ubuntu Server** de los PCs (pendiente: saber cuál es).
+2. El repositorio entero.
+3. Las imágenes de todas las aplicaciones, guardadas **por etiqueta**, nunca por digest (si no, la imagen queda sin nombre al cargarla y Docker intenta descargarla).
+4. La imagen de OpenVPMS ya construida (~300 MB, se compila antes).
+
+**Comandos de la Fase 0: pendientes** (los construye pepe con `docker save`/`docker load`). Cada receta marca el hueco.
 
 ## Ensaya antes en tu portátil (sin hardware)
 
