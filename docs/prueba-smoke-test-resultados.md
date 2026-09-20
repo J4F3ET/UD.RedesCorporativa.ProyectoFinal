@@ -493,3 +493,104 @@ consumo de Pretix, no el de ERPNext, es el dominante en este arnés.
 - El login de ERPNext por navegador, y el acceso desde otro PC de la red.
 - `openvpms-app` y `pretix-web` funcionando (no responden a pruebas útiles en este estado).
 - El paquete offline (Fase 2), incluido el comportamiento de las referencias con digest sin red.
+
+## 11. Arreglos de healthcheck H1, H3 y H4 — SIN VALIDAR EN FRÍO (20/09/2026)
+
+**Estado: cambios escritos y comprobados solo por renderizado y por un experimento parcial. NO VERIFICADO: un arranque
+en frío (`docker compose down -v` + `up -d`) con estos cambios. Un re-arranque sobre volúmenes existentes no valida nada:
+en la ronda 6 `erpnext-db` pasó a `healthy` en segundos precisamente porque su volumen persistía.**
+
+| Defecto | Cambio (rama `fix/healthchecks-arranque-frio`) | Estado |
+|---|---|---|
+| H1 `erpnext-db` sin margen | `docker/pc3-administracion-infra/docker-compose.yml`: `start_period: 420s` (medido ≈ 300 s de inicialización con el datadir en `/mnt/d`) | Sin validar en frío |
+| H3 `pretix-web` sonda con Host `127.0.0.1` → 400 | `docker/pc2-operaciones/docker-compose.yml`: la sonda envía `Host: ${IP_PC2}` (`urllib.request.Request(..., headers={'Host': ...})`); no se tocan los hosts permitidos de Pretix | Sin validar en frío; `start_period` sin cambios (900 s) hasta medir el arranque real |
+| H4 `inventree-app` mismo patrón latente | ídem, `Host: ${IP_PC2}` | Sin validar en frío |
+
+`docker compose config` renderiza las tres sondas correctamente (con `IP_PC2=10.10.30.10`,
+`headers={'Host': '10.10.30.10'}`).
+
+### 11.1 Experimento previo: qué `Host` aceptan Pretix e InvenTree (volúmenes existentes)
+
+Solo `pretix-web` e `inventree-app` (con sus bases y Redis), volúmenes de la ronda 6. `ExecMainStartTimestamp` de
+`docker.service` = `16:57:29` al inicio y al final (16:57:29 → 16:59:59). Se pidió cada URL desde dentro del propio contenedor
+con `urllib` y un `Host` distinto. Salida literal:
+
+```
+--- esperando a que pretix-web responda (max ~4 min)
+pretix-web sin Host explicito: 400
+pretix-web Host=10.10.30.10 -> 200
+pretix-web Host=10.10.30.10:18082 -> 200
+pretix-web Host=10.10.30.10:80 -> 200
+pretix-web Host=localhost -> 200
+pretix-web Host=127.0.0.1:80 -> 400
+--- inventree-app
+inventree-app sin Host explicito: 200
+inventree-app Host=10.10.30.10 -> 200
+inventree-app Host=10.10.30.10:18083 -> 200
+inventree-app Host=10.10.30.10:8000 -> 200
+inventree-app Up About a minute (healthy)
+inventree-db Up 2 minutes
+pretix-db Up 2 minutes
+pretix-redis Up About a minute
+pretix-web Up About a minute (health: starting)
+```
+
+Confirma H3: Pretix devuelve 400 con el `Host` por defecto de la sonda (`127.0.0.1`) y 200 con `Host = IP_PC2`
+(con o sin puerto). InvenTree acepta ambos, así que H4 sigue siendo un riesgo latente, no un fallo actual. Límite: se
+comprobó el código HTTP con volúmenes ya inicializados, **no** el comportamiento del contenedor en un arranque en frío.
+
+### 11.2 Pendiente de esta sección
+
+- Arranque en frío (`down -v` + `up -d`) con EXIT 0 a la primera, 3 jobs en `Exited (0)`, todos los healthchecks en `healthy`
+  (incluido `pretix-web`) y `ldaplogin.py` con PASS: **NO VERIFICADO**.
+- Medir el tiempo real de arranque de Pretix para decidir si se puede reducir su `start_period` de 900 s: **NO VERIFICADO**
+  (se deja en 900 s).
+- Cierre del caso 4 de `ldaplogin.py` (`--persistencia`): **NO VERIFICADO**.
+
+## 12. Pretix partido en `pretix-web` + `pretix-worker` — medición de RAM (20/09/2026)
+
+**Cambio** (`docker/pc2-operaciones/docker-compose.yml`, rama `fix/pretix-split-workers`, partida de `fix/healthchecks-arranque-frio`):
+`pretix-web` pasa a `command: ["web"]` con `NUM_WORKERS: "2"` (sin prefijo `PRETIX_`, la lee el script de arranque de la imagen);
+nuevo servicio `pretix-worker` (misma imagen y digest, `taskworker --concurrency 2`, `AUTOMIGRATE=skip`, `depends_on: pretix-web
+service_healthy`, IP `.13`, sin healthcheck ni puertos); volumen nuevo `pretix_data` montado en `/data` de ambos. Imagen, digest,
+healthcheck de H3 y `start_period` de 900 s sin tocar. Es la topología que recomienda la documentación oficial de pretix
+(`docker_smallscale`). Antes, `pretix-web` no tenía volumen en `/data`: el fichero `secret` se regeneraba en cada recreación del
+contenedor; el volumen compartido lo corrige de paso.
+
+**Prueba**: solo `pretix-db`, `pretix-redis`, `pretix-web`, `pretix-worker`, con `--env-file test.env`, desde una sesión WSL
+persistente. `ExecMainStartTimestamp` de docker.service idéntico antes y después (`Sun 2026-09-20 16:57:29 -05`): la medición es válida.
+RAM libre antes de arrancar: 6.237.156 KB (~5,9 GiB).
+
+| Comprobación | Resultado (salida literal) |
+|---|---|
+| a) `docker compose config` | Renderiza bien: `command: [web]`, `NUM_WORKERS: "2"`, volumen `pretix_data` en los dos, worker en `10.10.20.13`, `AUTOMIGRATE: skip`, `depends_on ... condition: service_healthy`. Comillas del healthcheck intactas. |
+| b) `pretix-web` healthy | **498 s (8 min 18 s)** desde `up -d` en base vacía (migración incluida). Hasta ese punto `starting`. |
+| c) celery conecta | `Connected to redis://10.10.20.12:6379/2` · `celery@d59a6992f806 ready.` · `concurrency: 2 (prefork)` · `inspect ping` → `celery@d59a6992f806: OK  pong  1 node online.` |
+| f) la web responde | `GET /control/login/` con `Host: <IP_PC2>` → 302 y, siguiendo la redirección, `200 .../control/login?next=/control/login/` con HTML de Pretix. Sin ese `Host` → 400 (comportamiento ya documentado en H3). |
+| /data compartido | Fichero escrito en `pretix-web:/data/media/probe.txt`; `pretix-worker` lo lee (`probe`). |
+
+**d) Medición** (`docker stats --no-stream`, ~1 min tras arrancar el worker; segunda lectura 1 min después):
+
+| Contenedor | MiB 1.ª lectura | MiB 2.ª lectura |
+|---|---|---|
+| pretix-web | 585,0 | 585,9 |
+| pretix-worker | 403,5 | 406,0 |
+| **web + worker** | **988,5** | **991,9** |
+| pretix-db / pretix-redis | 95,5 / 5,6 | 96,1 / 5,7 |
+
+Antes (contenedor único, medición del 20/09 14:34): **3.751,9 MiB**. Después: **~990 MiB**. Ahorro: **~2.760 MiB (≈73,6 %)**,
+mejor que la estimación de ≈1.200 MiB / 2.550 MiB de ahorro. Reserva: es una medición en reposo, sin tráfico de usuarios ni tareas
+pesadas; con carga real los procesos crecerán (`--max-requests 1200` los recicla).
+
+**e) Procesos** (`ps -eo pid,rss,args`): `pretix-web` = supervisord + nginx (master + **6** workers, uno por CPU, ~10 MB cada uno)
++ gunicorn master + **2** workers (~255-260 MB RSS cada uno). `pretix-worker` = celery padre (~268 MB) + **2** hijos (~238 MB).
+Antes: 12 workers de gunicorn + master y 6 hijos de celery.
+
+**Fuera de alcance, anotado y sin tocar**: nginx sigue abriendo 6 procesos (uno por CPU; coste bajo, ~60 MB en total).
+
+**NO VERIFICADO**: comportamiento bajo carga o con tareas reales de celery (generación de PDF, envío de correo, pagos: solo se
+probó conexión y `ping`); que el worker genere un PDF y la web lo sirva de extremo a extremo (solo se probó la compartición de
+`/data`); arranque en frío con los 23 contenedores a la vez; efecto del cambio sobre el `start_period` (medido 498 s, no cambiado);
+que `pretix-worker` reintente bien tras un reinicio de `pretix-web`.
+
+Limpieza: `docker compose down -v` ejecutado (contenedores, volúmenes y redes del arnés eliminados; imágenes locales intactas).

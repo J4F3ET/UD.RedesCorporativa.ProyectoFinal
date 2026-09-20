@@ -55,6 +55,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 40
+      # La primera inicializacion de la base tarda ~5 min con el datadir sobre /mnt/d (medido); sin start_period
+      # el margen eran 200 s y compose abortaba el `up` con "erpnext-db is unhealthy". Los fallos dentro del
+      # periodo no cuentan y el primer exito lo cierra, asi que un valor holgado no retrasa el arranque.
+      start_period: 420s
     volumes:
       - erpnext_db_data:/var/lib/mysql
     networks:
@@ -111,18 +115,25 @@ services:
       erpnext-redis-queue:
         condition: service_started
     entrypoint: ["bash", "-c"]
+    # "bench new-site" deja el scheduler APAGADO (System Settings.enable_scheduler = 0, imprime "*** Scheduler is disabled ***"):
+    # comprueba si esta activo antes de que exista el sitio (frappe/installer.py:83), falla, y al terminar hace
+    # toggle_scheduler(False) (installer.py:119). Sin scheduler, erpnext-scheduler queda "Up" pero no encola nada (ni correos
+    # ni recordatorios). Por eso se activa explicitamente. "enable-scheduler" va FUERA del if de la guarda, y no dentro de la
+    # rama de creacion, para que tambien se ejecute cuando el sitio ya existia (volumen anterior con el scheduler a 0);
+    # es idempotente, asi que ejecutarlo siempre es seguro. Si new-site falla se sale con error antes de llegar a el.
     command:
       - |
         if [ -f "sites/$$SITE/site_config.json" ]; then
-          echo "El sitio $$SITE ya existe; nada que hacer."
-          exit 0
+          echo "El sitio $$SITE ya existe; solo se asegura el scheduler."
+        else
+          bench new-site "$$SITE" \
+            --mariadb-user-host-login-scope='%' \
+            --db-root-password "$$DB_ROOT_PASSWORD" \
+            --admin-password "$$ADMIN_PASSWORD" \
+            --install-app erpnext \
+            --set-default || exit 1
         fi
-        bench new-site "$$SITE" \
-          --mariadb-user-host-login-scope='%' \
-          --db-root-password "$$DB_ROOT_PASSWORD" \
-          --admin-password "$$ADMIN_PASSWORD" \
-          --install-app erpnext \
-          --set-default
+        bench --site "$$SITE" enable-scheduler
     environment:
       SITE: ${ERPNEXT_SITE:-rrhh.reservaviva.local}
       DB_ROOT_PASSWORD: ${ERPNEXT_DB_ROOT_PASSWORD}
@@ -347,7 +358,11 @@ services:
     container_name: ntp-interno
     restart: unless-stopped
     environment:
-      NTP_SERVERS: "${NET_INFRA:-10.10.99}.12"
+      # NTP_SERVERS son los servidores DE LOS QUE chrony toma la hora. El laboratorio no tiene salida a Internet, asi que no
+      # sirve el valor por defecto de la imagen (time.cloudflare.com). Se usa el reloj local (127.127.1.1, ejemplo
+      # "local (offline)" del README de cturra/docker-ntp): este servidor sirve su propio reloj como referencia de hora comun.
+      # Antes apuntaba a la IP del propio contenedor (.12), una referencia circular que no obtenia la hora de ninguna parte.
+      NTP_SERVERS: "127.127.1.1"
     networks:
       vlan99_infra:
         ipv4_address: ${NET_INFRA:-10.10.99}.12
