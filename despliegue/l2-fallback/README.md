@@ -16,7 +16,7 @@ Usa esta receta si el switch **no** tiene interfaces `VlanNN` con IP y no acepta
 - El switch, su cable de consola y sus credenciales.
 - Un portátil con Linux y un cable de red (para las pruebas). Necesita `curl`, `dig`, `ldap-utils` y `ntpdate`.
 - Un puerto libre del switch para el portátil (le llamaremos **puerto de pruebas**).
-- Un USB (por si `scp` entre PCs no funciona, ver paso 5).
+- Un USB (alternativa si `scp` no funciona, ver paso 6).
 - Los nombres reales de los puertos del switch de cada PC. Anótalos: `PUERTO-PC1`, `PUERTO-PC2`, `PUERTO-PC3`, `PUERTO-PRUEBAS`.
 
 ## Resumen: qué pasa en cada paso y cuánto tarda
@@ -27,8 +27,8 @@ Usa esta receta si el switch **no** tiene interfaces `VlanNN` con IP y no acepta
 | 2 | Cablear | sin medir |
 | 3 | Preparar los 3 PCs (Docker, repo, `.env`) | sin medir |
 | 4 | PC-3 (router + LDAP/DNS/NTP + ERPNext): `sudo ./deploy.sh` | **~13 min** el primer arranque completo (lo marca `erpnext-create-site`) |
-| 5 | Copiar `ca.crt` a PC-1 y PC-2 | sin medir |
-| 6 | PC-2: `sudo ./deploy.sh` | Pretix e InvenTree, **~10 min** de migraciones |
+| 5 | PC-2: `sudo ./deploy.sh` | Pretix e InvenTree, **~10 min** de migraciones |
+| 6 | Copiar `ca.crt` a PC-2 con `scp` y reiniciar sus contenedores | sin medir |
 | 7 | PC-1: `sudo ./deploy.sh` | build de OpenVPMS **~2 min** y primer arranque **~5 min** |
 | 8 | Pruebas por VLAN | sin medir |
 | 9 | Evidencia | sin medir |
@@ -166,9 +166,15 @@ Valores (los que no aparecen, déjalos como están):
 |---|---|---|---|
 | `PERFIL` | `l2` | `l2` | `l2` |
 | `IFACE` | NIC real de PC-1 | NIC real de PC-2 | NIC real de PC-3 |
+| `IP_GESTION` | `10.10.10.250` | `10.10.20.250` (**o** `10.10.30.250`, nunca las dos) | vacía (con `PERFIL=l2` se ignora: PC-3 ya se alcanza en `10.10.99.1`) |
 | Contraseñas (`*_PASSWORD`) | cámbialas; anótalas | cámbialas; anótalas | cámbialas; anótalas |
 
 `PERFIL=l2` va **igual en los tres PCs**.
+
+`IP_GESTION` es una dirección propia de cada PC, para poder copiar el certificado con `scp` y hacer `ping`/`ssh` de diagnóstico. Sin ella el PC no tiene ninguna dirección alcanzable. Reglas (el script las valida y se niega si no se cumplen):
+
+- Una sola dirección por PC, con el último número entre 16 y 254 (`.250` es seguro: los contenedores usan de `.1` a `.14`).
+- **PC-2: en una sola de sus dos VLANs (20 o 30), nunca en las dos.** Docker activa `ip_forward` por su cuenta: con IP en las dos VLANs, PC-2 enrutaría entre VLAN 20 y VLAN 30 él mismo, el tráfico ya no saldría al switch y se perdería el *hairpin*, una de las dos evidencias centrales de la segmentación. No es un capricho: no busques cómo saltarlo.
 
 Claves con reglas propias:
 
@@ -237,36 +243,17 @@ Esperado: el archivo existe.
 
 **Evidencia:** salida de `docker compose ps`, `ip -brief addr show` y `nft -a list ruleset` (con los contadores en 0).
 
-## Paso 5 — Copiar `ca.crt` a PC-1 y PC-2
+## Paso 5 — PC-2 (Pretix + InvenTree)
 
-PC-1 y PC-2 necesitan la CA para confiar en LDAPS. El archivo es `docker/pc3-administracion-infra/certs/ca.crt`; hay que dejarlo en:
-
-- PC-1: `docker/pc1-medica/certs/ca.crt`
-- PC-2: `docker/pc2-operaciones/certs/ca.crt`
-
-Opción rápida, desde PC-3, **solo si PC-2 tiene una IP en su NIC alcanzable** (ojo: en este diseño las sub-interfaces de PC-2 no llevan IP, así que puede no haberla):
-
-```
-scp certs/ca.crt USUARIO@IP-DE-PC2:UD.RedesCorporativaa.ProyectoFinak/docker/pc2-operaciones/certs/ca.crt
-```
-
-Opción segura: USB. Cópialo a un USB en PC-3 y luego a las dos carpetas. Si la carpeta `certs/` no existe en PC-1 o PC-2, créala dentro de la carpeta del PC (`docker/pc1-medica` o `docker/pc2-operaciones`).
+PC-2 monta `certs/ca.crt` en su contenedor de InvenTree, así que el archivo tiene que **existir** antes de arrancar. Pero el `scp` que lo trae necesita la IP de gestión de PC-2, y esa la crea el propio `deploy.sh`. Por eso se deja primero un archivo vacío como marcador y se sustituye después (paso 6). Desde `docker/pc2-operaciones`:
 
 ```
 mkdir -p certs
 ```
 
-**Comprueba:** en PC-1 y PC-2 el archivo existe y es idéntico al de PC-3. Compara el hash en los tres.
-
 ```
-sha256sum certs/ca.crt
+touch certs/ca.crt
 ```
-
-Esperado: el mismo valor en los tres PCs.
-
-## Paso 6 — PC-2 (Pretix + InvenTree)
-
-Desde `docker/pc2-operaciones`:
 
 ```
 sudo ./deploy.sh
@@ -278,7 +265,7 @@ sudo ./deploy.sh
 sudo ./deploy.sh --solo-admins
 ```
 
-PC-2 crea `IFACE.20` y `IFACE.30` sin IP. **No** le pongas gateway a mano: el gateway `10.10.X.1` de sus contenedores es PC-3 y lo fija el compose.
+PC-2 crea `IFACE.20` y `IFACE.30`. **No** le pongas gateway a mano: el gateway `10.10.X.1` de sus contenedores lo fija el compose.
 
 **Comprueba:**
 
@@ -286,15 +273,55 @@ PC-2 crea `IFACE.20` y `IFACE.30` sin IP. **No** le pongas gateway a mano: el ga
 docker compose ps
 ```
 
-Esperado: todo `Up`.
+Esperado: todo `Up`. (InvenTree aún no verifica LDAPS: falta el certificado real.)
 
 ```
 ip -brief addr show
 ```
 
-Esperado: `IFACE.20` y `IFACE.30` en `UP` y **sin** IP.
+Esperado: `IFACE.20` y `IFACE.30` en `UP`, y solo la IP de gestión en una de ellas.
 
 **Evidencia:** las dos salidas.
+
+## Paso 6 — Copiar `ca.crt` a PC-2 con `scp`
+
+**El sentido importa.** La matriz sigue en vigor para los PCs, no solo para los contenedores: una VLAN de negocio solo alcanza la VLAN 99. Por eso el `scp` lo **inicia PC-2** (o PC-1) contra PC-3, en su dirección de la VLAN 99. Empujar el certificado desde PC-3 hacia los otros PCs choca con la matriz: la red funciona bien, no es un fallo.
+
+PC-3 debe tener el servicio SSH activo (`sudo systemctl status ssh`). Si falta y no hay Internet para instalarlo, usa el USB (abajo).
+
+Primero comprueba que PC-2 llega a PC-3:
+
+```
+ping -c 2 10.10.99.1
+```
+
+Esperado: responde. Si no, revisa `IP_GESTION` en los dos `.env` y la ruta (`ip route`).
+
+Desde `docker/pc2-operaciones`, en PC-2 (cambia `USUARIO` por el usuario de PC-3). La dirección de PC-3 en este perfil es 10.10.99.1 (PC-3 es el router y tiene esa dirección):
+
+```
+scp USUARIO@10.10.99.1:UD.RedesCorporativaa.ProyectoFinak/docker/pc3-administracion-infra/certs/ca.crt certs/ca.crt
+```
+
+Esto **sobrescribe** el marcador vacío del paso 5. Reinicia los contenedores de PC-2 para que InvenTree lea el certificado:
+
+```
+docker compose restart
+```
+
+**Comprueba:** el archivo es idéntico al de PC-3. Ejecuta esto en PC-2 y en PC-3 (carpetas `docker/pc2-operaciones` y `docker/pc3-administracion-infra`).
+
+```
+sha256sum certs/ca.crt
+```
+
+Esperado: el mismo valor en los dos PCs.
+
+**Alternativa con USB** si el `scp` no funciona: copia `ca.crt` de PC-3 a un USB y luego sobre `docker/pc2-operaciones/certs/ca.crt`, y haz el `docker compose restart` igual.
+
+**PC-1:** su compose no monta el certificado hoy (OpenVPMS no integra LDAP), así que no lo necesita para arrancar. Si quieres tenerlo igualmente, es el mismo `scp` hacia `docker/pc1-medica/certs/ca.crt` (crea antes la carpeta `certs`) una vez que PC-1 tenga su IP (paso 7).
+
+> **Pendiente de comprobar en hardware:** este `scp`, el reinicio y el orden marcador → `deploy.sh` → `scp` no se han ejecutado contra una red real.
 
 ## Paso 7 — PC-1 (OpenVPMS)
 
@@ -304,7 +331,7 @@ Desde `docker/pc1-medica`:
 sudo ./deploy.sh
 ```
 
-**Tiempo:** build ~2 min (necesita Internet, ~300 MB) y primer arranque ~5 min. PC-1 es puerto access: no crea sub-interfaz.
+**Tiempo:** build ~2 min (necesita Internet, ~300 MB) y primer arranque ~5 min. PC-1 es puerto access: no crea sub-interfaz. Si pusiste `IP_GESTION`, la lleva la propia tarjeta (`IFACE`), con `10.10.10.250`.
 
 **Comprueba:**
 
