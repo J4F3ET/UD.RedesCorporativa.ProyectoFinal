@@ -546,3 +546,51 @@ comprobó el código HTTP con volúmenes ya inicializados, **no** el comportamie
 - Medir el tiempo real de arranque de Pretix para decidir si se puede reducir su `start_period` de 900 s: **NO VERIFICADO**
   (se deja en 900 s).
 - Cierre del caso 4 de `ldaplogin.py` (`--persistencia`): **NO VERIFICADO**.
+
+## 12. Pretix partido en `pretix-web` + `pretix-worker` — medición de RAM (20/09/2026)
+
+**Cambio** (`docker/pc2-operaciones/docker-compose.yml`, rama `fix/pretix-split-workers`, partida de `fix/healthchecks-arranque-frio`):
+`pretix-web` pasa a `command: ["web"]` con `NUM_WORKERS: "2"` (sin prefijo `PRETIX_`, la lee el script de arranque de la imagen);
+nuevo servicio `pretix-worker` (misma imagen y digest, `taskworker --concurrency 2`, `AUTOMIGRATE=skip`, `depends_on: pretix-web
+service_healthy`, IP `.13`, sin healthcheck ni puertos); volumen nuevo `pretix_data` montado en `/data` de ambos. Imagen, digest,
+healthcheck de H3 y `start_period` de 900 s sin tocar. Es la topología que recomienda la documentación oficial de pretix
+(`docker_smallscale`). Antes, `pretix-web` no tenía volumen en `/data`: el fichero `secret` se regeneraba en cada recreación del
+contenedor; el volumen compartido lo corrige de paso.
+
+**Prueba**: solo `pretix-db`, `pretix-redis`, `pretix-web`, `pretix-worker`, con `--env-file test.env`, desde una sesión WSL
+persistente. `ExecMainStartTimestamp` de docker.service idéntico antes y después (`Sun 2026-09-20 16:57:29 -05`): la medición es válida.
+RAM libre antes de arrancar: 6.237.156 KB (~5,9 GiB).
+
+| Comprobación | Resultado (salida literal) |
+|---|---|
+| a) `docker compose config` | Renderiza bien: `command: [web]`, `NUM_WORKERS: "2"`, volumen `pretix_data` en los dos, worker en `10.10.20.13`, `AUTOMIGRATE: skip`, `depends_on ... condition: service_healthy`. Comillas del healthcheck intactas. |
+| b) `pretix-web` healthy | **498 s (8 min 18 s)** desde `up -d` en base vacía (migración incluida). Hasta ese punto `starting`. |
+| c) celery conecta | `Connected to redis://10.10.20.12:6379/2` · `celery@d59a6992f806 ready.` · `concurrency: 2 (prefork)` · `inspect ping` → `celery@d59a6992f806: OK  pong  1 node online.` |
+| f) la web responde | `GET /control/login/` con `Host: <IP_PC2>` → 302 y, siguiendo la redirección, `200 .../control/login?next=/control/login/` con HTML de Pretix. Sin ese `Host` → 400 (comportamiento ya documentado en H3). |
+| /data compartido | Fichero escrito en `pretix-web:/data/media/probe.txt`; `pretix-worker` lo lee (`probe`). |
+
+**d) Medición** (`docker stats --no-stream`, ~1 min tras arrancar el worker; segunda lectura 1 min después):
+
+| Contenedor | MiB 1.ª lectura | MiB 2.ª lectura |
+|---|---|---|
+| pretix-web | 585,0 | 585,9 |
+| pretix-worker | 403,5 | 406,0 |
+| **web + worker** | **988,5** | **991,9** |
+| pretix-db / pretix-redis | 95,5 / 5,6 | 96,1 / 5,7 |
+
+Antes (contenedor único, medición del 20/09 14:34): **3.751,9 MiB**. Después: **~990 MiB**. Ahorro: **~2.760 MiB (≈73,6 %)**,
+mejor que la estimación de ≈1.200 MiB / 2.550 MiB de ahorro. Reserva: es una medición en reposo, sin tráfico de usuarios ni tareas
+pesadas; con carga real los procesos crecerán (`--max-requests 1200` los recicla).
+
+**e) Procesos** (`ps -eo pid,rss,args`): `pretix-web` = supervisord + nginx (master + **6** workers, uno por CPU, ~10 MB cada uno)
++ gunicorn master + **2** workers (~255-260 MB RSS cada uno). `pretix-worker` = celery padre (~268 MB) + **2** hijos (~238 MB).
+Antes: 12 workers de gunicorn + master y 6 hijos de celery.
+
+**Fuera de alcance, anotado y sin tocar**: nginx sigue abriendo 6 procesos (uno por CPU; coste bajo, ~60 MB en total).
+
+**NO VERIFICADO**: comportamiento bajo carga o con tareas reales de celery (generación de PDF, envío de correo, pagos: solo se
+probó conexión y `ping`); que el worker genere un PDF y la web lo sirva de extremo a extremo (solo se probó la compartición de
+`/data`); arranque en frío con los 23 contenedores a la vez; efecto del cambio sobre el `start_period` (medido 498 s, no cambiado);
+que `pretix-worker` reintente bien tras un reinicio de `pretix-web`.
+
+Limpieza: `docker compose down -v` ejecutado (contenedores, volúmenes y redes del arnés eliminados; imágenes locales intactas).
