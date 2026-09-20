@@ -228,6 +228,68 @@ Además, **sin cambiar la estructura de carpetas** (evita romper 60+ enlaces): b
 
 **Se queda como limitación conocida y documentada:** VLANs, macvlan, 802.1Q entre PCs, switch físico (L2/L3), `scp` entre PCs, `IP_GESTION`, systemd, Wireshark en el trunk, y todo M1, M5, M8, M9, M10, M11, M13–M16 y `plans/`.
 
+## Análisis de colisiones entre los PR abiertos (#8, #15–#22)
+
+**Método.** Se fusionaron en un árbol de prueba desechable, a partir de `origin/master` @ 9f58922, las nueve ramas (#18, #21, #8, #15, #16, #17, #19, #20, #22; #21 sobre #18) y se leyó el resultado. Solo lectura: no se corrigió nada.
+
+### 1. Conflictos de git
+
+**No hay ningún conflicto textual** en el orden probado: las nueve fusiones entran limpias. La razón es que casi ningún PR comparte ficheros:
+
+| Ficheros | PR que los tocan | Riesgo |
+|---|---|---|
+| `docker/pc1-medica/docker-compose.yml` | #18 y #21 (apilado) | Ninguno si #18 va primero y #21 se reorienta a `master`. |
+| `README.md` | solo #20 | Ninguno hoy. Lo tocaría el cambio posterior del «en preparación» por un enlace. |
+| `tutoriales/*`, `despliegue/README.md`, recetas L2/L3 | solo #20 | Ninguno hoy. Si alguien reescribe los tutoriales, chocará con el aviso de cabecera (2 líneas). |
+| `diagramas/README.md` y `topologia-red.*` | solo #8 | Ninguno. |
+| `despliegue/*/diagramas/**` | #15 (l2/l3) y #19 (`despliegue/docker-desktop/`) | Ninguno: carpetas distintas. |
+| `docs/…` | #16, #17, #21 y #22 cada uno con un fichero propio | Ninguno. |
+
+El riesgo real no está en git sino en el contenido (apartados 2 y 3).
+
+### 2. Contradicciones de contenido
+
+**Todas verificadas sobre el árbol fusionado.** Numeradas para poder asignarlas.
+
+| # | Entre | Qué dice cada uno | Gravedad | Quién corrige |
+|---|---|---|---|---|
+| C1 | **#21** `docs/despliegue-windows-docker-desktop.md:72-77` frente a **#22** §2 y **#16** §1 | #21: «`scripts/generar-certificados.sh` … en Git Bash, **una vez, en PC-3**; después hay que **copiar `ca.crt`** a `docker/pc2-operaciones/certs/`». #22 y #16: los certificados **vienen ya generados en el USB** (misma CA en los tres PCs; PC-3 con `ca.key`, `ldap.crt/key`; PC-1 y PC-2 solo `ca.crt`), sin `scp` ni copia entre PCs. **No está corregido** en la rama actual de #21. | **Bloqueante** (dos instrucciones incompatibles para el mismo paso) | juan |
+| C2 | **#21** `docs/despliegue-windows-docker-desktop.md:9-13` frente a **#20**, **#22** y el README | #21: «se renuncia a … matriz de segmentación… **el laboratorio ya no demuestra segmentación L2/L3**», los scripts de VLAN y `despliegue/*/` «no se ejecutan en Windows». #20/#22/README: la matriz **sí se demuestra en vivo** con los simuladores (`despliegue/*/pruebas/`), que se ejecutaron en Docker Desktop sobre Windows; los scripts reales se ejecutan dentro del simulador. | **Bloqueante** (contradice el planteamiento de la entrega en su propio documento «oficial») | juan (o yo, si él lo prefiere) |
+| C3 | **#16** `scripts/instalar-paquete-offline.ps1:143` frente a **#20** | El instalador imprime «Siguiente: **el tutorial de este PC**». Con #20, los tutoriales llevan un aviso de «no aplica al laboratorio Windows». Debe remitir a `docs/puesta-en-marcha-windows.md`. | Menor-alto | pepe |
+| C4 | **#22** §2 y §7 frente a **#16** §1, §4.3 | #22 escribe `.\instalar.ps1 -Perfil pcN` (falla con la política de ejecución por defecto de Windows: #16 lo invoca con `powershell -ExecutionPolicy Bypass -File …`), y usa la imagen `nicolaka/netshoot` (equivale a `:latest`, que **no** está cargada; #16 la etiqueta **`nicolaka/netshoot:fase0`** y solo la carga con `-ConSimuladores`). | Bloqueante para la demostración (el comando del simulador no funcionaría) | **yo** |
+| C5 | **#22** §1 y §6 frente a **#21** compose:342-343 y doc:25 | #22: bind9 publica `53/udp`. Realidad: `53/udp` **y** `53/tcp`. | Menor | yo |
+| C6 | **#22** §9 frente a **#21** doc:47-53 | #22 dice «avisa antes de parar nada» para 123/udp; #21 da el diagnóstico (`w32time` suele ocupar el 123; recomienda pararlo en PC-3, decisión pendiente) y los comandos de cortafuegos de Windows (`New-NetFirewallRule`), que #22 no trae. Duplicación parcial y criterios distintos. | Menor | yo (remitir a #21) |
+| C7 | **#19** `despliegue-docker-desktop.architecture.json:409-412,420` y `flujo-ldaps…dataflow.json:172` frente a **#21** | #19 marca «PROPUESTO, no implementado… Puertos e IP_PC3 aún sin fijar en los compose» y «hoy los compose usan 10.10.99.10». Con #21 ya están fijados: `IP_PC3` (PC-1, PC-2), `IP_PC2` (PC-2), `DNS_BIND_IP` (PC-3) y los `ports:` en `0.0.0.0`. Además #19 dibuja `53/udp` (la realidad es `53/udp+tcp`) y no muestra `IP_PC2`. Los **puertos** (8080, 80, 8000, 8080, 389/636, 123/udp) **ya coinciden**; el flujo de certificados «USB → PC-2/PC-3» **sí** coincide con #16/#22 y **no** con #21 (C1). | Menor (queda desactualizado al fusionar #21) | yobana |
+| C8 | **#8** `topologia-red.architecture.json` (evidencias `path`/`line`) frente a **#18** y **#21** | Las referencias de línea a los compose se generaron contra master. Tras #18/#21 los compose cambiaron y **apuntan a otra cosa**: p. ej. «openldap» `:290-320` cae ahora en `erpnext-hr`, «dns-interno» `:322-331` en la mitad de la red, «inventree-worker» `:152-172` en el final de `inventree-app`. | Menor (reaparece el hallazgo M8) | yobana (regenerar tras #21) |
+| C9 | **#21** `docker/*/.env.example` frente a **#22** | `.env.example` conserva `IFACE`, `PERFIL` e `IP_GESTION` con el comentario «ya NO los lee el compose». #22 dice que ya no se usan. Coinciden; solo queda ruido para un operador no técnico. | Trivial | — |
+| C10 | **#17** (este informe) frente al estado fusionado | Quedará desactualizado en cuanto se fusionen otros: B1 (lo cierra #15), M7 (lo cierra #18/#21), M1 y M3, B2 (sigue), etc. | Trivial | yo, tras las fusiones |
+
+**Duplicación entre `docs/despliegue-windows-docker-desktop.md` (#21) y `docs/puesta-en-marcha-windows.md` (#22).** Se solapan en la tabla de puertos, la lista de variables de IP, el diagnóstico de choques con Windows y la advertencia del administrador de Pretix; **no** en el resto. Propósitos distintos: #21 es la **referencia técnica y la decisión** (qué se cambió y por qué, choques con Windows, cortafuegos); #22 es la **guía operativa** (pasos, verificación, demostración del simulador). **Recomendación: no fundirlos**, sino deslindarlos: #21 pasa a ser el documento de decisiones y referencia, #22 remite a él para puertos, cortafuegos y choques, y cada dato vive en un solo sitio. Lo que sí hay que resolver antes de fusionar son C1, C2, C4, C5 y C6.
+
+### 3. Comprobado y coherente
+
+- **#16 ↔ #22:** contenido del USB (imágenes `.tar` por etiqueta, `proyecto.zip`, certificados por PC, overrides, `MANIFEST.sha256`, inventario, netshoot), `-Perfil pc1|pc2|pc3`, el instalador **no despliega ni escribe `.env`** y la decisión del almacén (clásico vs containerd, §4.1) son coherentes. **Un hueco de #22 queda resuelto por #16:** el instalador deja `docker-compose.override.yml` en `docker\pcN-*\`, y `docker compose` lo lee **automáticamente** en esa carpeta, así que no hace falta `-f` (salvo en el arnés de `pruebas/smoke-test-3-pcs/`, cuyo `include:` no lo lee: #16 §4.2).
+- **#21 ↔ #22:** nombres de variable (`IP_PC3`, `IP_PC2`, `DNS_BIND_IP`, `*_PORT`, `PUBLISH_IP`), marcador `SUSTITUIR-POR-LA-IP-REAL-…`, `:?` que hace fallar el arranque, puertos y el aviso de `init_admins`.
+- **#15 y #8:** sin «policy drop» en los diagramas; 12 servicios de ERPNext en los tres diagramas de topología (10 en el bridge interno).
+- **#20:** solo añade avisos y reescribe el README; no contradice a ningún otro PR (sus «en preparación» se cambiarán por enlaces al final).
+
+### 4. Orden de fusión recomendado
+
+| Pos. | PR | Por qué en esa posición | Condición previa |
+|---|---|---|---|
+| 1 | **#20** README + avisos | Independiente y sin conflicto; **quita ya las afirmaciones falsas del README** (switch físico, VLAN, `sudo ./deploy.sh`). Cuanto antes esté en master, antes deja de mentir la portada. | Ninguna. |
+| 2 | **#18** compose de PC-1 | Prerrequisito de #21; pequeño y ya mergeable. | Ninguna. |
+| 3 | **#21** compose + doc de Windows | Es el cambio de mayor impacto y el que definen los demás (`ports:`, `IP_PC2/3`, `DNS_BIND_IP`). Reorientarlo a `master` tras #18. | Corregir **C1** y **C2** en su doc (juan), o al menos marcar la sección de certificados como obsoleta. |
+| 4 | **#16** paquete offline | Depende del formato de los compose de #21 (imágenes y override); su instalador usa los compose ya fusionados. | Corregir **C3** (mensaje final del instalador, pepe). |
+| 5 | **#15** diagramas L2/L3 | Independiente; cierra B1 («policy drop»). No hay motivo para esperar; se puede fusionar ya. | Ninguna. |
+| 6 | **#19** diagrama Docker Desktop | Debe fusionarse **después de #21**, porque describe lo que #21 implementa. | Actualizar **C7** (yobana). |
+| 7 | **#8** diagrama de topología | Fusionar **después de #21** y regenerar antes (evidencias de línea, **C8**). Si no se regenera, se fusiona con el hallazgo M8 conocido. | Regenerar (yobana). |
+| 8 | **#22** runbook | Remite a #21 y a #16; conviene que ambos estén en master para poder enlazarlos. | Corregir **C4**, **C5** y **C6** (yo) y cerrar el sustituto de `deploy.sh` de juan. |
+| 9 | Cambio del README («en preparación» → enlaces a #21 y #22) | Tiene que ir después de #20 y #22. | — |
+| 10 | **#17** este informe | Es el documento vivo; se fusiona el último, ya con los estados refrescados (C10). | Refrescar (yo). |
+
+**Alternativa si hay prisa:** #20, #18, #21, #15 y #16 en ese orden; el resto puede esperar sin bloquear nada. Lo único que **no** debe hacerse es fusionar #22 antes de corregir **C4** (el comando del simulador no funcionaría tal como está) ni dejar #21 con **C1/C2** sin tocar, porque fija en master dos instrucciones contradictorias con las del resto.
+
 ## Lo comprobado sin discrepancias
 
 - **Enlaces `[..](..)`:** los 12 documentos con enlaces relativos resuelven contra master, incluidos `diagramas/*.html`, `despliegue/*/diagramas/*.html` y `despliegue/comun/probar-matriz.sh`.
