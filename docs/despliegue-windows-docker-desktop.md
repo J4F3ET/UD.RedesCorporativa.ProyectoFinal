@@ -69,12 +69,13 @@ New-NetFirewallRule -DisplayName "RV Pretix/InvenTree" -Direction Inbound -Proto
 New-NetFirewallRule -DisplayName "RV OpenVPMS" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow -RemoteAddress LocalSubnet
 ```
 
-## Certificados (agujero de la Fase 0)
+## Certificados
 
-`docker/*/certs/` está en `.gitignore`: **no viene con el repositorio**. Sin `ca.crt` y `ldap.crt/key` no hay LDAPS.
-`scripts/generar-certificados.sh` necesita `bash` y `openssl`; en Windows, **Git Bash**. Se ejecuta **una vez, en PC-3**;
-después hay que copiar `ca.crt` (nunca `ca.key`) a `docker/pc2-operaciones/certs/ca.crt`. PC-1 no lo necesita (OpenVPMS no
-usa LDAP). Si falta el archivo, Docker crea un *directorio* con ese nombre y InvenTree arranca sin verificar nada.
+`docker/*/certs/` está en `.gitignore`: **no viene con el repositorio**. Los certificados **los genera la preparación del paquete
+offline (Fase 0) y llegan ya hechos**: PC-3 recibe `ca.crt`, `ca.key`, `ldap.crt` y `ldap.key` en `docker/pc3-administracion-infra/certs/`;
+PC-2 solo `ca.crt` en `docker/pc2-operaciones/certs/`; PC-1 no necesita ninguno (OpenVPMS no usa LDAP). En los PC no hay Git Bash, ni
+`generar-certificados.sh`, ni copia entre máquinas. `deploy.ps1` **comprueba que existan** (como archivos PEM, no directorios) y se
+niega a arrancar si faltan: si Docker los encontrara ausentes crearía un *directorio* con ese nombre y LDAPS quedaría sin verificar.
 
 ## Datos que contradicen la documentación anterior
 
@@ -82,15 +83,25 @@ usa LDAP). Si falta el archivo, Docker crea un *directorio* con ese nombre y Inv
   solo sirve a clientes externos. En PC-2 apunta a `IP_PC3`; en PC-3 (mismo motor que OpenLDAP) va directo al bridge.
 - **`openvpms-app` no usa LDAP** (OpenVPMS 2.4.0.1 no lo soporta) y sus `LDAP_HOST`/`DNS_HOST`/`NTP_HOST` son variables
   que nada lee. Ahora valen `IP_PC3` los tres.
-- **`bind9` sigue sirviendo IP 10.10.NN.M** en `docker/pc3-administracion-infra/bind/zones/db.reservaviva.local`, que en
-  este modelo no son alcanzables desde otros equipos. **Pendiente:** cambiarlas a las IP LAN reales (la zona no admite
-  variables de entorno).
+- **La zona de bind9 era de IP fijas 10.10.NN.M**, inalcanzables desde otros equipos. Ahora `bind/zones/db.reservaviva.local.tpl` es
+  una **plantilla** con `${IP_PC1}`, `${IP_PC2}`, `${IP_PC3}` y `${SERIAL}`; `bind/generar-zona.ps1` (que llama `deploy.ps1` de PC-3) genera
+  `db.reservaviva.local` (ignorado por git) con las IP LAN de los `.env`. Así un equipo externo resuelve `pretix.reservaviva.local` a la IP real
+  de PC-2. Además `named.conf` ya no limita `allow-query` a `10.10.0.0/16` (no hay VLAN): permite cualquier origen, sin recursión.
+
+## Despliegue: `deploy.ps1` (uno por PC)
+
+Sustituye a `deploy.sh`. Desde la carpeta del PC, en PowerShell: `powershell -ExecutionPolicy Bypass -File .\deploy.ps1`
+(parámetros: `-TimeoutMinutos N`, por defecto 30; solo PC-2: `-SoloAdmins`). Sale con **código 0 si todo quedó bien y 1 si algo falló**. Hace:
+
+1. Valida `.env` (variables obligatorias, IPv4 válidas, ningún valor `SUSTITUIR-…`) y los certificados que ese PC necesita.
+2. PC-3: genera la zona DNS con las IP LAN. Todos: `docker compose up -d --pull never` (no descarga nada; las imágenes vienen en el paquete).
+3. Espera a que los contenedores estén `running` y `healthy` y a que los jobs de ERPNext terminen con código 0.
+4. PC-2: **crea el administrador de Pretix y elimina `admin@localhost`** (clave pública `admin`) como `init_admins` de `deploy.sh`; comprueba el
+   resultado y, si no puede, **falla** (no deja Pretix con credenciales conocidas publicado en la LAN). `-SoloAdmins` repite solo este paso.
+
+Es idempotente. Orden de despliegue recomendado: PC-3, después PC-2 y PC-1 (PC-2 verifica LDAPS contra PC-3).
 
 ## Pendiente (no incluido en este cambio)
 
-- **Entrada de despliegue para Windows.** Los `deploy.sh` son bash con `sudo` e `ip link`. Falta el equivalente (`.ps1` o
-  instrucciones de `docker compose up`) y debe **replicar `init_admins` de `docker/pc2-operaciones/deploy.sh`**: crea el
-  administrador de Pretix y **elimina el `admin@localhost` con clave `admin`** que trae por defecto. Sin ese paso, Pretix
-  queda con credenciales conocidas.
 - Validar todo en Docker: `docker compose config`, arranque de cada PC, `ldaplogin.py` (rama `test/ldaplogin-revalidacion`) y
   el arnés de `pruebas/smoke-test-3-pcs/` (su `test.env` fija `IP_PC3=10.10.99.10` y desplaza los puertos a localhost).

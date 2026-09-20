@@ -1,3 +1,4 @@
 .env
 docker/*/.env
 docker/*/certs/
+docker/pc3-administracion-infra/bind/zones/db.reservaviva.local
