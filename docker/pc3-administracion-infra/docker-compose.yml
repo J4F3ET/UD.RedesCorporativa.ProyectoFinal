@@ -366,9 +366,13 @@ services:
     restart: unless-stopped
     environment:
       # NTP_SERVERS son los servidores DE LOS QUE chrony toma la hora. El laboratorio no tiene salida a Internet, asi que no
-      # sirve el valor por defecto de la imagen (time.cloudflare.com). Se usa el reloj local (127.127.1.1, ejemplo
-      # "local (offline)" del README de cturra/docker-ntp): este servidor sirve su propio reloj como referencia de hora comun.
-      # Antes apuntaba a la IP del propio contenedor (.12), una referencia circular que no obtenia la hora de ninguna parte.
+      # sirve el valor por defecto de la imagen (time.cloudflare.com). Antes apuntaba a la IP del propio contenedor (.12),
+      # una referencia circular que no obtenia la hora de ninguna parte.
+      # 127.127.1.1 es el ejemplo "local (offline)" del README de cturra/docker-ntp. OJO con el mecanismo real, que no es
+      # el que parece: /opt/startup.sh detecta cualquier direccion 127.0.0.0/8 y, ademas de la linea "server", anade
+      # "local stratum 10" a chrony.conf. ESA es la directiva que hace que este contenedor sirva su propio reloj como
+      # referencia; la linea "server 127.127.1.1" es notacion de refclock de ntpd y chrony la trata como un servidor
+      # normal inalcanzable. Por eso el servidor publica stratum 10. Verificado leyendo /opt/startup.sh de la imagen.
       NTP_SERVERS: "127.127.1.1"
     networks:
       vlan99_infra:
