@@ -13,8 +13,9 @@ show mac address-table           ! MAC de PC-3 vista en las VLAN 10,20,30,40,99 
 
 ## 2. En PC-3 (el router)
 ```
-ip -brief addr show                          # <IFACE>.10/.20/.30 con 10.10.X.1; gw40 y gw99 con 10.10.40.1 y 10.10.99.1
+ip -brief addr show                          # <IFACE>.10/.20/.30/.40/.99 SIN IPv4; gw10/gw20/gw30/gw40/gw99 con 10.10.X.1
 cat /proc/sys/net/ipv4/ip_forward            # 1
+sysctl net.ipv4.conf.all.arp_ignore net.ipv4.conf.all.arp_announce   # 1 y 2
 sudo nft -a list table inet reservaviva      # 12 reglas "drop" con contador (-a va antes de list)
 sudo iptables -S DOCKER-USER                 # incluye: -s 10.10.0.0/16 -d 10.10.0.0/16 -j ACCEPT
 ```

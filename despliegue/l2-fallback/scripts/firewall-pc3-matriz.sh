@@ -9,6 +9,9 @@
 #     de ERPNext hablando por su bridge privado pasan por este mismo hook forward).
 #   - Cada regla cuenta sus paquetes: "nft -a list ruleset" muestra la evidencia en vivo para la sustentación.
 #
+# Las reglas casan por gwNN (ver setup-vlans-pc3.sh); ese script fija arp_ignore/arp_announce para que los
+# paquetes entren de verdad por gwNN y no por <IFACE>.NN, donde ninguna regla casaría.
+#
 # Usa una tabla propia (inet reservaviva) que borra y recrea de forma atómica: correrlo dos veces deja el
 # mismo resultado y NUNCA se vacía el ruleset completo (borraría las cadenas de Docker).
 #
@@ -30,9 +33,8 @@ docker_user_disponible() {
   command -v iptables >/dev/null && iptables -w -n -L DOCKER-USER >/dev/null 2>&1
 }
 
-nft delete table inet "${TABLA}" 2>/dev/null || true
-
 if [ "${1:-}" = "--quitar" ]; then
+  nft delete table inet "${TABLA}" 2>/dev/null || true
   if docker_user_disponible; then
     while iptables -w -C DOCKER-USER "${DOCKER_USER_ARGS[@]}" 2>/dev/null; do
       iptables -w -D DOCKER-USER "${DOCKER_USER_ARGS[@]}"
@@ -42,15 +44,21 @@ if [ "${1:-}" = "--quitar" ]; then
   exit 0
 fi
 
-# Interfaz por la que entra/sale cada VLAN en PC-3 (ver setup-vlans-pc3.sh): la 40 y la 99 tienen
-# contenedores macvlan en este equipo y su gateway vive en gw40/gw99; las demás en <IFACE>.<vlan>.
-interfaz_vlan() {
-  case "$1" in
-    40|99) echo "gw$1" ;;
-    *)     echo "${IFACE}.$1" ;;
-  esac
-}
+# Interfaz por la que entra/sale cada VLAN en PC-3: el gateway gwNN de setup-vlans-pc3.sh. Si faltara alguna,
+# ninguna regla casaría y la política accept dejaría pasar el tráfico prohibido SIN avisar, así que se exige
+# que existan (junto con su parent <IFACE>.NN) antes de aplicar nada.
+interfaz_vlan() { echo "gw$1"; }
+for v in 10 20 30 40; do
+  for n in "${IFACE}.${v}" "$(interfaz_vlan "${v}")"; do
+    ip link show "${n}" >/dev/null 2>&1 || {
+      echo "No existe la interfaz ${n}: ejecuta antes setup-vlans-pc3.sh (con el mismo IFACE) y reintenta." >&2
+      exit 1
+    }
+  done
+done
 
+# Solo ahora (con las interfaces verificadas) se reemplaza la tabla anterior, para no dejar un hueco si algo falla.
+nft delete table inet "${TABLA}" 2>/dev/null || true
 {
   echo "table inet ${TABLA} {"
   echo "  chain forward {"
