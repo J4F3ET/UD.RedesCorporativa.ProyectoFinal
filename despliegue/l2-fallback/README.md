@@ -319,7 +319,7 @@ Esperado: el mismo valor en los dos PCs.
 
 **Alternativa con USB** si el `scp` no funciona: copia `ca.crt` de PC-3 a un USB y luego sobre `docker/pc2-operaciones/certs/ca.crt`, y haz el `docker compose restart` igual.
 
-**PC-1:** su compose no monta el certificado hoy (OpenVPMS no integra LDAP), así que no lo necesita para arrancar. Si quieres tenerlo igualmente, es el mismo `scp` hacia `docker/pc1-medica/certs/ca.crt` (crea antes la carpeta `certs`) una vez que PC-1 tenga su IP (paso 7).
+**PC-1 no necesita el certificado:** su compose no monta ninguno (OpenVPMS no llega a verificar la cadena de LDAPS). Solo PC-2 lo usa.
 
 > **Pendiente de comprobar en hardware:** este `scp`, el reinicio y el orden marcador → `deploy.sh` → `scp` no se han ejecutado contra una red real.
 
