@@ -1,30 +1,27 @@
 # PC-2 — Servidor de Operaciones
 # Departamentos: Taquilla y Boletería (Pretix) + Logística y Almacén (InvenTree)
-# Puerto de switch: TRUNK 802.1Q, VLANs 20 y 30 permitidas
 #
-# Requiere sub-interfaces 802.1Q creadas antes de "docker compose up":
-#   ver scripts/setup-vlans-pc2.sh
+# DESPLIEGUE OFICIAL: Windows + Docker Desktop (WSL2), redes bridge. NO hay VLAN ni macvlan; scripts/setup-vlans-pc2.sh
+# es solo anexo de diseño. Ver docs/despliegue-windows-docker-desktop.md.
+# Las redes 10.10.20.0/24 y 10.10.30.0/24 son bridges LOCALES de este motor Docker: no las ve ningún otro PC. Otros equipos
+# acceden por la IP LAN de este PC (IP_PC2) y los puertos publicados; para LDAP se usa la IP LAN de PC-3 (IP_PC3).
+# NO VERIFICADO: adaptación escrita sin poder ejecutarla (Docker no estaba disponible).
 
 networks:
+  # Bridges locales. NET_TAQUILLA / NET_LOGISTICA solo cambian si chocan con la LAN del laboratorio (ver .env.example).
   vlan20_taquilla:
-    driver: macvlan
-    driver_opts:
-      parent: ${IFACE:-eth0}.20
+    driver: bridge
     ipam:
       config:
-        - subnet: 10.10.20.0/24
-          gateway: 10.10.20.1
-          ip_range: 10.10.20.0/28
+        - subnet: ${NET_TAQUILLA:-10.10.20}.0/24
+          gateway: ${NET_TAQUILLA:-10.10.20}.1
 
   vlan30_logistica:
-    driver: macvlan
-    driver_opts:
-      parent: ${IFACE:-eth0}.30
+    driver: bridge
     ipam:
       config:
-        - subnet: 10.10.30.0/24
-          gateway: 10.10.30.1
-          ip_range: 10.10.30.0/28
+        - subnet: ${NET_LOGISTICA:-10.10.30}.0/24
+          gateway: ${NET_LOGISTICA:-10.10.30}.1
 
 services:
   # --- Taquilla y Boletería (VLAN 20) ---
@@ -40,7 +37,7 @@ services:
       - pretix_db_data:/var/lib/postgresql/data
     networks:
       vlan20_taquilla:
-        ipv4_address: 10.10.20.11
+        ipv4_address: ${NET_TAQUILLA:-10.10.20}.11
 
   pretix-redis:
     image: redis:7.4.11@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
@@ -48,7 +45,7 @@ services:
     restart: unless-stopped
     networks:
       vlan20_taquilla:
-        ipv4_address: 10.10.20.12
+        ipv4_address: ${NET_TAQUILLA:-10.10.20}.12
 
   pretix-web:
     # Digest = el que tenia el tag "stable" (pretix 2026.7.0) cuando se probo. Ningun tag de version apunta a el:
@@ -61,15 +58,16 @@ services:
       - pretix-redis
     environment:
       PRETIX_DATABASE_BACKEND: postgresql
-      PRETIX_DATABASE_HOST: 10.10.20.11
+      PRETIX_DATABASE_HOST: ${NET_TAQUILLA:-10.10.20}.11
       PRETIX_DATABASE_NAME: pretix
       PRETIX_DATABASE_USER: pretix
       PRETIX_DATABASE_PASSWORD: ${PRETIX_DB_PASSWORD}
-      PRETIX_REDIS_LOCATION: redis://10.10.20.12/0
+      PRETIX_REDIS_LOCATION: redis://${NET_TAQUILLA:-10.10.20}.12/0
       PRETIX_REDIS_SESSIONS: "true"
-      PRETIX_CELERY_BACKEND: redis://10.10.20.12/1
-      PRETIX_CELERY_BROKER: redis://10.10.20.12/2
-      PRETIX_PRETIX_URL: http://10.10.20.10
+      PRETIX_CELERY_BACKEND: redis://${NET_TAQUILLA:-10.10.20}.12/1
+      PRETIX_CELERY_BROKER: redis://${NET_TAQUILLA:-10.10.20}.12/2
+      # URL con la que otros equipos llegan a Pretix (IP LAN de este PC y puerto publicado).
+      PRETIX_PRETIX_URL: http://${IP_PC2:?definir IP_PC2 (IP LAN de PC-2) en .env}:${PRETIX_PORT:-80}
       PRETIX_MAIL_FROM: taquilla@reservaviva.local
     # El primer arranque migra la base (~10 min): start_period largo para no marcarlo unhealthy sin motivo.
     healthcheck:
@@ -80,7 +78,10 @@ services:
       start_period: 900s
     networks:
       vlan20_taquilla:
-        ipv4_address: 10.10.20.10
+        ipv4_address: ${NET_TAQUILLA:-10.10.20}.10
+    # Accesible desde otros equipos: http://<IP LAN de PC-2>:${PRETIX_PORT:-80}
+    ports:
+      - "${PUBLISH_IP:-0.0.0.0}:${PRETIX_PORT:-80}:80"
 
   # --- Logística y Almacén (VLAN 30) ---
   inventree-db:
@@ -95,7 +96,7 @@ services:
       - inventree_db_data:/var/lib/postgresql/data
     networks:
       vlan30_logistica:
-        ipv4_address: 10.10.30.11
+        ipv4_address: ${NET_LOGISTICA:-10.10.30}.11
 
   inventree-app:
     image: inventree/inventree:1.5.5@sha256:5dc64d7ceee39db7bd98bd4a8a2c6f95dcc7a3e0fc39c4c1ea1efe8ba1c83ea3
@@ -105,12 +106,12 @@ services:
       - inventree-db
     environment:
       INVENTREE_DB_ENGINE: postgresql
-      INVENTREE_DB_HOST: 10.10.30.11
+      INVENTREE_DB_HOST: ${NET_LOGISTICA:-10.10.30}.11
       INVENTREE_DB_PORT: "5432"
       INVENTREE_DB_NAME: inventree
       INVENTREE_DB_USER: inventree
       INVENTREE_DB_PASSWORD: ${INVENTREE_DB_PASSWORD}
-      INVENTREE_SITE_URL: http://10.10.30.10:8000
+      INVENTREE_SITE_URL: http://${IP_PC2}:${INVENTREE_PORT:-8000}
       INVENTREE_AUTO_UPDATE: "True"
       # InvenTree crea este superusuario solo al arrancar si no existe (idempotente).
       INVENTREE_ADMIN_USER: ${INVENTREE_ADMIN_USER:-admin}
@@ -128,10 +129,10 @@ services:
       INVENTREE_LDAP_SEARCH_BASE_DN: ou=operaciones,dc=reservaviva,dc=local
       # El valor por defecto de la imagen es "(uid= %(user)s)" (con espacio) y no encuentra a nadie.
       INVENTREE_LDAP_SEARCH_FILTER_STR: (uid=%(user)s)
-    # El nombre lo resuelve el DNS interno (PC-3) en el laboratorio; aquí se fija para no depender de él
-    # y para que el nombre coincida con el certificado de OpenLDAP.
+    # ldap.reservaviva.local lo resuelve ESTA línea, no bind9 (los contenedores usan el DNS de Docker). Apunta a la IP LAN
+    # de PC-3, donde openldap publica 636; el nombre coincide con el certificado de OpenLDAP (SAN).
     extra_hosts:
-      - "ldap.reservaviva.local:10.10.99.10"
+      - "ldap.reservaviva.local:${IP_PC3:?definir IP_PC3 (IP LAN de PC-3) en .env}"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/', timeout=5)"]
       interval: 15s
@@ -145,7 +146,10 @@ services:
       - ./certs/ca.crt:/certs/ca.crt:ro
     networks:
       vlan30_logistica:
-        ipv4_address: 10.10.30.10
+        ipv4_address: ${NET_LOGISTICA:-10.10.30}.10
+    # Accesible desde otros equipos: http://<IP LAN de PC-2>:${INVENTREE_PORT:-8000}
+    ports:
+      - "${PUBLISH_IP:-0.0.0.0}:${INVENTREE_PORT:-8000}:8000"
 
   # Worker de tareas en segundo plano de InvenTree (correo, importaciones, informes).
   # Espera a que la app este sana para no competir por la clave secreta ni las migraciones.
@@ -159,17 +163,17 @@ services:
     command: ["invoke", "worker"]
     environment:
       INVENTREE_DB_ENGINE: postgresql
-      INVENTREE_DB_HOST: 10.10.30.11
+      INVENTREE_DB_HOST: ${NET_LOGISTICA:-10.10.30}.11
       INVENTREE_DB_PORT: "5432"
       INVENTREE_DB_NAME: inventree
       INVENTREE_DB_USER: inventree
       INVENTREE_DB_PASSWORD: ${INVENTREE_DB_PASSWORD}
-      INVENTREE_SITE_URL: http://10.10.30.10:8000
+      INVENTREE_SITE_URL: http://${IP_PC2}:${INVENTREE_PORT:-8000}
     volumes:
       - inventree_data:/home/inventree/data
     networks:
       vlan30_logistica:
-        ipv4_address: 10.10.30.12
+        ipv4_address: ${NET_LOGISTICA:-10.10.30}.12
 
 volumes:
   pretix_db_data:

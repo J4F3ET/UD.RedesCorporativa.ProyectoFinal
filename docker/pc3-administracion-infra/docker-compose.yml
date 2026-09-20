@@ -1,30 +1,28 @@
 # PC-3 — Servidor de Administración e Infraestructura
 # Departamentos: Recursos Humanos (ERPNext HR) + Infraestructura transversal (OpenLDAP/DNS/NTP)
-# Puerto de switch: TRUNK 802.1Q, VLANs 40 y 99 permitidas
 #
-# Requiere sub-interfaces 802.1Q creadas antes de "docker compose up":
-#   ver scripts/setup-vlans-pc3.sh
+# DESPLIEGUE OFICIAL: Windows + Docker Desktop (WSL2), redes bridge. NO hay VLAN ni macvlan; scripts/setup-vlans-pc3.sh
+# y firewall-pc3-matriz.sh son solo anexo de diseño. Ver docs/despliegue-windows-docker-desktop.md.
+# Las redes 10.10.40.0/24 y 10.10.99.0/24 son bridges LOCALES de este motor Docker: PC-1 y PC-2 NO llegan a 10.10.99.10.
+# Llegan por la IP LAN de este PC (IP_PC3 en sus .env) y los puertos publicados: 389/636 (OpenLDAP), 53 (bind9),
+# 123/udp (NTP) y 8080 (ERPNext). Ojo: 53/udp y 123/udp suelen chocar con Windows (ICS, w32time): ver el documento.
+# NO VERIFICADO: adaptación escrita sin poder ejecutarla (Docker no estaba disponible).
 
 networks:
+  # Bridges locales. NET_RRHH / NET_INFRA solo cambian si chocan con la LAN del laboratorio (ver .env.example).
   vlan40_rrhh:
-    driver: macvlan
-    driver_opts:
-      parent: ${IFACE:-eth0}.40
+    driver: bridge
     ipam:
       config:
-        - subnet: 10.10.40.0/24
-          gateway: 10.10.40.1
-          ip_range: 10.10.40.0/28
+        - subnet: ${NET_RRHH:-10.10.40}.0/24
+          gateway: ${NET_RRHH:-10.10.40}.1
 
   vlan99_infra:
-    driver: macvlan
-    driver_opts:
-      parent: ${IFACE:-eth0}.99
+    driver: bridge
     ipam:
       config:
-        - subnet: 10.10.99.0/24
-          gateway: 10.10.99.1
-          ip_range: 10.10.99.0/28
+        - subnet: ${NET_INFRA:-10.10.99}.0/24
+          gateway: ${NET_INFRA:-10.10.99}.1
 
   # Red privada de ERPNext (MariaDB, Redis, workers). No sale a ninguna VLAN.
   erpnext_internal:
@@ -38,8 +36,8 @@ services:
   # --- Recursos Humanos (VLAN 40) — ERPNext (stack de frappe_docker) ---
   # El sitio "rrhh.reservaviva.local" lo crea solo "erpnext-create-site"
   # (idempotente, sin pasos manuales). Solo el frontend (erpnext-hr, nginx) y el
-  # backend viven en VLAN40; el backend sale por el gateway 10.10.40.1 hacia
-  # LDAP (VLAN99). Acceso restringido a nivel de roles/permisos dentro de
+  # backend viven en VLAN40; el backend llega a LDAP por la red
+  # bridge vlan99_infra. Acceso restringido a nivel de roles/permisos dentro de
   # ERPNext: solo se exponen los perfiles y páginas del módulo HR (ver docs,
   # sección 6).
   erpnext-db:
@@ -190,11 +188,11 @@ services:
       erpnext-create-site:
         condition: service_completed_successfully
     environment:
-      LDAP_HOST: 10.10.99.10
-    # El backend es quien habla LDAPS con OpenLDAP (10.10.99.10:636). Se fija el nombre para que
-    # coincida con el certificado sin depender del DNS interno.
+      LDAP_HOST: ${NET_INFRA:-10.10.99}.10
+    # El backend es quien habla LDAPS con OpenLDAP. Se fija el nombre (no lo resuelve bind9) para que coincida con el
+    # certificado. Está en el mismo motor que openldap, así que va directo por la red bridge de infraestructura, no por la IP LAN.
     extra_hosts:
-      - "ldap.reservaviva.local:10.10.99.10"
+      - "ldap.reservaviva.local:${NET_INFRA:-10.10.99}.10"
     volumes:
       - erpnext_sites:/home/frappe/frappe-bench/sites
       - erpnext_logs:/home/frappe/frappe-bench/logs
@@ -203,7 +201,10 @@ services:
     networks:
       erpnext_internal:
       vlan40_rrhh:
-        ipv4_address: 10.10.40.11
+        ipv4_address: ${NET_RRHH:-10.10.40}.11
+      # Sin gateway entre VLAN, el backend se conecta también a la red de OpenLDAP para poder hacer LDAPS.
+      vlan99_infra:
+        ipv4_address: ${NET_INFRA:-10.10.99}.23
 
   erpnext-websocket:
     image: *erpnext_image
@@ -253,7 +254,7 @@ services:
     networks:
       - erpnext_internal
 
-  # Punto de entrada HTTP de RRHH (nginx, puerto 8080): http://10.10.40.10:8080
+  # Punto de entrada HTTP de RRHH (nginx, puerto 8080): http://<IP LAN de PC-3>:8080 (bridge interno 10.10.40.10)
   erpnext-hr:
     image: *erpnext_image
     container_name: erpnext-hr
@@ -284,7 +285,10 @@ services:
     networks:
       erpnext_internal:
       vlan40_rrhh:
-        ipv4_address: 10.10.40.10
+        ipv4_address: ${NET_RRHH:-10.10.40}.10
+    # Accesible desde otros equipos: http://<IP LAN de PC-3>:${ERPNEXT_PORT:-8080}
+    ports:
+      - "${PUBLISH_IP:-0.0.0.0}:${ERPNEXT_PORT:-8080}:8080"
 
   # --- Infraestructura transversal (VLAN 99) ---
   openldap:
@@ -317,7 +321,11 @@ services:
       - ./ldap:/container/service/slapd/assets/config/bootstrap/ldif/custom
     networks:
       vlan99_infra:
-        ipv4_address: 10.10.99.10
+        ipv4_address: ${NET_INFRA:-10.10.99}.10
+    # Publicados en la LAN para PC-1 y PC-2 (extra_hosts de sus contenedores apunta a IP_PC3:636).
+    ports:
+      - "${PUBLISH_IP:-0.0.0.0}:${LDAP_PORT:-389}:389"
+      - "${PUBLISH_IP:-0.0.0.0}:${LDAPS_PORT:-636}:636"
 
   dns:
     image: internetsystemsconsortium/bind9:9.18@sha256:1ffb29c718ee2540c5643c1e8166629a07bbd505f99107baae535e9f86eb7eef
@@ -328,17 +336,24 @@ services:
       - ./bind/zones:/etc/bind/zones:ro
     networks:
       vlan99_infra:
-        ipv4_address: 10.10.99.11
+        ipv4_address: ${NET_INFRA:-10.10.99}.11
+    # 53 suele chocar con ICS de Windows: DNS_BIND_IP (la IP LAN de PC-3) evita ese choque; ver el documento.
+    ports:
+      - "${DNS_BIND_IP:-0.0.0.0}:${DNS_PORT:-53}:53/udp"
+      - "${DNS_BIND_IP:-0.0.0.0}:${DNS_PORT:-53}:53/tcp"
 
   ntp:
     image: cturra/ntp:latest@sha256:7224d4e7c7833aabbcb7dd70c46c8a8dcccda365314c6db047b9b10403ace3bc
     container_name: ntp-interno
     restart: unless-stopped
     environment:
-      NTP_SERVERS: "10.10.99.12"
+      NTP_SERVERS: "${NET_INFRA:-10.10.99}.12"
     networks:
       vlan99_infra:
-        ipv4_address: 10.10.99.12
+        ipv4_address: ${NET_INFRA:-10.10.99}.12
+    # 123/udp suele estar ocupado por el servicio de hora de Windows (w32time): ver el documento.
+    ports:
+      - "${PUBLISH_IP:-0.0.0.0}:${NTP_PORT:-123}:123/udp"
 
 volumes:
   erpnext_db_data:
