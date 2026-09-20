@@ -7,7 +7,7 @@ Este computador va a correr **ERPNext** (el módulo de Recursos Humanos) y los t
 - [ ] El PC tiene Ubuntu Server ya instalado.
 - [ ] Tienes la contraseña de administrador del PC.
 - [ ] Tienes el cable de red a la mano.
-- [ ] Hay Internet disponible (solo para esta instalación inicial).
+- [ ] Tienes el **paquete de la Fase 0** (preparación previa, hecha en otra máquina con Internet: Docker, las imágenes y el proyecto). **El laboratorio no tiene Internet.** Ver [`despliegue/README.md`](../despliegue/README.md).
 - [ ] **Pregúntale al equipo técnico si el switch del laboratorio es "L2" o "L3"** (esto define un valor, `PERFIL`, que vas a poner en el Paso 6, y es el mismo en los tres PCs). Si nadie lo sabe todavía, espera a saberlo antes de encender: el archivo trae `l3` por defecto y solo sirve si el switch es L3.
 
 ## Paso 1 — Conectar el cable de red
@@ -25,30 +25,31 @@ De aquí en adelante, cada bloque de texto gris es algo que debes **copiar y peg
 
 ## Paso 3 — Instalar Docker
 
-Docker es el programa que va a correr las aplicaciones. Se instala una sola vez, copiando y pegando esto:
+Docker es el programa que va a correr las aplicaciones. **En el laboratorio no hay Internet**, así que no se descarga aquí: se instala desde el paquete de la Fase 0.
+
+> **HUECO: comandos pendientes.** Los está preparando pepe (paquete offline con `docker save` / `docker load`). Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
+
+Al terminar, comprueba que quedó instalado:
 
 ```bash
-curl -fsSL https://get.docker.com | sudo sh
+docker --version
 ```
 
-Te va a pedir la contraseña del PC (la del administrador) — escríbela y presiona `Enter`. No vas a ver los caracteres mientras escribes la contraseña, eso es normal, sigue escribiendo y da `Enter`.
+Debe mostrar un número de versión.
 
-Espera a que termine (puede tardar unos minutos). Al final debería decir algo como "Docker Engine v... is installed".
+## Paso 4 — Dejar el proyecto en el PC
 
-## Paso 4 — Descargar el proyecto
+El proyecto no se descarga de GitHub (no hay Internet): llega dentro del paquete de la Fase 0.
+
+> **HUECO: comandos pendientes.** Los está preparando pepe (paquete offline con `docker save` / `docker load`). Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
+
+Cuando el proyecto esté en el PC, entra a la carpeta de este equipo:
 
 ```bash
-git clone https://github.com/J4F3ET/UD.RedesCorporativaa.ProyectoFinak.git
 cd UD.RedesCorporativaa.ProyectoFinak/docker/pc3-administracion-infra
 ```
 
-Si tu equipo te indicó una rama de trabajo distinta a la principal, después del `git clone` ejecuta también:
-
-```bash
-git checkout NOMBRE-DE-LA-RAMA
-```
-
-(reemplaza `NOMBRE-DE-LA-RAMA` por el nombre real que te dieron).
+(Si el paquete lo dejó en otra ruta, entra a esa carpeta y luego a `docker/pc3-administracion-infra`.)
 
 ## Paso 5 — Identificar el nombre de tu tarjeta de red
 
@@ -91,7 +92,7 @@ Para guardar y salir: presiona `Ctrl` + `O`, luego `Enter`, luego `Ctrl` + `X`.
 sudo ./deploy.sh
 ```
 
-Este comando hace automáticamente todo lo necesario: prepara la red para las VLANs (40 y 99, y además 10, 20 y 30 si pusiste `PERFIL=l2`, porque entonces este PC hace de router) y luego descarga y arranca las aplicaciones. La primera vez tarda varios minutos, depende de la velocidad de Internet. No necesitas hacer nada manual de redes — el script se encarga.
+Este comando hace automáticamente todo lo necesario: prepara la red para las VLANs (40 y 99, y además 10, 20 y 30 si pusiste `PERFIL=l2`, porque entonces este PC hace de router) y luego descarga y arranca las aplicaciones. La primera vez tarda varios minutos (las imágenes ya están cargadas desde el paquete; el tiempo depende del disco del PC). No necesitas hacer nada manual de redes — el script se encarga.
 
 El instalador también genera solo los certificados de seguridad del directorio de usuarios (LDAPS); no tienes que hacer nada. Quedan en la carpeta `certs/` de este PC y **no se suben a GitHub**.
 
@@ -141,6 +142,5 @@ Listo. De ahora en adelante, cada vez que este PC se encienda, ERPNext (RRHH), L
 | Aparece un error mencionando `eth0.40` o `eth0.99` que "no existe" o "invalid" | El nombre de tu tarjeta de red no es `eth0`. Repite el Paso 5 y corrige `IFACE` en el `.env` (Paso 6), luego vuelve a correr `sudo ./deploy.sh`. |
 | Alguna fila de la tabla del Paso 8 dice `Exited` o `Restarting` | Copia el mensaje de error con: `docker compose logs` y muéstraselo al equipo técnico. |
 | Los otros PCs (PC-1 o PC-2) dicen que no pueden autenticarse o resolver nombres | Confirma que este PC (PC-3) está encendido y con la tabla del Paso 8 en "Up" — todo el laboratorio depende de él para LDAP/DNS/NTP. |
-| No hay Internet para el Paso 3 o el Paso 4 | Conéctate temporalmente a una red con Internet (Wi-Fi u otro cable) solo para instalar, y luego vuelve a conectar el cable del switch para el Paso 1. |
 
 Si nada de esto resuelve el problema, avisa al equipo técnico indicando en qué paso te quedaste y adjuntando una foto de la pantalla.

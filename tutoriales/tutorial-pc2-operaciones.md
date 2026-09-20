@@ -7,7 +7,7 @@ Este computador va a correr **dos** aplicaciones: **Pretix** (venta de entradas)
 - [ ] El PC tiene Ubuntu Server ya instalado.
 - [ ] Tienes la contraseña de administrador del PC.
 - [ ] Tienes el cable de red a la mano.
-- [ ] Hay Internet disponible (solo para esta instalación inicial).
+- [ ] Tienes el **paquete de la Fase 0** (preparación previa, hecha en otra máquina con Internet: Docker, las imágenes y el proyecto). **El laboratorio no tiene Internet.** Ver [`despliegue/README.md`](../despliegue/README.md).
 
 ## Paso 1 — Conectar el cable de red
 
@@ -24,30 +24,31 @@ De aquí en adelante, cada bloque de texto gris es algo que debes **copiar y peg
 
 ## Paso 3 — Instalar Docker
 
-Docker es el programa que va a correr las aplicaciones. Se instala una sola vez, copiando y pegando esto:
+Docker es el programa que va a correr las aplicaciones. **En el laboratorio no hay Internet**, así que no se descarga aquí: se instala desde el paquete de la Fase 0.
+
+> **HUECO: comandos pendientes.** Los está preparando pepe (paquete offline con `docker save` / `docker load`). Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
+
+Al terminar, comprueba que quedó instalado:
 
 ```bash
-curl -fsSL https://get.docker.com | sudo sh
+docker --version
 ```
 
-Te va a pedir la contraseña del PC (la del administrador) — escríbela y presiona `Enter`. No vas a ver los caracteres mientras escribes la contraseña, eso es normal, sigue escribiendo y da `Enter`.
+Debe mostrar un número de versión.
 
-Espera a que termine (puede tardar unos minutos). Al final debería decir algo como "Docker Engine v... is installed".
+## Paso 4 — Dejar el proyecto en el PC
 
-## Paso 4 — Descargar el proyecto
+El proyecto no se descarga de GitHub (no hay Internet): llega dentro del paquete de la Fase 0.
+
+> **HUECO: comandos pendientes.** Los está preparando pepe (paquete offline con `docker save` / `docker load`). Cuando estén comprobados se escribirán en [`despliegue/README.md`](../despliegue/README.md) y aquí. **No improvises otro procedimiento** y no intentes conseguir Internet para este PC: el laboratorio debe quedar aislado.
+
+Cuando el proyecto esté en el PC, entra a la carpeta de este equipo:
 
 ```bash
-git clone https://github.com/J4F3ET/UD.RedesCorporativaa.ProyectoFinak.git
 cd UD.RedesCorporativaa.ProyectoFinak/docker/pc2-operaciones
 ```
 
-Si tu equipo te indicó una rama de trabajo distinta a la principal, después del `git clone` ejecuta también:
-
-```bash
-git checkout NOMBRE-DE-LA-RAMA
-```
-
-(reemplaza `NOMBRE-DE-LA-RAMA` por el nombre real que te dieron).
+(Si el paquete lo dejó en otra ruta, entra a esa carpeta y luego a `docker/pc2-operaciones`.)
 
 ## Paso 5 — Identificar el nombre de tu tarjeta de red
 
@@ -93,7 +94,9 @@ Para guardar y salir: presiona `Ctrl` + `O`, luego `Enter`, luego `Ctrl` + `X`.
 sudo ./deploy.sh
 ```
 
-Este comando hace automáticamente todo lo necesario: prepara la red para las dos VLANs (20 y 30) y luego descarga y arranca las aplicaciones. La primera vez tarda varios minutos, depende de la velocidad de Internet. No necesitas hacer nada manual de redes — el script se encarga.
+Este comando hace automáticamente todo lo necesario: prepara la red para las dos VLANs (20 y 30) y luego descarga y arranca las aplicaciones. La primera vez tarda varios minutos (las imágenes ya están cargadas desde el paquete; el tiempo depende del disco del PC). No necesitas hacer nada manual de redes — el script se encarga.
+
+**Si la primera vez el instalador se detiene** con el mensaje `PASO PENDIENTE (no es un error)`: falta el certificado `ca.crt`, que viene del PC-3. El mensaje trae el comando exacto para copiarlo; cópialo y vuelve a ejecutar `sudo ./deploy.sh`. Los detalles (y la dirección `IP_GESTION` que se necesita para copiarlo) están en el paso 5 de la receta del switch que esté siguiendo el equipo técnico: [`despliegue/README.md`](../despliegue/README.md).
 
 **Importante:** en el primer arranque, Pretix e InvenTree preparan sus bases de datos y tardan **unos 10 minutos** en responder. El script espera y, cuando Pretix está listo, crea su administrador. Si al final ves el aviso `Pretix no quedo listo a tiempo`, espera unos minutos y ejecuta `sudo ./deploy.sh --solo-admins`. Es normal y no significa que algo esté roto.
 
@@ -140,6 +143,5 @@ Listo. De ahora en adelante, cada vez que este PC se encienda, Pretix e InvenTre
 | Aparece un error mencionando `eth0.20` o `eth0.30` que "no existe" o "invalid" | El nombre de tu tarjeta de red no es `eth0`. Repite el Paso 5 y corrige `IFACE` en el `.env` (Paso 6), luego vuelve a correr `sudo ./deploy.sh`. |
 | Alguna fila de la tabla del Paso 8 dice `Exited` o `Restarting` | Copia el mensaje de error con: `docker compose logs` y muéstraselo al equipo técnico. |
 | Solo una de las dos aplicaciones (Pretix o InvenTree) funciona | Puede ser que el puerto del switch no esté permitiendo las dos VLANs (20 y 30) como trunk. Avisa al compañero encargado del switch. |
-| No hay Internet para el Paso 3 o el Paso 4 | Conéctate temporalmente a una red con Internet (Wi-Fi u otro cable) solo para instalar, y luego vuelve a conectar el cable del switch para el Paso 1. |
 
 Si nada de esto resuelve el problema, avisa al equipo técnico indicando en qué paso te quedaste y adjuntando una foto de la pantalla.

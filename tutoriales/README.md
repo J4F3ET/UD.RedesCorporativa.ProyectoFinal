@@ -14,8 +14,7 @@ Si no sabes cuál PC te tocó, pregúntale al compañero encargado de la red ant
 
 - El PC debe tener **Ubuntu Server** (o similar) ya instalado por el equipo técnico — estos tutoriales no cubren instalar el sistema operativo, solo lo que va encima.
 - Necesitas la **contraseña de administrador** de ese PC (la que te dio el equipo técnico).
-- Necesitas **Internet por unos minutos** al principio, solo para instalar el programa Docker y descargar el proyecto. Después de eso, el laboratorio funciona sin Internet (así lo pide el profesor).
-- **Aviso:** el laboratorio **no tiene Internet** (confirmado). Estos tutoriales suponen un momento con Internet; eso hay que resolverlo con una preparación previa en otra máquina (imágenes guardadas con `docker save` y cargadas con `docker load`), cuyos comandos están **pendientes** y se documentarán en [`../despliegue/README.md`](../despliegue/README.md). Pregunta al equipo técnico antes de empezar.
+- **El laboratorio no tiene Internet** (confirmado; así lo pide el profesor). Todo lo que hace falta instalar (Docker, las imágenes de las aplicaciones y el proyecto) llega en un **paquete de preparación previa (Fase 0)**, armado antes en otra máquina con Internet. Sin ese paquete no arranca nada. Los comandos para usarlo están **pendientes** (los prepara pepe) y se documentarán en [`../despliegue/README.md`](../despliegue/README.md). Pregunta al equipo técnico por el paquete antes de empezar.
 - El **cable de red** conectado al puerto correcto del switch (cada tutorial dice cuál).
 
 ## Si algo no funciona
