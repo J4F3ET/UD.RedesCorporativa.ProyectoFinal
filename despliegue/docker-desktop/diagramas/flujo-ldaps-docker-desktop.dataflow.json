@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Reserva Viva — Flujo LDAPS con la CA interna (PROPUESTO)",
+    "output": "flujo-ldaps-docker-desktop.html",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1080,
+      500
+    ],
+    "views": [
+      {
+        "id": "ldaps",
+        "label": "Cadena de confianza",
+        "focus": [
+          "gen",
+          "cacrt",
+          "inventree",
+          "erpnext",
+          "host",
+          "openldap"
+        ],
+        "note": "Sin Internet: la CA la crea PC-3 y ca.crt se copia a mano; el nombre se fija con extra_hosts, no con bind9."
+      }
+    ]
+  },
+  "stages": [
+    {
+      "label": "CA interna · PC-3"
+    },
+    {
+      "label": "Distribución offline"
+    },
+    {
+      "label": "Clientes LDAPS"
+    },
+    {
+      "label": "Puerto publicado"
+    },
+    {
+      "label": "Servidor"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "gen",
+      "type": "security",
+      "label": "generar-certificados.sh",
+      "sublabel": "crea CA + ldap.crt",
+      "tag": "una vez",
+      "stage": 0,
+      "row": 1,
+      "width": 140
+    },
+    {
+      "id": "cacrt",
+      "type": "backend",
+      "label": "ca.crt",
+      "sublabel": "CA pública",
+      "tag": "copia a mano",
+      "stage": 1,
+      "row": 1,
+      "width": 140
+    },
+    {
+      "id": "inventree",
+      "type": "cloud",
+      "label": "InvenTree · PC-2",
+      "sublabel": "django-auth-ldap",
+      "tag": "ldap.reservaviva.local",
+      "stage": 2,
+      "row": 0,
+      "width": 140
+    },
+    {
+      "id": "erpnext",
+      "type": "cloud",
+      "label": "ERPNext backend · PC-3",
+      "sublabel": "LDAP Settings",
+      "tag": "ldap.reservaviva.local",
+      "stage": 2,
+      "row": 2,
+      "width": 140
+    },
+    {
+      "id": "host",
+      "type": "cloud",
+      "label": "Host de PC-3 :636",
+      "sublabel": "IP LAN del .env",
+      "tag": "PROPUESTO",
+      "stage": 3,
+      "row": 1,
+      "width": 140
+    },
+    {
+      "id": "openldap",
+      "type": "security",
+      "label": "OpenLDAP",
+      "sublabel": "LDAPS 636 · bind + búsqueda",
+      "tag": "cadena verificada",
+      "stage": 4,
+      "row": 1,
+      "width": 140
+    }
+  ],
+  "flows": [
+    {
+      "id": "f1",
+      "from": "gen",
+      "to": "cacrt",
+      "label": "publica la CA",
+      "variant": "security"
+    },
+    {
+      "id": "f2",
+      "from": "cacrt",
+      "to": "inventree",
+      "label": "a PC-2",
+      "variant": "emphasis"
+    },
+    {
+      "id": "f3",
+      "from": "cacrt",
+      "to": "erpnext",
+      "label": "./certs",
+      "variant": "default"
+    },
+    {
+      "id": "f4",
+      "from": "inventree",
+      "to": "host",
+      "label": "ldaps://…:636",
+      "variant": "emphasis"
+    },
+    {
+      "id": "f5",
+      "from": "erpnext",
+      "to": "host",
+      "label": "ldaps://…:636",
+      "variant": "default"
+    },
+    {
+      "id": "f6",
+      "from": "host",
+      "to": "openldap",
+      "label": "636",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Nombre por extra_hosts",
+      "items": [
+        "ldap.reservaviva.local lo fijan los contenedores",
+        "bind9 solo atiende a clientes externos"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Sin LDAP",
+      "items": [
+        "OpenVPMS no lo soporta; Pretix no está integrado",
+        "Solo InvenTree y ERPNext autentican por LDAPS"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Pendiente de fijar",
+      "items": [
+        "IP LAN de PC-3 vía .env, hoy 10.10.99.10 en los compose",
+        "NTP 123/udp aporta la hora para validar el certificado"
+      ]
+    }
+  ]
+}
