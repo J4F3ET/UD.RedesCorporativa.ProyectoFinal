@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "dataflow",
   "meta": {
-    "title": "Reserva Viva — Flujo LDAPS con la CA interna (PROPUESTO)",
+    "title": "Reserva Viva — Flujo LDAPS con la CA interna",
     "output": "flujo-ldaps-docker-desktop.html",
     "quality_profile": "showcase",
     "viewBox": [
@@ -88,7 +88,7 @@
       "type": "cloud",
       "label": "Host de PC-3 :636",
       "sublabel": "IP_PC3 del .env",
-      "tag": "PROPUESTO",
+      "tag": "solo para PC-2",
       "stage": 3,
       "row": 1,
       "width": 140
@@ -136,9 +136,11 @@
     {
       "id": "f5",
       "from": "erpnext",
-      "to": "host",
-      "label": "ldaps://…:636",
-      "variant": "default"
+      "to": "openldap",
+      "label": "bridge local · 636",
+      "variant": "dashed",
+      "route": "bottom-channel",
+      "channelY": 450
     },
     {
       "id": "f6",
@@ -167,10 +169,10 @@
     },
     {
       "dot": "amber",
-      "title": "Pendiente de fijar",
+      "title": "Quién usa la IP LAN",
       "items": [
-        "IP_PC3 en .env; hoy los compose usan 10.10.99.10",
-        "Conectar siempre por nombre: con ldaps://<ip> el certificado fallaría"
+        "IP_PC3 solo para clientes de otro PC (InvenTree)",
+        "ERPNext va por el bridge local de PC-3, no por la LAN"
       ]
     }
   ]

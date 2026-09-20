@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "Reserva Viva — Despliegue en Docker Desktop (PROPUESTO)",
+    "title": "Reserva Viva — Despliegue en Docker Desktop",
     "output": "despliegue-docker-desktop.html",
     "quality_profile": "showcase",
     "viewBox": [
@@ -29,7 +29,7 @@
           "dns-interno",
           "ntp-interno"
         ],
-        "note": "PROPUESTO: 3 PCs Windows físicos, bridges locales; entre PCs solo puertos publicados en la IP del host."
+        "note": "3 PCs Windows físicos con bridges locales; entre PCs solo puertos publicados en la IP del host (compose del PR #21)."
       },
       {
         "id": "pc3",
@@ -42,7 +42,7 @@
           "dns-interno",
           "ntp-interno"
         ],
-        "note": "PC-3 publica LDAP/LDAPS, DNS, NTP y ERPNext. 123/udp y 53/udp pueden chocar con Windows: NO VERIFICADO."
+        "note": "PC-3 publica LDAP/LDAPS, DNS, NTP y ERPNext. 53 y 123/udp pueden chocar con Windows: NO VERIFICADO."
       }
     ]
   },
@@ -231,7 +231,7 @@
       "id": "dns-interno",
       "type": "security",
       "label": "DNS bind9",
-      "sublabel": "PC-3 · 53/udp publicado",
+      "sublabel": "PC-3 · 53 udp+tcp publicado",
       "tag": "clientes externos",
       "pos": [
         1174,
@@ -393,7 +393,7 @@
       "title": "Sin VLANs ni segmentación",
       "items": [
         "Bridges locales por PC; sin macvlan, ACL ni nftables",
-        "Entre PCs solo hay puertos publicados"
+        "NO VERIFICADO: 53 y 123/udp frente a ICS y w32time"
       ]
     },
     {
@@ -405,11 +405,11 @@
       ]
     },
     {
-      "dot": "rose",
-      "title": "PROPUESTO, no implementado",
+      "dot": "emerald",
+      "title": "IP de cada PC en el .env",
       "items": [
-        "Puertos e IP_PC3 (.env) aún sin fijar en los compose",
-        "123/udp y 53/udp vs Windows: NO VERIFICADO"
+        "IP_PC3: PC-1 y PC-2 alcanzan LDAP, DNS y NTP de PC-3",
+        "IP_PC2: URL pública de Pretix e InvenTree (CSRF)"
       ]
     },
     {
@@ -417,7 +417,7 @@
       "title": "Quién usa LDAPS",
       "items": [
         "InvenTree y ERPNext; OpenVPMS y Pretix no usan LDAP",
-        "Por nombre: extra_hosts apunta a IP_PC3 (.env)"
+        "Siempre por nombre; con ldaps://<ip> el certificado fallaría"
       ]
     }
   ]
