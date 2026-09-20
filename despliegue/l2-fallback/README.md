@@ -8,15 +8,19 @@ Usa esta receta si el switch **no** tiene interfaces `VlanNN` con IP y no acepta
 
 **Consecuencia práctica:** PC-3 es el punto único de fallo. Si PC-3 está apagado o caído, **no hay tráfico entre VLANs** (y ni PC-1 ni PC-2 llegan a LDAP).
 
-> **RIESGO SIN RESOLVER: Internet.** Instalar necesita Internet: Docker, las imágenes de las aplicaciones y el build de OpenVPMS (~300 MB, una sola vez). **Aún no se sabe si el laboratorio da Internet.** Si no lo da, todo eso hay que preparar antes en otro equipo con Internet y llevarlo (`docker save` / `docker load` de las imágenes; el build de OpenVPMS incluido). Es trabajo de un día previo, no un detalle: averígualo antes de ir.
+> **OBLIGATORIO ANTES DE IR: el laboratorio NO tiene Internet** (confirmado por el usuario). Instalar necesita Internet: Docker, las imágenes de las aplicaciones y el build de OpenVPMS (~300 MB de descarga, una sola vez). **Sin la preparación previa no arranca nada.**
+>
+> **Fase 0 — preparación previa (otro día, otra máquina, con Internet).** Se construye y se guarda todo en un paquete que se lleva al laboratorio: Docker instalado en los 3 PCs, todas las imágenes (incluida la de OpenVPMS, que hay que compilar antes) y el repositorio. En el laboratorio se carga ese paquete en cada PC antes del paso 3.
+>
+> **HUECO: comandos de la Fase 0 pendientes.** Los está construyendo pepe (paquete offline con `docker save`/`docker load`); hay una duda abierta sobre si las imágenes fijadas por digest sobreviven a `save`/`load`, y de la respuesta depende el procedimiento. Aquí irán los comandos cuando estén comprobados. **No improvises otro procedimiento.**
 
 ## Lo que necesitas antes de empezar
 
-- Los 3 PCs con Ubuntu Server, usuario con `sudo` y **Internet solo para instalar** (Docker, imágenes y el build de OpenVPMS, ~300 MB). Ver el riesgo de Internet justo arriba.
+- Los 3 PCs con Ubuntu Server, usuario con `sudo` y **sin Internet en el laboratorio**: todo lo que se instala llega en el paquete de la Fase 0 (recuadro de arriba).
 - El switch, su cable de consola y sus credenciales.
 - Un portátil con Linux y un cable de red (para las pruebas). Necesita `curl`, `dig`, `ldap-utils` y `ntpdate`.
 - Un puerto libre del switch para el portátil (le llamaremos **puerto de pruebas**).
-- Un USB (alternativa si `scp` no funciona, ver paso 6).
+- Un USB (alternativa si `scp` no funciona, ver paso 5).
 - Los nombres reales de los puertos del switch de cada PC. Anótalos: `PUERTO-PC1`, `PUERTO-PC2`, `PUERTO-PC3`, `PUERTO-PRUEBAS`.
 
 ## Resumen: qué pasa en cada paso y cuánto tarda
@@ -27,12 +31,11 @@ Usa esta receta si el switch **no** tiene interfaces `VlanNN` con IP y no acepta
 | 2 | Cablear | sin medir |
 | 3 | Preparar los 3 PCs (Docker, repo, `.env`) | sin medir |
 | 4 | PC-3 (router + LDAP/DNS/NTP + ERPNext): `sudo ./deploy.sh` | **~13 min** el primer arranque completo (lo marca `erpnext-create-site`) |
-| 5 | PC-2: `sudo ./deploy.sh` | Pretix e InvenTree, **~10 min** de migraciones |
-| 6 | Copiar `ca.crt` a PC-2 con `scp` y reiniciar sus contenedores | sin medir |
-| 7 | PC-1: `sudo ./deploy.sh` | build de OpenVPMS **~2 min** y primer arranque **~5 min** |
-| 8 | Pruebas por VLAN | sin medir |
-| 9 | Evidencia | sin medir |
-| 10 | Reinicio real | sin medir |
+| 5 | PC-2: `sudo ./deploy.sh`, copiar `ca.crt` con `scp` y relanzar | Pretix e InvenTree, **~10 min** de migraciones |
+| 6 | PC-1: `sudo ./deploy.sh` | build de OpenVPMS **~2 min** y primer arranque **~5 min** |
+| 7 | Pruebas por VLAN | sin medir |
+| 8 | Evidencia | sin medir |
+| 9 | Reinicio real | sin medir |
 
 Los ~13 min son el primer arranque de los 3 PCs medido en **un solo host** con las tres pilas a la vez (22 contenedores); OpenVPMS corre en paralelo. En hardware real por separado puede variar. Los arranques posteriores son inmediatos. **No interrumpas** un arranque que "parece colgado" durante esos minutos: es normal.
 
@@ -50,7 +53,7 @@ Aquí el switch **no** enruta ni filtra. Solo se configura:
 - El **puerto de pruebas** del portátil **no viene en el archivo**: lo añades tú justo después (ver abajo).
 - **Sin** SVIs, **sin** `ip routing`, **sin** ACL.
 
-Todo eso está escrito para Cisco IOS en `despliegue/l2-fallback/switch/config-switch-l2.txt`. Ábrelo, cambia los nombres de puerto (`GigabitEthernet1/0/1`, `/2` y `/3` son solo **ejemplos**; el cableado propuesto es PC-1 → 1/0/1, PC-2 → 1/0/2, PC-3 → 1/0/3) por los reales (`show interfaces status` te los lista), y pégalo en la consola dentro de `configure terminal`. Al inicio del archivo hay un aviso: léelo. Al terminar, añade el puerto de pruebas (sustituye `PUERTO-PRUEBAS` por el puerto real; es un bloque de configuración, se pega entero):
+Todo eso está escrito para Cisco IOS en [`despliegue/l2-fallback/switch/config-switch-l2.txt`](switch/config-switch-l2.txt). Ábrelo, cambia los nombres de puerto (`GigabitEthernet1/0/1`, `/2` y `/3` son solo **ejemplos**; el cableado propuesto es PC-1 → 1/0/1, PC-2 → 1/0/2, PC-3 → 1/0/3) por los reales (`show interfaces status` te los lista), y pégalo en la consola dentro de `configure terminal`. Al inicio del archivo hay un aviso: léelo. Al terminar, añade el puerto de pruebas (sustituye `PUERTO-PRUEBAS` por el puerto real; es un bloque de configuración, se pega entero):
 
 ```
 interface PUERTO-PRUEBAS
@@ -66,7 +69,7 @@ Y guarda la configuración.
 write memory
 ```
 
-**Comprueba** (la guía larga está en `despliegue/l2-fallback/switch/verificacion.md`):
+**Comprueba** (la guía larga está en [`switch/verificacion.md`](switch/verificacion.md)):
 
 ```
 show vlan brief
@@ -86,7 +89,7 @@ show ip interface brief
 
 Esperado: **ninguna** `Vlan10`…`Vlan99` con IP (como mucho `Vlan1` de gestión). Si aparecen, el switch es L3: cambia a [`../l3-switch/README.md`](../l3-switch/README.md).
 
-Más comandos de evidencia en `despliegue/l2-fallback/switch/verificacion.md`.
+Más comandos de evidencia en [`switch/verificacion.md`](switch/verificacion.md).
 
 **Evidencia a guardar:** captura o texto de estos tres comandos.
 
@@ -110,13 +113,13 @@ Si alguno sale `notconnect`, revisa el cable y el nombre del puerto.
 
 Repite esto en **cada PC**. Si ya tienen Docker y el repo, salta a "Crear el `.env`".
 
-Instalar Docker (una vez, con Internet):
+Instalar Docker. **En el laboratorio no hay Internet:** Docker y el repositorio llegan en el paquete de la Fase 0 (comandos pendientes, ver recuadro del inicio). El comando siguiente es el de la máquina **con Internet**, solo para saber qué se prepara; no lo ejecutes en el laboratorio:
 
 ```
 curl -fsSL https://get.docker.com | sudo sh
 ```
 
-Descargar el proyecto:
+Descargar el proyecto (igual: solo en la máquina con Internet; en el laboratorio el repositorio viene en el paquete):
 
 ```
 git clone https://github.com/J4F3ET/UD.RedesCorporativaa.ProyectoFinak.git
@@ -201,9 +204,9 @@ sudo ./deploy.sh
 **Tiempo: ~13 min.** El script hace, en orden:
 
 1. Valida `PERFIL`.
-2. Crea las sub-interfaces `IFACE.10`, `.20` y `.30` con IP `10.10.X.1` (solo para enrutar).
-3. Crea `IFACE.40` y `IFACE.99` (sin IP) y, colgadas de ellas, las interfaces `gw40` y `gw99` con `10.10.40.1` y `10.10.99.1`. (Existen porque, con macvlan, el propio PC no alcanza a sus contenedores por la interfaz padre.)
-4. Activa `ip_forward`.
+2. Crea las cinco sub-interfaces `IFACE.10`, `.20`, `.30`, `.40` y `.99`, **todas sin IP**.
+3. Cuelga de cada una una interfaz `gwNN` (macvlan) con `10.10.NN.1`: `gw10`, `gw20`, `gw30`, `gw40` y `gw99`. Ese es el gateway de cada VLAN. (Existen porque, con macvlan, el propio PC no alcanza a sus contenedores por la interfaz padre; se usan en las cinco VLAN para tener una sola regla.)
+4. Activa `ip_forward` y ajusta `arp_ignore=1` y `arp_announce=2` (evitan que PC-3 conteste ARP por la interfaz equivocada).
 5. Aplica la tabla `nftables` con la matriz.
 6. Genera los certificados de LDAPS y arranca los contenedores.
 
@@ -221,13 +224,19 @@ Esperado: todo `Up`, salvo `erpnext-configurator` y `erpnext-create-site`, que *
 ip -brief addr show
 ```
 
-Esperado: `IFACE.10`, `IFACE.20`, `IFACE.30` con `10.10.X.1/24`, más `gw40` con `10.10.40.1/24` y `gw99` con `10.10.99.1/24`.
+Esperado: `IFACE.10`, `.20`, `.30`, `.40` y `.99` **sin IP**, y `gw10`, `gw20`, `gw30`, `gw40` y `gw99` con `10.10.NN.1/24`.
 
 ```
 sysctl net.ipv4.ip_forward
 ```
 
 Esperado: `net.ipv4.ip_forward = 1`.
+
+```
+sysctl net.ipv4.conf.all.arp_ignore net.ipv4.conf.all.arp_announce
+```
+
+Esperado: `arp_ignore = 1` y `arp_announce = 2`.
 
 ```
 sudo nft -a list ruleset
@@ -241,53 +250,27 @@ ls certs/ca.crt
 
 Esperado: el archivo existe.
 
+Más comprobaciones de PC-3 en [`switch/verificacion.md`](switch/verificacion.md) (sección 2).
+
 **Evidencia:** salida de `docker compose ps`, `ip -brief addr show` y `nft -a list ruleset` (con los contadores en 0).
 
-## Paso 5 — PC-2 (Pretix + InvenTree)
+## Paso 5 — PC-2 (Pretix + InvenTree), con el certificado
 
-PC-2 monta `certs/ca.crt` en su contenedor de InvenTree, así que el archivo tiene que **existir** antes de arrancar. Pero el `scp` que lo trae necesita la IP de gestión de PC-2, y esa la crea el propio `deploy.sh`. Por eso se deja primero un archivo vacío como marcador y se sustituye después (paso 6). Desde `docker/pc2-operaciones`:
+PC-2 necesita `certs/ca.crt` (la CA interna de LDAPS, que nace en PC-3) antes de arrancar. `deploy.sh` lo sabe: **la primera vez se detiene a pedírtelo, sin error**, y lo relanzas después de copiarlo.
 
-```
-mkdir -p certs
-```
+### 5a — Primer lanzamiento (se detiene a pedir el certificado)
 
-```
-touch certs/ca.crt
-```
+Desde `docker/pc2-operaciones`:
 
 ```
 sudo ./deploy.sh
 ```
 
-**Tiempo: ~10 min** (cientos de migraciones de Pretix e InvenTree). Al final el script crea el administrador de Pretix. Si esa parte falla, se repite sola con:
+Crea las sub-interfaces `IFACE.20` e `IFACE.30` y la IP de gestión, y **antes** de arrancar los contenedores comprueba `certs/ca.crt`. Como falta, imprime `PASO PENDIENTE (no es un error)` con el `scp` exacto y **termina con código 0**. Es lo esperado.
 
-```
-sudo ./deploy.sh --solo-admins
-```
+### 5b — Copiar el certificado con `scp`
 
-PC-2 crea `IFACE.20` y `IFACE.30`. **No** le pongas gateway a mano: el gateway `10.10.X.1` de sus contenedores lo fija el compose.
-
-**Comprueba:**
-
-```
-docker compose ps
-```
-
-Esperado: todo `Up`. (InvenTree aún no verifica LDAPS: falta el certificado real.)
-
-```
-ip -brief addr show
-```
-
-Esperado: `IFACE.20` y `IFACE.30` en `UP`, y solo la IP de gestión en una de ellas.
-
-**Evidencia:** las dos salidas.
-
-## Paso 6 — Copiar `ca.crt` a PC-2 con `scp`
-
-**El sentido importa.** La matriz sigue en vigor para los PCs, no solo para los contenedores: una VLAN de negocio solo alcanza la VLAN 99. Por eso el `scp` lo **inicia PC-2** (o PC-1) contra PC-3, en su dirección de la VLAN 99. Empujar el certificado desde PC-3 hacia los otros PCs choca con la matriz: la red funciona bien, no es un fallo.
-
-PC-3 debe tener el servicio SSH activo (`sudo systemctl status ssh`). Si falta y no hay Internet para instalarlo, usa el USB (abajo).
+**El sentido importa.** La matriz sigue en vigor para los PCs, no solo para los contenedores: una VLAN de negocio solo alcanza la VLAN 99. Por eso el `scp` lo **inicia PC-2** contra PC-3, en su dirección de la VLAN 99, que en este perfil es `10.10.99.1` (PC-3 es el router y tiene esa dirección). Empujar el certificado desde PC-3 hacia los otros PCs choca con la matriz: la red funciona bien, no es un fallo.
 
 Primero comprueba que PC-2 llega a PC-3:
 
@@ -295,21 +278,11 @@ Primero comprueba que PC-2 llega a PC-3:
 ping -c 2 10.10.99.1
 ```
 
-Esperado: responde. Si no, revisa `IP_GESTION` en los dos `.env` y la ruta (`ip route`).
+Esperado: responde. Si no, revisa `IP_GESTION` en los `.env` de PC-2 y la ruta (`ip route`).
 
-Desde `docker/pc2-operaciones`, en PC-2 (cambia `USUARIO` por el usuario de PC-3). La dirección de PC-3 en este perfil es 10.10.99.1 (PC-3 es el router y tiene esa dirección):
+Ejecuta el comando `scp` que imprimió `deploy.sh` (cambia `<usuario>` y `<ruta-del-repo-en-PC-3>` por los reales). PC-3 debe tener el servicio SSH activo (`sudo systemctl status ssh`). Si el `scp` no es posible, copia `ca.crt` de PC-3 con un USB a `docker/pc2-operaciones/certs/ca.crt`.
 
-```
-scp USUARIO@10.10.99.1:UD.RedesCorporativaa.ProyectoFinak/docker/pc3-administracion-infra/certs/ca.crt certs/ca.crt
-```
-
-Esto **sobrescribe** el marcador vacío del paso 5. Reinicia los contenedores de PC-2 para que InvenTree lea el certificado:
-
-```
-docker compose restart
-```
-
-**Comprueba:** el archivo es idéntico al de PC-3. Ejecuta esto en PC-2 y en PC-3 (carpetas `docker/pc2-operaciones` y `docker/pc3-administracion-infra`).
+**Comprueba:** el archivo es idéntico al de PC-3. Ejecútalo en PC-2 y en PC-3 (carpetas `docker/pc2-operaciones` y `docker/pc3-administracion-infra`).
 
 ```
 sha256sum certs/ca.crt
@@ -317,13 +290,39 @@ sha256sum certs/ca.crt
 
 Esperado: el mismo valor en los dos PCs.
 
-**Alternativa con USB** si el `scp` no funciona: copia `ca.crt` de PC-3 a un USB y luego sobre `docker/pc2-operaciones/certs/ca.crt`, y haz el `docker compose restart` igual.
+> **Pendiente de comprobar en hardware:** el `scp` real contra la red del laboratorio no se ha ejecutado.
 
-**PC-1 no necesita el certificado:** su compose no monta ninguno (OpenVPMS no llega a verificar la cadena de LDAPS). Solo PC-2 lo usa.
+### 5c — Segundo lanzamiento (arranca todo)
 
-> **Pendiente de comprobar en hardware:** este `scp`, el reinicio y el orden marcador → `deploy.sh` → `scp` no se han ejecutado contra una red real.
+```
+sudo ./deploy.sh
+```
 
-## Paso 7 — PC-1 (OpenVPMS)
+**Tiempo: ~10 min** (cientos de migraciones de Pretix e InvenTree). Al final crea el administrador de Pretix. Si esa parte falla, se repite sola con:
+
+```
+sudo ./deploy.sh --solo-admins
+```
+
+PC-2 crea `IFACE.20` e `IFACE.30`. **No** le pongas gateway a mano: el gateway `10.10.X.1` de sus contenedores lo fija el compose.
+
+**Comprueba:**
+
+```
+docker compose ps
+```
+
+Esperado: todo `Up`.
+
+```
+ip -brief addr show
+```
+
+Esperado: `IFACE.20` e `IFACE.30` en `UP`, y solo la IP de gestión en una de ellas.
+
+**Evidencia:** las dos salidas.
+
+## Paso 6 — PC-1 (OpenVPMS)
 
 Desde `docker/pc1-medica`:
 
@@ -331,7 +330,7 @@ Desde `docker/pc1-medica`:
 sudo ./deploy.sh
 ```
 
-**Tiempo:** build ~2 min (necesita Internet, ~300 MB) y primer arranque ~5 min. PC-1 es puerto access: no crea sub-interfaz. Si pusiste `IP_GESTION`, la lleva la propia tarjeta (`IFACE`), con `10.10.10.250`.
+**Tiempo:** primer arranque ~5 min. El build de OpenVPMS (~2 min medido con Internet, ~300 MB de descarga) **se hace en la Fase 0**, no en el laboratorio. *Pendiente:* cómo llega esa imagen ya compilada a PC-1 (lo define el paquete offline de pepe). PC-1 es puerto access: no crea sub-interfaz. Si pusiste `IP_GESTION`, la lleva la propia tarjeta (`IFACE`), con `10.10.10.250`.
 
 **Comprueba:**
 
@@ -341,7 +340,7 @@ docker compose ps
 
 Esperado: todo `Up`. Si `openvpms-app` reinicia, espera: está inicializando la base.
 
-## Paso 8 — Pruebas por VLAN (desde el portátil)
+## Paso 7 — Pruebas por VLAN (desde el portátil)
 
 **Regla importante:** con `macvlan`, un PC **no alcanza a sus propios contenedores**. Todas las pruebas se hacen **desde el portátil**, nunca desde el PC que aloja el servicio.
 
@@ -440,7 +439,7 @@ sudo nft -a list ruleset
 
 Esperado: los contadores de las reglas `drop` **subieron** (las de VLAN de negocio contra VLAN de negocio). Es la prueba de que PC-3 aplicó la matriz, y no solo que "no hay ruta". **Guárdala** junto con la salida anterior de contadores en 0.
 
-## Paso 9 — Evidencia para la sustentación
+## Paso 8 — Evidencia para la sustentación
 
 Ya reunida durante los pasos anteriores. Falta la captura en el trunk de PC-3:
 
@@ -464,7 +463,7 @@ Esperado: tramas con la etiqueta 802.1Q. Aquí verás el tráfico **entrar y sal
 - [ ] Captura Wireshark con etiquetas 802.1Q.
 - [ ] Tiempos reales de cada primer arranque (anota cuánto tardó cada `deploy.sh`).
 
-## Paso 10 — Que sobreviva a un reinicio
+## Paso 9 — Que sobreviva a un reinicio
 
 En cada PC, con el número que corresponda (`pc1`, `pc2` o `pc3`; abajo el ejemplo es PC-3). Primero, ve a la raíz del repo.
 

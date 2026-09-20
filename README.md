@@ -29,10 +29,12 @@ pruebas/
   software-un-host/      # HISTÓRICO, no ejecutar (evidencia de la primera ronda)
 despliegue/
   README.md              # ¿switch L2 o L3? cómo saberlo y a qué receta ir
-  l3-switch/             # receta completa si el switch enruta (SVIs + ACL en el switch)
-  l2-fallback/           # receta completa si el switch solo conmuta (PC-3 enruta con nftables)
+  l3-switch/             # receta completa si el switch enruta (SVIs + ACL en el switch); trae scripts/, switch/, pruebas/ y diagramas/
+  l2-fallback/           # receta completa si el switch solo conmuta (PC-3 enruta con nftables); misma estructura
+  comun/                 # biblioteca de los simuladores de la matriz
 scripts/
   generar-certificados.sh                   # CA interna + certificado de LDAPS (636); lo ejecuta el deploy.sh de PC-3
+  perfil.sh, ip-gestion.sh                  # bibliotecas que hacen "source" los deploy.sh (validan PERFIL; IP de gestión opcional)
   systemd/reserva-viva-pc{1,2,3}.service    # persistencia al reiniciar cada PC
 ```
 

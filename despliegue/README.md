@@ -72,12 +72,23 @@ Las dos son completas y se siguen de arriba abajo, sin saltar a otros documentos
 
 `PERFIL` va **igual en los tres PCs**. Si lo pones distinto en uno, la red queda a medias.
 
-## Riesgo antes de ir: Internet
+## Obligatorio antes de ir: el laboratorio NO tiene Internet
 
-Instalar necesita Internet (Docker, imágenes y el build de OpenVPMS, ~300 MB). **Aún no se sabe si el laboratorio lo da.** Si no, hay que preparar todo antes en otro equipo (`docker save` / `docker load`): es un día de trabajo previo. Averígualo antes de ir.
+Confirmado por el usuario. Instalar necesita Internet (Docker, imágenes y el build de OpenVPMS, ~300 MB). **Sin una preparación previa no arranca nada.** Esa preparación (Fase 0) se hace otro día, en otra máquina con Internet: se guardan las imágenes (`docker save`), se compila OpenVPMS y se lleva todo al laboratorio para cargarlo (`docker load`).
+
+**Comandos de la Fase 0: pendientes.** Los construye pepe; hay una duda abierta sobre si las imágenes fijadas por digest sobreviven a `save`/`load`. Cuando estén comprobados se escribirán aquí. Mientras tanto, cada receta marca el hueco.
+
+## Ensaya antes en tu portátil (sin hardware)
+
+Cada perfil trae un simulador que ejercita la matriz de segmentación completa (las 20 celdas) en un solo host, sin el switch y sin levantar las aplicaciones. Es la forma de llegar al laboratorio sabiendo que la lógica de la receta funciona.
+
+- L3: [`l3-switch/pruebas/README.md`](l3-switch/pruebas/README.md)
+- L2: [`l2-fallback/pruebas/README.md`](l2-fallback/pruebas/README.md)
+
+Prueba el **kernel de Linux**, no el switch del laboratorio (no valida la sintaxis del switch ni macvlan sobre una NIC real).
 
 ## Estado de validación
 
-Ninguno de los dos perfiles se ha probado todavía contra un switch real: **pendiente de hardware**. Lo único probado es la capa de software en un solo host (ver [`../docs/prueba-smoke-test-resultados.md`](../docs/prueba-smoke-test-resultados.md)). Por eso cada receta dice, paso a paso, cómo comprobar que salió bien y qué guardar como evidencia.
+Ninguno de los dos perfiles se ha probado todavía contra un switch real: **pendiente de hardware**. Lo probado es la capa de software en un solo host y, con los simuladores de arriba, el comportamiento de la matriz sobre el kernel de Linux (ver [`../docs/prueba-smoke-test-resultados.md`](../docs/prueba-smoke-test-resultados.md)). Por eso cada receta dice, paso a paso, cómo comprobar que salió bien y qué guardar como evidencia.
 
 El diseño completo (direccionamiento y matriz) está en [`../docs/arquitectura-3-equipos-departamentos.md`](../docs/arquitectura-3-equipos-departamentos.md); no lo necesitas para seguir las recetas.
