@@ -8,7 +8,7 @@
     "repository": {
       "url": "https://github.com/J4F3ET/UD.RedesCorporativaa.ProyectoFinak",
       "provider": "github",
-      "revision": "752e41fa0eb0df0d1680aec956ef35b4dd176a1a"
+      "revision": "95431025d1d687b8a0a5de5e4a0470118bd89a19"
     },
     "viewBox": [
       1390,
@@ -60,7 +60,7 @@
           "erpnext-backend",
           "erpnext-internals"
         ],
-        "note": "ERPNext no es un contenedor: son 10 servicios y solo nginx (:8080) y el backend salen a VLAN40."
+        "note": "ERPNext no es un contenedor: son 12 servicios y solo nginx (:8080) y el backend salen a VLAN40."
       },
       {
         "id": "infraestructura-transversal",
@@ -112,8 +112,8 @@
       "sources": [
         {
           "path": "docker/pc1-medica/docker-compose.yml",
-          "line": 36,
-          "end_line": 54,
+          "line": 39,
+          "end_line": 62,
           "label": "openvpms-app"
         },
         {
@@ -140,8 +140,8 @@
       "sources": [
         {
           "path": "docker/pc1-medica/docker-compose.yml",
-          "line": 22,
-          "end_line": 34,
+          "line": 25,
+          "end_line": 37,
           "label": "openvpms-db"
         }
       ]
@@ -163,8 +163,8 @@
       "sources": [
         {
           "path": "docker/pc2-operaciones/docker-compose.yml",
-          "line": 53,
-          "end_line": 74,
+          "line": 50,
+          "end_line": 84,
           "label": "pretix-web"
         }
       ]
@@ -186,8 +186,8 @@
       "sources": [
         {
           "path": "docker/pc2-operaciones/docker-compose.yml",
-          "line": 31,
-          "end_line": 43,
+          "line": 28,
+          "end_line": 40,
           "label": "pretix-db"
         }
       ]
@@ -209,8 +209,8 @@
       "sources": [
         {
           "path": "docker/pc2-operaciones/docker-compose.yml",
-          "line": 45,
-          "end_line": 51,
+          "line": 42,
+          "end_line": 48,
           "label": "pretix-redis"
         }
       ]
@@ -232,8 +232,8 @@
       "sources": [
         {
           "path": "docker/pc2-operaciones/docker-compose.yml",
-          "line": 91,
-          "end_line": 120,
+          "line": 101,
+          "end_line": 152,
           "label": "inventree-app"
         }
       ]
@@ -255,8 +255,8 @@
       "sources": [
         {
           "path": "docker/pc2-operaciones/docker-compose.yml",
-          "line": 77,
-          "end_line": 89,
+          "line": 87,
+          "end_line": 99,
           "label": "inventree-db"
         }
       ]
@@ -278,8 +278,8 @@
       "sources": [
         {
           "path": "docker/pc2-operaciones/docker-compose.yml",
-          "line": 124,
-          "end_line": 144,
+          "line": 156,
+          "end_line": 176,
           "label": "inventree-worker"
         }
       ]
@@ -301,8 +301,8 @@
       "sources": [
         {
           "path": "docker/pc3-administracion-infra/docker-compose.yml",
-          "line": 200,
-          "end_line": 223,
+          "line": 258,
+          "end_line": 291,
           "label": "erpnext-hr (frontend)"
         }
       ]
@@ -324,8 +324,8 @@
       "sources": [
         {
           "path": "docker/pc3-administracion-infra/docker-compose.yml",
-          "line": 136,
-          "end_line": 149,
+          "line": 183,
+          "end_line": 207,
           "label": "erpnext-backend"
         }
       ]
@@ -335,7 +335,7 @@
       "type": "database",
       "label": "ERPNext interno",
       "sublabel": "MariaDB · Redis · workers",
-      "tag": "9 servicios, bridge privado",
+      "tag": "10 servicios, bridge privado",
       "pos": [
         962,
         374
@@ -347,21 +347,21 @@
       "sources": [
         {
           "path": "docker/pc3-administracion-infra/docker-compose.yml",
-          "line": 45,
-          "end_line": 79,
+          "line": 43,
+          "end_line": 77,
           "label": "erpnext-db + redis"
         },
         {
           "path": "docker/pc3-administracion-infra/docker-compose.yml",
-          "line": 151,
-          "end_line": 197,
+          "line": 209,
+          "end_line": 255,
           "label": "websocket/scheduler/colas"
         },
         {
           "path": "docker/pc3-administracion-infra/docker-compose.yml",
-          "line": 82,
-          "end_line": 134,
-          "label": "configurator + create-site"
+          "line": 80,
+          "end_line": 181,
+          "label": "configurator + create-site + ldap-config"
         }
       ]
     },
@@ -382,8 +382,8 @@
       "sources": [
         {
           "path": "docker/pc3-administracion-infra/docker-compose.yml",
-          "line": 226,
-          "end_line": 252,
+          "line": 294,
+          "end_line": 328,
           "label": "openldap"
         },
         {
@@ -410,14 +410,14 @@
       "sources": [
         {
           "path": "docker/pc3-administracion-infra/docker-compose.yml",
-          "line": 254,
-          "end_line": 263,
+          "line": 330,
+          "end_line": 343,
           "label": "dns-interno"
         },
         {
-          "path": "docker/pc3-administracion-infra/bind/zones/db.reservaviva.local",
+          "path": "docker/pc3-administracion-infra/bind/zones/db.reservaviva.local.tpl",
           "line": 1,
-          "label": "zona reservaviva.local"
+          "label": "plantilla de zona reservaviva.local"
         }
       ]
     },
@@ -438,8 +438,8 @@
       "sources": [
         {
           "path": "docker/pc3-administracion-infra/docker-compose.yml",
-          "line": 265,
-          "end_line": 273,
+          "line": 345,
+          "end_line": 356,
           "label": "ntp-interno"
         }
       ]
