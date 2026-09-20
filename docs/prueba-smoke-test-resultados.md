@@ -331,7 +331,7 @@ es decir, ningún reinicio del daemon a mitad de prueba.
   [FAIL] ERPNext rrhh.prueba: status=None Traceback (most recent call last):
   File "<stdin>", line 8, in <module>
   File
-  [PASS] InvenTree logistica.prueba: status=200 {"token":"inv-5312973474949199d384a84daaaafab294eb38b3-20260920","name":"","expi
+  [PASS] InvenTree logistica.prueba: status=200 {"token":"inv-5312...","name":"","expi
   => Caso 1: login LDAP correcto: FAIL
 
 == Caso 2: contrasena erronea
@@ -361,7 +361,7 @@ dio `200`.
 ```
 == Caso 1: login LDAP correcto
   [PASS] ERPNext rrhh.prueba: status=200 {"message":"No App","home_page":"/me","full_name":"RRHH Prueba","_server_message
-  [PASS] InvenTree logistica.prueba: status=200 {"token":"inv-5312973474949199d384a84daaaafab294eb38b3-20260920","name":"","expi
+  [PASS] InvenTree logistica.prueba: status=200 {"token":"inv-5312...","name":"","expi
   => Caso 1: login LDAP correcto: PASS
 
 == Caso 2: contrasena erronea
