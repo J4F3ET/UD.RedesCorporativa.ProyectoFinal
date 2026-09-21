@@ -195,6 +195,14 @@ services:
       INVENTREE_DB_PASSWORD: ${INVENTREE_DB_PASSWORD}
       INVENTREE_SITE_URL: http://${IP_PC2}:${INVENTREE_PORT:-8000}
       INVENTREE_AUTO_UPDATE: "True"
+      # Procesos de gunicorn: dimensionado a la carga real del laboratorio (unos pocos usuarios de prueba). La imagen trae
+      # INVENTREE_GUNICORN_WORKERS=4 como valor por defecto (docker image inspect) y gunicorn.conf.py lo LEE del entorno
+      # (el arranque no pasa --workers), asi que se puede sobrescribir aqui. Con 2 procesos y los 4 hilos por proceso que fija
+      # gunicorn.conf.py (threads = 4) quedan 8 peticiones simultaneas: sobra para el laboratorio, no se quita ninguna funcion.
+      # Contexto medido: inventree-app 586,8 MiB con 4 procesos (docker stats, arnes parcial de 15 contenedores). El ahorro
+      # con 2 NO esta medido: la app se carga con preload_app = True, asi que los procesos comparten paginas y el ahorro sera
+      # menor que el RSS de un proceso. Medirlo en la siguiente pasada del arnes.
+      INVENTREE_GUNICORN_WORKERS: "2"
       # InvenTree crea este superusuario solo al arrancar si no existe (idempotente).
       INVENTREE_ADMIN_USER: ${INVENTREE_ADMIN_USER:-admin}
       INVENTREE_ADMIN_PASSWORD: ${INVENTREE_ADMIN_PASSWORD:?definir INVENTREE_ADMIN_PASSWORD en .env}
