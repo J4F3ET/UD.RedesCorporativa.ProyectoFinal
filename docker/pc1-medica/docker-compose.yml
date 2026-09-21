@@ -32,15 +32,21 @@ services:
     command: ["--character-set-server=utf8mb4", "--max_allowed_packet=16M", "--innodb_file_per_table=1", "--innodb_buffer_pool_size=512M"]
     # Antes PC-1 no tenía ningún healthcheck, y por eso un bucle de reinicios de openvpms-app pasó por "Up".
     # Se sonda por TCP (127.0.0.1), no por el socket: durante el primer arranque MySQL 8 levanta un servidor temporal sin
-    # red para inicializar el directorio de datos, y solo cuando escucha el definitivo responde el ping. start_period 180 s
-    # = la espera máxima del entrypoint de openvpms-app (90 intentos x 2 s): no tiene sentido darle menos margen que el
-    # que el propio consumidor tolera. El tiempo real del primer arranque de este MySQL NO está medido.
+    # red para inicializar el directorio de datos, y solo cuando escucha el definitivo responde el ping.
+    # Medido en la validación en frío del arnés completo (datadir sobre /mnt/d, HDD de 5400 rpm; UTC): el entrypoint
+    # arranca a las 00:37:04, "init process done" a las 00:44:56 y "ready for connections" (el servidor definitivo, el
+    # que responde al ping) a las 00:45:08 = 484 s. Con start_period 180 s + 30 reintentos x 5 s el margen eran 330 s
+    # y compose abortaba el `up` con "container openvpms-db is unhealthy", y en cascada quedaron en "Created" openvpms-app y
+    # los servicios que compose aún no había creado. 600 s son ~24 % de margen sobre lo medido (no un "por si acaso"): en un
+    # HDD el mismo arranque varía según lo que compita por disco. Con 40 reintentos el margen total es 600 + 200 = 800 s.
+    # Los fallos dentro del start_period no cuentan y el primer éxito lo cierra, así que un valor holgado no retrasa el
+    # arranque: solo evita que compose se rinda antes de tiempo.
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
       interval: 5s
       timeout: 5s
-      retries: 30
-      start_period: 180s
+      retries: 40
+      start_period: 600s
     volumes:
       - openvpms_db_data:/var/lib/mysql
     networks:
