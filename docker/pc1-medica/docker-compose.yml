@@ -88,6 +88,16 @@ services:
       OPENVPMS_DB_ROOT_PASSWORD: ${OPENVPMS_DB_ROOT_PASSWORD}
       OPENVPMS_DB_PASSWORD: ${OPENVPMS_DB_PASSWORD}
       OPENVPMS_ADMIN_PASSWORD: ${OPENVPMS_ADMIN_PASSWORD}
+      # Heap de Tomcat. El Dockerfile fija por defecto "-Xms512m -Xmx1024m" (ENV de la imagen); el `environment` del compose
+      # lo sobrescribe sin reconstruir la imagen (entrypoint.sh e init-lib.sh no tocan CATALINA_OPTS y acaban en `exec "$@"`
+      # con el entorno intacto). -Xms512m reservaba medio giga de heap desde el arranque sin carga que lo justificara;
+      # -Xms128m deja crecer a la JVM solo lo que necesite. El techo baja de 1024m a 768m porque el laboratorio (pocos
+      # registros de prueba, un puñado de usuarios) no se acerca a eso; no se baja más: un heap corto no ahorra memoria,
+      # da OutOfMemoryError a mitad de la inicialización de OpenVPMS, que es la fase más pesada. No es una función del
+      # sistema: no cambia ningún comportamiento observable. El ahorro NO está medido: openvpms-app nunca ha arrancado
+      # con el arnés completo, y los ~800 MiB de consumo son una estimación. NO VERIFICADO en un arranque real: que el
+      # primer arranque de OpenVPMS quepa en 768m de heap (y el efecto sobre los ~5 min medidos).
+      CATALINA_OPTS: "-Xms128m -Xmx768m"
       # Variables informativas: OpenVPMS 2.4.0.1 no tiene soporte LDAP y nada en el repo las lee. OpenLDAP, bind9 y
       # ntp viven en PC-3 (389/636, 53 y 123/udp publicados en su IP LAN); las tres se alcanzan por IP_PC3.
       LDAP_HOST: ${IP_PC3:?definir IP_PC3 (IP LAN de PC-3) en .env}
