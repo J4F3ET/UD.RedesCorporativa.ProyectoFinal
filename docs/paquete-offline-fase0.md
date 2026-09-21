@@ -12,7 +12,7 @@ Un **único paquete** para los tres PCs; en cada uno se ejecuta el instalador **
 | Contenido | Ruta en el paquete | Nota |
 |---|---|---|
 | Imágenes, una por `.tar`, guardadas **por etiqueta** | `imagenes/*.tar`, `imagenes/INVENTARIO.tsv` | El TSV tiene una columna con los perfiles que usan cada imagen. |
-| Imagen de OpenVPMS **ya construida** | `imagenes/reservaviva_openvpms-app_fase0.tar` | El compose usa `build:`; construirla exige Internet (release de OpenVPMS + driver JDBC). |
+| Imagen de OpenVPMS **ya construida** | `imagenes/reservaviva_openvpms-app_fase0.tar` | El compose usa `build:`; construirla exige Internet (release de OpenVPMS + driver JDBC). **Hay que reconstruirla siempre que cambie `docker/pc1-medica/openvpms/`**: `entrypoint.sh` e `init-lib.sh` (H2) viven DENTRO de la imagen, y un paquete hecho antes de esos cambios lleva el entrypoint antiguo sin error alguno. |
 | Imagen de los simuladores | `imagenes/nicolaka_netshoot_fase0.tar` | Perfil `simuladores`, ~900 MB, solo con `-ConSimuladores`. |
 | Override de cada PC | `overrides/pcN-<nombre>.yml` | Etiqueta sin digest + `pull_policy: never` (§4.1). |
 | Certificados ya generados | `certs/pc1/`, `certs/pc2/`, `certs/pc3/` | CA **compartida** por los tres PCs; `ldap.crt/key` y `ca.key` solo en `pc3`. |
@@ -32,15 +32,15 @@ Extraído con `scripts/preparar-paquete-offline.sh --listar <compose>` (esa orde
 | `pretix/standalone:stable` | `sha256:7f8c1b51f0b3e28f7c7a4245e85bcdfcd1e1bef76454dfc8314eda8f4ed596b3` | PC-2 |
 | `inventree/inventree:1.5.5` | `sha256:5dc64d7ceee39db7bd98bd4a8a2c6f95dcc7a3e0fc39c4c1ea1efe8ba1c83ea3` | PC-2 |
 | `mariadb:10.6.28` | `sha256:40153feb479c0da88b5cfe3f50f44c91f7baf05a1b7bcc5beb7eb37a890a8f16` | PC-3 |
-| `frappe/erpnext:v15.121.3` | `sha256:7b52acb52af9ac1721aa9922e06fab198e608bc748d3d3adae388aba364243fb` | PC-3 |
+| `ghcr.io/frappe/hrms:v15.64.1` | `sha256:b7ba52bc9aeb288f47d0aea9dc94635843ea1a7a83c45df724449f613b2f6395` | PC-3 |
 | `osixia/openldap:1.5.0` | `sha256:18742e9c449c9c1afe129d3f2f3ee15fb34cc43e5f940a20f3399728f41d7c28` | PC-3 |
 | `internetsystemsconsortium/bind9:9.18` | `sha256:1ffb29c718ee2540c5643c1e8166629a07bbd505f99107baae535e9f86eb7eef` | PC-3 |
 | `cturra/ntp:latest` | `sha256:7224d4e7c7833aabbcb7dd70c46c8a8dcccda365314c6db047b9b10403ace3bc` | PC-3 |
 | `nicolaka/netshoot:fase0` | `sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70` | simuladores |
 
-**12 imágenes** (10 descargadas de los compose + OpenVPMS construida + netshoot). Por PC: PC-1 = 2 servicios / 2 imágenes; PC-2 = 6 servicios / 4 imágenes; PC-3 = 15 servicios / 6 imágenes. Se cargan una sola vez por PC aunque varios servicios la compartan.
+**12 imágenes** (10 descargadas de los compose + OpenVPMS construida + netshoot). La imagen de ERPNext es `ghcr.io/frappe/hrms:v15.64.1` (ancla `&erpnext_image` de `docker/pc3-administracion-infra/docker-compose.yml`): sustituyó a `frappe/erpnext:v15.121.3` en H14 porque trae las mismas versiones de frappe y erpnext y añade la app hrms (programación de turnos). **Viene de `ghcr.io`, no de Docker Hub**: la máquina que prepara el paquete debe poder llegar a ambos registros. El fichero `.tar` se llamará `ghcr.io_frappe_hrms_v15.64.1.tar` (el script cambia `/` y `:` por `_`). Por PC: PC-1 = 2 servicios / 2 imágenes; PC-2 = 6 servicios / 4 imágenes; PC-3 = 15 servicios / 6 imágenes. Se cargan una sola vez por PC aunque varios servicios la compartan.
 
-**No están aquí y por qué:** tamaños y sha256 de los `.tar` solo existen tras ejecutar la preparación; el script los escribe en `INVENTARIO.md` y `MANIFEST.sha256`, y el instalador los comprueba antes de cargar. Orientación no medida: `frappe/erpnext`, `pretix` e `inventree` son las mayores (~1–2 GB); OpenVPMS ~300 MB; netshoot ~900 MB.
+**No están aquí y por qué:** tamaños y sha256 de los `.tar` solo existen tras ejecutar la preparación; el script los escribe en `INVENTARIO.md` y `MANIFEST.sha256`, y el instalador los comprueba antes de cargar. Orientación no medida: `pretix` e `inventree` son de las mayores (~1–2 GB); OpenVPMS ~300 MB; netshoot ~900 MB. **La imagen de ERPNext (`ghcr.io/frappe/hrms`) mide 3,19 GB según una medición de juan posterior a H14** (dato relatado por el coordinador; no he visto el comando ni si es tamaño en disco o comprimido), bastante más que el ~1–2 GB que sugería esta orientación: cuenta como la mayor con diferencia.
 
 ## 3. Cómo se usa
 
@@ -69,7 +69,7 @@ Hace, y se detiene en el primer fallo: (1) Docker Desktop responde y la arquitec
 3. **Simuladores con `docker run nicolaka/netshoot@sha256:…`.** Los README de `despliegue/*/pruebas/` citan la imagen **por digest**. Con el almacén containerd resuelve; con el clásico no y `docker run` intentaría descargar: usar entonces `nicolaka/netshoot:fase0` (la etiqueta local). No se tocan esos README (`despliegue/**` no es de esta sesión).
 4. **Certificados: condición de la que depende que valgan.** El `ldap.crt` lleva en el SAN `DNS:ldap.reservaviva.local`, `openldap`, `localhost` y `IP:<LDAP_IP>` (por defecto 10.10.99.10). Los clientes (InvenTree y ERPNext) se conectan a `ldaps://ldap.reservaviva.local:636`, que resuelven con `extra_hosts`: la verificación TLS valida el **nombre**, no la IP, así que el certificado vale para **cualquier IP** que acabe teniendo PC-3. **Requisito explícito: los clientes deben seguir conectándose por nombre.** Si alguien cambia un cliente a `ldaps://<ip>`, la verificación falla salvo que esa IP sea la del SAN; habría que preparar el paquete con `LDAP_IP=<ip>`. Como la CA es la misma en los tres PCs, ya no hace falta el `scp` de `ca.crt` entre PCs.
 5. **`pull_policy: never`** en el override de todos los servicios descargados: si falta una imagen, error inmediato en vez de intento de red. En `openvpms-app` no se pone (no se ha comprobado su interacción con `build:`); ahí basta con que exista `reservaviva/openvpms-app:fase0`.
-6. **OpenVPMS.** Con `image:` + `build:` en el override, `docker compose up` usa la imagen local y solo construye si falta. Si intentara construir, fallaría en el `curl` del Dockerfile (sin Internet): señal de que la imagen no se cargó.
+6. **OpenVPMS.** Con `image:` + `build:` en el override, `docker compose up` usa la imagen local y solo construye si falta. Si intentara construir, fallaría en el `curl` del Dockerfile (sin Internet): señal de que la imagen no se cargó. Ojo: un `build:` necesita red **aunque todas las capas estén en caché**, porque el paso `load metadata` consulta el registro por `tomcat:9.0-jdk11-temurin`; juan midió hoy un build de 17 s, de los que 1,8 s fueron esa consulta (dato relatado por el coordinador). Sin red no hay que llegar al build: la imagen `reservaviva/openvpms-app:fase0` cargada con `docker load` debe existir antes del `up`.
 7. **Descargas del build de OpenVPMS sin verificar.** El Dockerfile baja el zip de OpenVPMS y el driver JDBC con `curl` sin checksum. Recomendación para quien tenga `docker/**` (juan): añadir `sha256sum -c`.
 8. **Plataforma.** `--platform linux/amd64` por defecto; el motor de Docker Desktop es Linux (WSL2). El instalador falla si la arquitectura del PC no coincide con la del paquete.
 9. **`git archive` y finales de línea.** Se ejecuta con `core.autocrlf=false` para que los `.sh` del zip conserven LF (si no, fallarían con `\r` en Git Bash/WSL). Sin verificar.
@@ -100,8 +100,8 @@ Prueba del 2026-09-20 en la máquina de preparación (Docker 29.8.0), sobre esta
 **VERIFICADO (ejecutado y observado):**
 
 - `docker info` devuelve el almacén `io.containerd.snapshotter.v1` (Docker 29.8.0, x86_64).
-- `preparar-paquete-offline.sh` terminó de punta a punta con **EXIT 0** y **3,4 GB** de salida.
-- Los **11 `docker pull` por digest**, el `docker tag` y el `docker save` por etiqueta de cada imagen (ntp, erpnext, bind9, inventree, mariadb, mysql, netshoot, openldap, postgres, pretix, redis) y el **`docker build` de OpenVPMS** (descargó el release y el driver JDBC).
+- `preparar-paquete-offline.sh` terminó de punta a punta con **EXIT 0** y **3,4 GB** de salida. **Cifra histórica: anterior a H14** (con `frappe/erpnext:v15.121.3`); ya no vale, porque la imagen de ERPNext es ahora `ghcr.io/frappe/hrms:v15.64.1` (3,19 GB medidos por juan, ver §2) y con ella el total será mayor. **El tamaño del paquete desde H14 NO está medido**: el script no se ha vuelto a ejecutar.
+- Los **11 `docker pull` por digest**, el `docker tag` y el `docker save` por etiqueta de cada imagen (ntp, erpnext, bind9, inventree, mariadb, mysql, netshoot, openldap, postgres, pretix, redis; aquí «erpnext» es `frappe/erpnext:v15.121.3`, la imagen de entonces. Tras H14 la imagen es `ghcr.io/frappe/hrms:v15.64.1`: **su `pull` por digest, `tag` y `save` con este script NO están verificados**; el recuento de 11 se mantiene porque hrms sustituye a erpnext) y el **`docker build` de OpenVPMS** (descargó el release y el driver JDBC).
 - **Certificados** con el SAN esperado (`DNS:ldap.reservaviva.local`, `DNS:openldap`, `DNS:localhost`, `IP:10.10.99.10`, `IP:127.0.0.1`) y el reparto correcto por PC: `certs/pc1` y `certs/pc2` solo con `ca.crt`; `certs/pc3` con `ca.crt`, `ca.key`, `ldap.crt` y `ldap.key`.
 - **`proyecto.zip`** contiene `docker/pc3-administracion-infra/bind/generar-zona.ps1` y `bind/zones/db.reservaviva.local.tpl`, y no contiene `.git` ni `.env`.
 - `MANIFEST.sha256` generado; `INVENTARIO.tsv` con la columna de perfiles correcta (redis en pc2 y pc3, netshoot en `simuladores`).
