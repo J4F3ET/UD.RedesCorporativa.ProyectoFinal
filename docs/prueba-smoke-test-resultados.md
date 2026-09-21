@@ -57,6 +57,7 @@ DNS verificado (`dns-interno`): `rrhh`→10.10.40.10, `ldap`→10.10.99.10, `pre
   `erpnext-websocket`, `erpnext-scheduler`, `erpnext-queue-short`, `erpnext-queue-long` y
   `erpnext-hr` (nginx, 10.10.40.10, **puerto 8080**). Imagen fijada a `frappe/erpnext:v15`
   (`latest` apunta a v17-dev). `configurator` y `create-site` terminan con `Exited (0)`: es lo esperado.
+  > **Nota (2026-09-20, posterior a H14):** esta acta describe el estado de la ronda en que se ejecutó, con `frappe/erpnext:v15`. Desde H14 la imagen de ERPNext es `ghcr.io/frappe/hrms:v15.64.1` (mismas versiones de frappe y erpnext, más la app hrms). No se reescribe el acta: es evidencia de lo que se ejecutó entonces.
 - `bind/named.conf` y `bind/zones/db.reservaviva.local` para el servicio DNS.
 
 **`docker/pc1-medica`** (probado en ronda 3, con bridge en vez de macvlan): `openvpms/Dockerfile` (Tomcat 9, Java 11, OpenVPMS 2.4.0.1,

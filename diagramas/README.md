@@ -32,6 +32,15 @@ Las referencias a código de `topologia-red.architecture.json` están fijadas al
 `752e41f`. Si los `docker-compose.yml` cambian de tamaño, hay que actualizar los rangos
 `line`/`end_line` y la `revision` antes de regenerar, o Archify rechazará la evidencia.
 
+## PENDIENTE: regeneración y referencias a código caducadas (2026-09-20)
+
+Los diagramas **no se han regenerado** desde los cambios del 20/09/2026. Qué se hizo y qué falta:
+
+- **Parcheado a mano (solo texto):** el tag de `erpnext-hr` pasó de `frappe/erpnext:v15` a `ghcr.io/frappe/hrms:v15.64.1` (H14 sustituyó la imagen). Se cambió en `topologia-red.architecture.json` y `topologia-red.html`, y en `despliegue/l3-switch/diagramas/topologia-l3.architecture.json` y `topologia-l3.html` (en cada HTML aparece en tres sitios: `data-node-tag`, `<title>` y el texto del nodo). No se ejecutó Archify; ese cambio no pasó por `visual-check`.
+- **Referencias a código caducadas:** `topologia-red.architecture.json` fija sus `sources` (`line`/`end_line`) a la `revision` `95431025d1d687b8a0a5de5e4a0470118bd89a19` (`9543102`). Desde entonces cambiaron los tres `docker-compose.yml`: H14 (imagen hrms), H17 y el buffer pool de `openvpms-db`, `CATALINA_OPTS` de `openvpms-app`, H16 (`erpnext-create-site`), healthchecks y `depends_on`. Ejemplo medido: en el JSON `erpnext-hr` cita las líneas 258-291 y `erpnext-backend` las 183-207 de `docker/pc3-administracion-infra/docker-compose.yml`; hoy esos servicios empiezan en las líneas 324 y 249. Contra esa `revision` las citas siguen siendo verdaderas (el enlace apunta al commit), pero **ya no describen el `HEAD`**, y el tag parcheado a mano describe el `HEAD`, no la `revision`: el diagrama mezcla los dos estados hasta que se regenere.
+- **Para regenerar:** actualizar `line`/`end_line` de todos los `sources` por clave YAML contra el commit vigente, poner esa `revision` en `meta.repository`, y seguir "Cómo regenerarlos" abajo. `topologia-l3.architecture.json` no declara `sources` (0 apariciones), solo necesita el tag.
+- **Inconsistencia previa:** el párrafo de arriba dice que las referencias están fijadas al commit `752e41f`, pero el JSON declara `9543102` (regenerado después, commit `8b790c0`). Vale lo que dice el JSON.
+
 ## Cómo regenerarlos
 
 Con el [Skill de Archify](https://github.com/tt-a1i/archify) instalado, desde su directorio:
