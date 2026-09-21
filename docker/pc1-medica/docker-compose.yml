@@ -29,7 +29,16 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${OPENVPMS_DB_ROOT_PASSWORD}
       # No se define MYSQL_DATABASE: `toolbox database --create` de OpenVPMS crea la base y su usuario.
-    command: ["--character-set-server=utf8mb4", "--max_allowed_packet=16M", "--innodb_file_per_table=1", "--innodb_buffer_pool_size=512M"]
+    # innodb_buffer_pool_size=128M (el valor por defecto de MySQL 8; antes 512M, fijado a mano sin motivo documentado en
+    # el repo ni en el historial). Es una CACHÉ de páginas de datos, no una funcionalidad: no desaparece ninguna función de
+    # OpenVPMS ni cambia ningún comportamiento observable, solo cuántas páginas caben en memoria antes de ir a disco. La
+    # base de este laboratorio son pocos registros de prueba y un puñado de usuarios: medio giga de caché no se justifica.
+    # Es dimensionar a la carga real (como pretix), no recortar el entregable. Con 512M el contenedor medía 457,7 MiB con
+    # el arnés completo arriba; el ahorro esperado es del orden de 300-330 MiB (estimación, NO medido con 128M).
+    # PENDIENTE DE MEDIR: el efecto sobre el primer arranque (484 s con 512M, ver healthcheck). InnoDB reserva el buffer pool
+    # al arrancar, así que con 128M debería tardar menos, pero eso es razonamiento, no medida; por eso el start_period NO se
+    # ha tocado. Si arranca antes, el margen sobra, y sobrar no cuesta nada.
+    command: ["--character-set-server=utf8mb4", "--max_allowed_packet=16M", "--innodb_file_per_table=1", "--innodb_buffer_pool_size=128M"]
     # Antes PC-1 no tenía ningún healthcheck, y por eso un bucle de reinicios de openvpms-app pasó por "Up".
     # Se sonda por TCP (127.0.0.1), no por el socket: durante el primer arranque MySQL 8 levanta un servidor temporal sin
     # red para inicializar el directorio de datos, y solo cuando escucha el definitivo responde el ping.
