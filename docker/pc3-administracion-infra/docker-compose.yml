@@ -127,11 +127,32 @@ services:
     # ni recordatorios). Por eso se activa explicitamente. "enable-scheduler" va FUERA del if de la guarda, y no dentro de la
     # rama de creacion, para que tambien se ejecute cuando el sitio ya existia (volumen anterior con el scheduler a 0);
     # es idempotente, asi que ejecutarlo siempre es seguro. Si new-site falla se sale con error antes de llegar a el.
+    #
+    # IDEMPOTENCIA REAL (H16). "site_config.json" NO significa "sitio terminado": bench new-site lo escribe pronto
+    # (frappe/installer.py: install_db -> make_conf, ANTES de setup_database, bootstrap_database y de instalar frappe,
+    # erpnext y hrms; ~15 min de tramo). Una interrupcion en ese tramo dejaba un site_config.json sobre un sitio a medias y
+    # la ejecucion siguiente decia "ya existe" y activaba el scheduler sobre un sitio incompleto. Ahora hay una marca
+    # propia, escrita SOLO cuando new-site (con --set-default incluido) devolvio 0: sites/<sitio>/.reservaviva-sitio-completo.
+    # Tres casos:
+    #   1. sin site_config.json  -> se crea el sitio y, si termina bien, se escribe la marca.
+    #   2. con marca             -> sitio completo; se salta la creacion.
+    #   3. site_config.json sin marca -> ambiguo: o un sitio a medias, o un sitio COMPLETO de un volumen anterior a esta
+    #      marca. Se decide preguntando al propio sistema (`bench list-apps`: estan erpnext y hrms) SOLO en este caso, no
+    #      en cada arranque: la marca es la via rapida y no depende de que bench y la base respondan. Si estan las dos apps
+    #      se adopta el sitio (marca + `bench use`, idempotente, por si se perdio el --set-default). Si NO estan, o si la
+    #      comprobacion falla (base no disponible...), se ABORTA sin tocar nada, con mensajes distintos para cada causa: un
+    #      fallo de la comprobacion nunca se toma por "faltan apps" ni por "sitio bueno".
+    # NO se ejecuta `bench drop-site` ni se ofrece una variable que lo haga: destruye la base y el sitio (15 min de
+    # instalacion mas los datos), y un sitio a medias lo recupera una persona en segundos con los comandos del mensaje. A
+    # diferencia de OpenVPMS (OPENVPMS_REINICIALIZAR_BASE, base de laboratorio con marcas por etapa), aqui no hay marcas por
+    # etapa que permitan probar que no hay datos, asi que ante la duda se rechaza borrar.
+    # NO VERIFICADO en un arranque real: el formato de `bench list-apps` (se busca el nombre de cada app con grep -w) y que
+    # el tramo interrumpido se comporte como se lee en installer.py.
     command:
       - |
-        if [ -f "sites/$$SITE/site_config.json" ]; then
-          echo "El sitio $$SITE ya existe; solo se asegura el scheduler."
-        else
+        SITE_DIR="sites/$$SITE"
+        MARCA="$$SITE_DIR/.reservaviva-sitio-completo"
+        if [ ! -f "$$SITE_DIR/site_config.json" ]; then
           bench new-site "$$SITE" \
             --mariadb-user-host-login-scope='%' \
             --db-root-password "$$DB_ROOT_PASSWORD" \
@@ -139,6 +160,33 @@ services:
             --install-app erpnext \
             --install-app hrms \
             --set-default || exit 1
+          touch "$$MARCA" || exit 1
+        elif [ -f "$$MARCA" ]; then
+          echo "El sitio $$SITE ya existe y esta completo; solo se asegura el scheduler."
+        else
+          echo "El sitio $$SITE tiene site_config.json pero no la marca de sitio completo; se comprueba que apps tiene instaladas."
+          APPS=$$(bench --site "$$SITE" list-apps 2>&1); RC=$$?
+          if [ "$$RC" -ne 0 ]; then
+            echo "ERROR: no se pudo comprobar el estado del sitio $$SITE (bench list-apps salio con $$RC). No se toca nada." >&2
+            echo "Causa mas probable: la base de datos no esta disponible. Reintentar cuando erpnext-db este healthy." >&2
+            echo "$$APPS" >&2
+            exit 1
+          fi
+          if echo "$$APPS" | grep -qw erpnext && echo "$$APPS" | grep -qw hrms; then
+            echo "El sitio $$SITE tiene erpnext y hrms instalados: se adopta como completo."
+            bench use "$$SITE" || exit 1
+            touch "$$MARCA" || exit 1
+          else
+            echo "ERROR: el sitio $$SITE esta A MEDIAS: tiene site_config.json pero le faltan erpnext y/o hrms." >&2
+            echo "Una creacion anterior (bench new-site) se interrumpio. No se continua ni se borra nada automaticamente." >&2
+            echo "Apps instaladas segun bench list-apps:" >&2
+            echo "$$APPS" >&2
+            echo "Para rehacerlo (DESTRUYE el sitio y su base; si ya hay datos, hacer copia antes), desde una sesion con este volumen:" >&2
+            echo "  bench drop-site $$SITE --force   (con la clave root de la base; ver bench drop-site --help para el nombre exacto de la opcion)" >&2
+            echo "y volver a lanzar erpnext-create-site. Si el sitio es de laboratorio y no importa, se pueden borrar SOLO los" >&2
+            echo "volumenes erpnext_sites y erpnext_db_data (no los demas: LDAP y el resto tienen datos propios) y volver a arrancar." >&2
+            exit 1
+          fi
         fi
         bench --site "$$SITE" enable-scheduler
     environment:
