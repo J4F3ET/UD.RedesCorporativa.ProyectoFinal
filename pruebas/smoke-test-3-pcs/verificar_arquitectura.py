@@ -277,7 +277,7 @@ def bloque_prereq():
     for nombre, redes in ips.items():
         por_depto[nombre] = {v: redes.get(pref + n, "") for v, n in RED.items()}
     faltan = [f"{a}@vlan{d}" for a, _ in APPS.values() for d in (10, 20, 30, 40, 99)
-              if (APPS[d][0] == a or d == 99) and not por_depto[a][d]]
+              if (d == 99 or APPS[d][0] == a) and not por_depto[a][d]]  # d == 99 primero: APPS no tiene clave 99
     for d, (a, _) in APPS.items():
         if not por_depto[a][d] or not por_depto[a][99]:
             faltan.append(f"{a} no esta dual-homed (vlan{d} + vlan99)")

@@ -16,7 +16,7 @@
 # Opciones:
 #   --forzar        no abortar por falta de memoria
 #   --timeout MIN   espera maxima a que todo quede sano tras el arranque (por defecto 45)
-#   --completo      (verificar) incluye la prueba de persistencia de LDAP, que hace down + up -d
+#   --rapido        (verificar) omite la prueba de persistencia de LDAP (down + up -d); ese caso queda como no verificado
 #   --si            (borrar) no pedir confirmacion
 #
 # Es idempotente: se puede ejecutar las veces que haga falta. Si un arranque se interrumpe, volver a ejecutarlo
@@ -41,7 +41,7 @@ MIN_VM_GIB=6
 ACCION="arrancar"
 FORZAR=false
 TIMEOUT_MIN=45
-COMPLETO=false
+RAPIDO=false
 SI=false
 
 uso() { sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
@@ -51,7 +51,7 @@ while [ $# -gt 0 ]; do
     arrancar|preparar|estado|verificar|detener|borrar) ACCION="$1" ;;
     ayuda|-h|--help) uso; exit 0 ;;
     --forzar) FORZAR=true ;;
-    --completo) COMPLETO=true ;;
+    --rapido) RAPIDO=true ;;
     --si) SI=true ;;
     --timeout)
       [ $# -ge 2 ] && [[ "$2" =~ ^[0-9]+$ ]] || { echo "--timeout necesita un numero de minutos" >&2; exit 2; }
@@ -330,7 +330,7 @@ accion_verificar() {
   local informe
   informe="resultados/verificacion-$(date +%Y%m%d-%H%M%S).txt"
   local args=(--informe "${informe}")
-  ${COMPLETO} || args+=(--sin-persistencia)
+  ${RAPIDO} && args+=(--sin-persistencia)
   paso "Verificando la arquitectura (${py} verificar_arquitectura.py ${args[*]})"
   local rc=0
   "${py}" verificar_arquitectura.py "${args[@]}" || rc=$?
