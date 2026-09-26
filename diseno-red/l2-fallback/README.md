@@ -1,6 +1,6 @@
 # Receta L2 — el switch solo conmuta; PC-3 enruta y aplica la matriz
 
-> **Documento de diseño: no aplica al laboratorio Windows.** Los PCs del laboratorio son Windows con Docker Desktop, que no permite VLAN 802.1Q ni `macvlan` sobre la tarjeta de red. Este documento describe el diseño de red propuesto (switch con VLANs, PCs Linux): su lógica se validó por simulación (`diseno-red/l2-fallback/pruebas/`), no sobre un switch real. No sigas estos pasos tal cual en el laboratorio: la guía para Windows está en preparación. Para saber qué está validado y cómo, ver el [README raíz](../../README.md#estado-de-validación).
+> **Documento de diseño: no aplica al laboratorio Windows.** Los PCs del laboratorio son Windows con Docker Desktop, que no permite VLAN 802.1Q ni `macvlan` sobre la tarjeta de red. Este documento describe el diseño de red propuesto (switch con VLANs, PCs Linux): su lógica se validó por simulación (`diseno-red/l2-fallback/pruebas/`), no sobre un switch real. El sistema se ejecuta en un solo host con `levantar-sistema` (ver el [README raíz](../../README.md)); qué está validado y cómo, en [`docs/resultados-un-host.md`](../../docs/resultados-un-host.md).
 
 Usa esta receta si el switch **no** tiene interfaces `VlanNN` con IP y no acepta `ip routing` ([cómo saberlo](../README.md)). Síguela de arriba abajo. En cada paso hay una comprobación: **no pases al siguiente hasta que la tuya dé el resultado esperado.**
 

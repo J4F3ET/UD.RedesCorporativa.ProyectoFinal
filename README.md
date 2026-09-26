@@ -1,89 +1,110 @@
-# UD.RedesCorporativaa.ProyectoFinak
+# Reserva Viva: intranet segmentada del Zoológico
 
-Arquitectura de red corporativa para el Zoológico Reserva Viva (empresa ficticia del entregable de Redes Corporativas). El diseño propone un switch administrable con VLANs 802.1Q + Docker (VLANs vía `macvlan`) para dar solución a las problemáticas de negocio de 4 departamentos, con un directorio centralizado (OpenLDAP) y sin conexión a Internet. **Los PCs del laboratorio son Windows con Docker Desktop**, que no permite `macvlan` ni 802.1Q sobre la tarjeta de red: por eso la segmentación por VLAN se valida por simulación y no sobre hardware (ver [Estado de validación](#estado-de-validación)).
+Proyecto final de Redes Corporativas (UD, grupo 678-302). Es la intranet del Zoológico "Reserva Viva", una empresa ficticia. Cuatro departamentos tienen cada uno su aplicación y su VLAN, y comparten un directorio central (OpenLDAP con LDAPS), DNS y NTP propios, sin depender de Internet.
 
-## Arranque rápido: todo el sistema en un solo equipo
+| Departamento | Aplicación | VLAN | Subred |
+|---|---|---|---|
+| Unidad Médica Veterinaria | OpenVPMS | 10 | 10.10.10.0/24 |
+| Taquilla y Boletería | Pretix | 20 | 10.10.20.0/24 |
+| Logística y Almacén | InvenTree | 30 | 10.10.30.0/24 |
+| Recursos Humanos | ERPNext (módulo HR) | 40 | 10.10.40.0/24 |
+| Infraestructura (transversal) | OpenLDAP + CA interna, bind9, NTP | 99 | 10.10.99.0/24 |
 
-Clonar y ejecutar un solo script levanta la arquitectura completa (los 3 PCs, 25 servicios) en una sola máquina:
+Todo el sistema (25 servicios) corre **en un solo equipo**. Cada VLAN es una red bridge de Docker con su misma subred. Cada aplicación está en la VLAN de su departamento y además en la VLAN 99, para llegar a la infraestructura.
+
+## Arranque rápido
 
 | Sistema | Cómo |
 |---|---|
 | Windows | Doble clic en **`levantar-sistema.cmd`**, o `.\levantar-sistema.ps1` en PowerShell |
 | Linux / WSL / macOS | `./levantar-sistema.sh` |
 
-Genera lo que no va en git (CA interna y certificado LDAPS, zona DNS), construye la imagen de OpenVPMS, levanta los 25 servicios, **espera a que todos estén sanos** y muestra las direcciones de acceso (`http://localhost:18080/openvpms`, `:18081` ERPNext, `:18082` Pretix, `:18083` InvenTree). Se puede volver a ejecutar sin riesgo: si un arranque se corta, retoma donde quedó. Otras acciones: `estado`, `verificar` (segmentación, DNS, NTP y LDAP), `detener` (sin borrar datos) y `borrar` (borra también los datos; pide confirmación).
+El script hace todo lo necesario y se puede volver a ejecutar sin riesgo: si un arranque se corta, retoma donde quedó.
 
-**Requisitos:** Docker Desktop (con Git for Windows en Windows) o Docker Engine en Linux/WSL, con Compose 2.24.4 o superior. Al menos **~7 GB de RAM libre**: los 25 servicios consumen unos 5,7 GB en el equipo. El primer arranque descarga varios GB de imágenes (solo la de ERPNext/hrms ocupa 3,2 GB). A eso se suma la inicialización: medido por separado, unos 13 min la cadena de OpenVPMS y unos 15 min el sitio de ERPNext, que corren en paralelo. Los siguientes arranques tardan unos minutos. Medido el 26/09/2026 en un equipo de 14 GB: **25/25 sanos en 15 min 45 s** (con las imágenes ya descargadas e inicializando OpenVPMS desde cero). Las contraseñas de laboratorio (desechables) están en `pruebas/smoke-test-3-pcs/test.env`.
+1. Genera lo que no va en git: la CA interna, el certificado LDAPS y la zona DNS.
+2. Construye la imagen de OpenVPMS.
+3. Levanta los 25 servicios y **espera a que todos estén sanos**.
+4. Crea el administrador de Pretix.
+5. Muestra las direcciones de acceso.
 
-En Windows con Docker Engine dentro de WSL (sin Docker Desktop), el lanzador deja una sesión de WSL abierta en segundo plano. Sin ella, al cerrarse la última terminal Docker se detiene y se lleva los contenedores. `detener` la cierra.
+| Aplicación | Dirección |
+|---|---|
+| OpenVPMS | http://localhost:18080/openvpms |
+| ERPNext | http://localhost:18081 |
+| Pretix | http://localhost:18082 |
+| InvenTree | http://localhost:18083 |
 
-Un equipo demuestra que la arquitectura funciona, pero no demuestra el switch físico ni el etiquetado 802.1Q (ver [Estado de validación](#estado-de-validación)).
+Los usuarios aparecen al terminar el arranque. Las contraseñas de laboratorio, que son desechables, están en [`sistema/test.env`](sistema/test.env).
 
-## Estado actual: 3 equipos separados por departamento
+| Acción | Qué hace |
+|---|---|
+| `arrancar` (por defecto) | Prepara todo, levanta el sistema y espera a que esté sano |
+| `verificar` | Comprueba la arquitectura contra el sistema en marcha (ver abajo); tarda unos 15 min. Con `--rapido` omite la prueba de persistencia |
+| `estado` | Estado de cada servicio y direcciones de acceso |
+| `detener` | Para los contenedores sin borrar datos |
+| `borrar` | Borra contenedores **y datos**. Pide confirmación |
 
-El diseño propuesto distribuye las aplicaciones en **3 computadores físicos**, uno por grupo de departamentos (en el laboratorio, tres PCs Windows con Docker Desktop). En el diseño de red completo se conectarían a un switch con puertos access/trunk según corresponda. Esto reemplaza un diseño previo de 2 equipos.
+**Requisitos:**
 
-Ver el documento completo: [`diseno-red/arquitectura-3-equipos-departamentos.md`](diseno-red/arquitectura-3-equipos-departamentos.md).
+- **Docker:** Docker Desktop (en Windows, con Git for Windows) o Docker Engine en Linux/WSL, con Compose 2.24.4 o superior.
+- **Memoria:** unos **7 GB de RAM libre**. Los 22 contenedores permanentes usan unos 4,6 GiB, y en el equipo cuestan unos 5,7 GB.
+- **Primer arranque:** descarga varios GB de imágenes (la de ERPNext/hrms ocupa 3,2 GB) e inicializa las bases de datos. Medido: **25/25 sanos en 15 min 45 s**, con las imágenes ya descargadas. Los arranques siguientes tardan unos minutos.
+- **Docker Engine dentro de WSL** (sin Docker Desktop): el lanzador de Windows deja una sesión de WSL abierta en segundo plano. Sin ella, Docker se detiene al cerrarse la última terminal y se lleva los contenedores. `detener` cierra esa sesión.
 
-| PC | Departamento(s) | Aplicación(es) | VLAN(es) |
-|---|---|---|---|
-| PC-1 | Unidad Médica Veterinaria | OpenVPMS | 10 |
-| PC-2 | Taquilla y Boletería + Logística y Almacén | Pretix + InvenTree | 20, 30 |
-| PC-3 | Recursos Humanos + Infraestructura | ERPNext (HR) + OpenLDAP + DNS + NTP | 40, 99 |
+## Qué demuestra `verificar`
 
-## Estado de validación
+[`sistema/verificar_arquitectura.py`](sistema/verificar_arquitectura.py) se ejecuta contra el sistema levantado. Lo que comprueba y cómo leer el resultado está en [`sistema/verificar_arquitectura.md`](sistema/verificar_arquitectura.md).
 
-No todo lo que describe este repositorio se ha demostrado de la misma manera. Hay tres niveles de evidencia:
+- **Segmentación:** cada departamento alcanza su propio servicio y no alcanza a los demás. Cada negativo se valida con controles positivos para que un timeout no pase por aislamiento.
+- **DNS:** respuestas autoritativas de `reservaviva.local`, NXDOMAIN, rechazo de recursión, y alcance solo desde la VLAN 99.
+- **NTP:** el servidor responde con un stratum válido, un cliente chrony real lo acepta, y solo es alcanzable desde la VLAN 99.
+- **LDAP/LDAPS:** login LDAP real en ERPNext e InvenTree; clave errónea rechazada; `ldapsearch` por LDAPS que valida con la CA interna y falla con una CA ajena. También comprueba que todo sobrevive a un `down` + `up -d`.
 
-| Nivel | Qué es | Dónde se demuestra |
-|---|---|---|
-| **Implementado y ejecutado** | Las 4 aplicaciones (OpenVPMS, Pretix, InvenTree, ERPNext), OpenLDAP con LDAPS (636) y CA interna, DNS (bind9), NTP, el direccionamiento `10.10.X.0/24` con sus IP y los healthchecks, sobre Docker Desktop con redes `bridge`. | `pruebas/smoke-test-3-pcs/`, [`pruebas/smoke-test-3-pcs/verificar_arquitectura.md`](pruebas/smoke-test-3-pcs/verificar_arquitectura.md), [`docs/integracion-ldap-erpnext-inventree.md`](docs/integracion-ldap-erpnext-inventree.md) |
-| **Simulado en el kernel de Linux (Docker Desktop)** | La segmentación 802.1Q y la matriz de política: las 20 celdas, con un contador por regla. En el perfil L2 se ejecutan los scripts reales `setup-vlans-pc3.sh` y `firewall-pc3-matriz.sh`. Se puede repetir en vivo en la misma máquina Windows. | `diseno-red/l3-switch/pruebas/` y `diseno-red/l2-fallback/pruebas/` |
-| **Diseñado, no validado en hardware** | Configuración del switch (Cisco IOS), trunk 802.1Q entre los PCs, `macvlan` real sobre la tarjeta física, copia de `ca.crt` con `scp` entre PCs, servicios systemd. | `diseno-red/*/switch/`, `diseno-red/*/README.md`, [`diseno-red/diagramas/`](diseno-red/diagramas/) |
+Último resultado: **92 PASS, 0 FAIL** (26/09/2026). Las cifras están en [`docs/resultados-un-host.md`](docs/resultados-un-host.md).
 
-**Por qué:** los PCs del laboratorio son Windows con Docker Desktop, que corre los contenedores en una máquina virtual Linux y no expone la tarjeta de red física a `macvlan` ni a sub-interfaces 802.1Q. El diseño con VLANs se conserva como diseño de red propuesto (con sus scripts, configuraciones de switch y diagramas como anexo) y su lógica se comprueba con los simuladores; lo que no se ha podido comprobar es el comportamiento sobre un switch físico.
+**Lo que un solo equipo no puede demostrar:**
 
-## Estructura del repositorio
+- El etiquetado 802.1Q y los puertos troncales.
+- El switch físico.
+- La matriz de firewall sobre interfaces reales.
+
+Además, la VLAN 99 es un único dominio L2 compartido por las 4 aplicaciones. `verificar` lo reporta como `INFO`, porque es un hallazgo previsto del diseño.
+
+## Mapa del repositorio
 
 ```
-docs/                    # integración LDAP de las apps (ERPNext/InvenTree sí; Pretix/OpenVPMS no)
+levantar-sistema.sh / .ps1 / .cmd   # arranque plug and play (la lógica está en el .sh)
+sistema/                            # el sistema en un host: incluye los 3 compose, test.env y la verificación
 docker/
-  pc1-medica/            # OpenVPMS (VLAN 10): docker-compose.yml + imagen propia (openvpms/)
-  pc2-operaciones/       # Pretix + InvenTree (VLAN 20/30): docker-compose.yml
-  pc3-administracion-infra/  # ERPNext HR + OpenLDAP/DNS/NTP (VLAN 40/99): docker-compose.yml, ldap/, bind/
-pruebas/
-  smoke-test-3-pcs/      # arnés vigente: los 3 compose reales en un solo host (lo usa levantar-sistema.sh)
-diseno-red/
-  README.md              # ANEXO DE DISEÑO (no se despliega): ¿switch L2 o L3? cómo saberlo y a qué receta ir
-  arquitectura-3-equipos-departamentos.md   # diseño de red (VLANs, matriz de segmentación, plan de pruebas)
-  diagramas/             # topología y flujo de datos (HTML interactivo, generados con Archify)
-  l3-switch/             # receta completa si el switch enruta (SVIs + ACL en el switch); trae scripts/, switch/, pruebas/ y diagramas/
-  l2-fallback/           # receta completa si el switch solo conmuta (PC-3 enruta con nftables); misma estructura
-  comun/                 # biblioteca de los simuladores de la matriz y de los scripts de VLAN (ip-gestion.sh)
-scripts/
-  generar-certificados.sh                   # CA interna + certificado de LDAPS (636); lo ejecuta levantar-sistema.sh
-levantar-sistema.sh / .ps1 / .cmd           # arranque plug and play de todo el sistema en un host
+  pc1-medica/                       # OpenVPMS (VLAN 10): compose + imagen propia (openvpms/)
+  pc2-operaciones/                  # Pretix + InvenTree (VLAN 20/30)
+  pc3-administracion-infra/         # ERPNext HR + OpenLDAP/DNS/NTP (VLAN 40/99): ldap/, bind/
+scripts/generar-certificados.sh     # CA interna + certificado LDAPS (lo ejecuta levantar-sistema.sh)
+docs/                               # resultados vigentes e integración LDAP de cada aplicación
+diseno-red/                         # ANEXO: diseño con switch L2/L3, VLANs 802.1Q, matriz y diagramas (no se despliega)
+plans/handoffs/                     # último traspaso de trabajo y su plan
 ```
 
-## Puesta en marcha
+Los servicios se agrupan en `docker/pc1…pc3` por departamento, igual que en el diseño de la Entrega 1 (3 equipos). `sistema/docker-compose.yml` los incluye a los tres y convierte cada VLAN en una red bridge.
 
-El sistema se despliega en **un solo equipo** con `levantar-sistema` (ver [Arranque rápido](#arranque-rápido-todo-el-sistema-en-un-solo-equipo)). El despliegue en 3 PCs (scripts `deploy.sh`/`deploy.ps1`, `.env.example` por PC, servicios systemd, tutoriales y guías de Windows) se retiró del repositorio el 26/09/2026 para reducir la curva de aprendizaje. Se puede recuperar del historial de git (ver el commit que lo retiró).
+## Diseño de red (anexo)
 
-**Diseño con switch (anexo):** la receta con VLANs 802.1Q y switch L2/L3 se conserva como diseño de red en [`diseno-red/README.md`](diseno-red/README.md), con sus simuladores de segmentación. No se despliega.
+El diseño propuesto reparte los servicios en 3 equipos conectados a un switch con VLANs 802.1Q. La carpeta [`diseno-red/`](diseno-red/README.md) lo conserva:
 
-## Diagramas
+- La matriz de segmentación: [`arquitectura-3-equipos-departamentos.md`](diseno-red/arquitectura-3-equipos-departamentos.md).
+- Las recetas para un switch L3 (SVIs + ACL) o L2 (PC-3 como router con nftables).
+- Los simuladores que reproducen la matriz sobre el kernel de Linux (necesitan la imagen `nicolaka/netshoot`).
+- Los diagramas de topología y de flujo: [`topologia-red.html`](diseno-red/diagramas/topologia-red.html) y [`flujo-datos-segmentacion.html`](diseno-red/diagramas/flujo-datos-segmentacion.html).
 
-- [`diseno-red/diagramas/topologia-red.html`](diseno-red/diagramas/topologia-red.html): topología física y lógica: los 3 PCs, el switch, las VLAN y qué servicio vive en cada una.
-- [`diseno-red/diagramas/flujo-datos-segmentacion.html`](diseno-red/diagramas/flujo-datos-segmentacion.html): flujo de datos entre VLAN y matriz de segmentación (qué pasa y qué se bloquea).
+No se ha probado contra un switch real.
 
-## Prueba de humo en un solo host
+El despliegue en 3 PCs se retiró del repositorio el 26/09/2026 para reducir la curva de aprendizaje. Incluía los scripts `deploy.sh` por PC, los servicios systemd, los tutoriales, las guías de Windows y el paquete offline. Todo se puede recuperar del historial de git: cada commit que lo retiró indica cómo.
 
-`pruebas/smoke-test-3-pcs/` levanta los 3 compose juntos en una sola máquina (redes `bridge` en lugar de `macvlan`) para comprobar que los servicios arrancan sin configuración extra. Es hoy la referencia de lo que se ha **ejecutado** (nivel 1 de la tabla de validación). Resultados en [`pruebas/smoke-test-3-pcs/verificar_arquitectura.md`](pruebas/smoke-test-3-pcs/verificar_arquitectura.md). No valida el switch, el trunk 802.1Q ni la segmentación: de eso se encargan los simuladores.
+## Integración LDAP por aplicación
 
-## Pendientes clave
+- **ERPNext e InvenTree** autentican contra OpenLDAP por LDAPS con la CA interna: [`docs/integracion-ldap-erpnext-inventree.md`](docs/integracion-ldap-erpnext-inventree.md).
+- **Pretix y OpenVPMS** no se integran de forma limpia y usan administradores locales. Es una limitación documentada: [`docs/ldap-pretix-openvpms.md`](docs/ldap-pretix-openvpms.md).
 
-- Diseño con switch (L2/L3): sin validar contra hardware real. Queda documentado como limitación conocida.
-- ~~Construir el Dockerfile propio de OpenVPMS~~ **Hecho** (`docker/pc1-medica/openvpms/Dockerfile`).
-- Cerrar por escrito en el informe el alcance de ERPNext (solo módulo HR) y la diferencia entre Pretix (backend web) y "PretixPOS".
+## Pendientes
 
-Detalle completo de decisiones, matriz de segmentación y plan de pruebas de fiabilidad en [`diseno-red/arquitectura-3-equipos-departamentos.md`](diseno-red/arquitectura-3-equipos-departamentos.md).
+La lista con su contexto está en [`docs/resultados-un-host.md`](docs/resultados-un-host.md#pendientes).
