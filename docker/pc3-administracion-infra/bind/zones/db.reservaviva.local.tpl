@@ -1,5 +1,5 @@
-; PLANTILLA de la zona reservaviva.local. NO se monta tal cual: deploy.ps1 (o generar-zona.ps1) la convierte en
-; db.reservaviva.local sustituyendo ${IP_PC1}, ${IP_PC2} e ${IP_PC3} por las IP LAN reales de cada PC (de los .env)
+; PLANTILLA de la zona reservaviva.local. NO se monta tal cual: levantar-sistema.sh (generar_zona) la convierte en
+; db.reservaviva.local sustituyendo ${IP_PC1}, ${IP_PC2} e ${IP_PC3} por las IP de los contenedores del arnés
 ; y fija el serial. db.reservaviva.local esta en .gitignore. Editar SOLO esta plantilla.
 $TTL 300
 @       IN SOA  dns.reservaviva.local. admin.reservaviva.local. (

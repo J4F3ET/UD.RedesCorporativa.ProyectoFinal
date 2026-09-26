@@ -1,0 +1,73 @@
+! =====================================================================================================
+! PERFIL L2 - Switch que SOLO CONMUTA (sin SVIs ni "ip routing"). PC-3 hace de router central y aplica
+! la matriz de segmentación con nftables (diseno-red/l2-fallback/scripts/firewall-pc3-matriz.sh).
+!
+! AVISO: la sintaxis es de Cisco IOS. Si el switch es de otro fabricante hay que traducirla; la lógica
+!        (VLANs 10/20/30/40/99, PC-3 con las cinco VLANs en su trunk) es la misma.
+! AVISO: los nombres de puerto (GigabitEthernet1/0/1..3) son EJEMPLOS. Cámbialos por los puertos donde
+!        se conecte cada PC (show interfaces status) antes de pegar.
+! AVISO: este archivo NO debe llevar "interface VlanNN" con IP ni "ip routing": el gateway .1 de cada VLAN
+!        es PC-3. Si el switch ya tenía SVIs de una prueba anterior, quítalas (no interface VlanNN).
+!
+! Cableado:  PC-1 -> Gi1/0/1 (access VLAN 10)
+!            PC-2 -> Gi1/0/2 (trunk 20,30)
+!            PC-3 -> Gi1/0/3 (trunk 10,20,30,40,99: es el router de las cinco VLANs)
+! Cada PC debe tener en su .env: PERFIL=l2
+! =====================================================================================================
+
+configure terminal
+hostname SW-RESERVAVIVA
+
+! --- VLANs ----------------------------------------------------------------------------------------
+vlan 10
+ name MEDICA
+vlan 20
+ name TAQUILLA
+vlan 30
+ name LOGISTICA
+vlan 40
+ name RRHH
+vlan 99
+ name INFRA
+vlan 999
+ name NATIVA-SIN-USO
+exit
+
+! Sin enrutamiento en el switch: no se configura "ip routing". Si el switch es multicapa y lo trae activado,
+! desactívalo con "no ip routing" (en un switch solo L2 ese comando no existe y no hace falta).
+
+! --- Puertos --------------------------------------------------------------------------------------
+! PC-1: puerto ACCESS en VLAN 10 (el PC no etiqueta). Su gateway 10.10.10.1 es PC-3.
+interface GigabitEthernet1/0/1
+ description PC-1 MEDICA (access VLAN10)
+ switchport mode access
+ switchport access vlan 10
+ spanning-tree portfast
+ no shutdown
+
+! PC-2: trunk 802.1Q, solo VLAN 20 y 30. Sus gateways 10.10.20.1 y 10.10.30.1 son PC-3.
+! Si el switch responde "Invalid input" a la línea "switchport trunk encapsulation dot1q", bórrala:
+! significa que ese modelo solo soporta 802.1Q y no la necesita.
+interface GigabitEthernet1/0/2
+ description PC-2 OPERACIONES (trunk 20,30)
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ switchport trunk native vlan 999
+ switchport trunk allowed vlan 20,30
+ spanning-tree portfast trunk
+ no shutdown
+
+! PC-3: trunk 802.1Q con LAS CINCO VLANs (router central de la matriz).
+interface GigabitEthernet1/0/3
+ description PC-3 ROUTER+ADMIN-INFRA (trunk 10,20,30,40,99)
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ switchport trunk native vlan 999
+ switchport trunk allowed vlan 10,20,30,40,99
+ spanning-tree portfast trunk
+ no shutdown
+exit
+
+end
+! Guardar y comprobar (ver verificacion.md):
+!   write memory

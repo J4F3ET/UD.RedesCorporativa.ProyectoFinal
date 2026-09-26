@@ -1,14 +1,12 @@
 # PC-2 — Servidor de Operaciones
 # Departamentos: Taquilla y Boletería (Pretix) + Logística y Almacén (InvenTree)
 #
-# DESPLIEGUE OFICIAL: Windows + Docker Desktop (WSL2), redes bridge. NO hay VLAN ni macvlan; scripts/setup-vlans-pc2.sh
-# es solo anexo de diseño. Ver docs/despliegue-windows-docker-desktop.md.
-# Las redes 10.10.20.0/24 y 10.10.30.0/24 son bridges LOCALES de este motor Docker: no las ve ningún otro PC. Otros equipos
-# acceden por la IP LAN de este PC (IP_PC2) y los puertos publicados; para LDAP se usa la IP LAN de PC-3 (IP_PC3).
-# NO VERIFICADO: adaptación escrita sin poder ejecutarla (Docker no estaba disponible).
+# SE ARRANCA EN UN SOLO HOST junto con los otros dos compose: sistema/docker-compose.yml lo incluye
+# (include:) con override-pc2.yml y test.env, y levantar-sistema.sh lo levanta todo. Cada red es un bridge de Docker
+# con la subred de su VLAN. El diseño con VLAN 802.1Q y switch es un anexo que no se despliega (diseno-red/).
 
 networks:
-  # Bridges locales. NET_TAQUILLA / NET_LOGISTICA solo cambian si chocan con la LAN del laboratorio (ver .env.example).
+  # Bridges locales. NET_TAQUILLA / NET_LOGISTICA solo cambian si chocan con la LAN del laboratorio (ver test.env del arnés).
   vlan20_taquilla:
     driver: bridge
     ipam:

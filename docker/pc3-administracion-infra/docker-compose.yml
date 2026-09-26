@@ -1,15 +1,12 @@
 # PC-3 — Servidor de Administración e Infraestructura
 # Departamentos: Recursos Humanos (ERPNext HR) + Infraestructura transversal (OpenLDAP/DNS/NTP)
 #
-# DESPLIEGUE OFICIAL: Windows + Docker Desktop (WSL2), redes bridge. NO hay VLAN ni macvlan; scripts/setup-vlans-pc3.sh
-# y firewall-pc3-matriz.sh son solo anexo de diseño. Ver docs/despliegue-windows-docker-desktop.md.
-# Las redes 10.10.40.0/24 y 10.10.99.0/24 son bridges LOCALES de este motor Docker: PC-1 y PC-2 NO llegan a 10.10.99.10.
-# Llegan por la IP LAN de este PC (IP_PC3 en sus .env) y los puertos publicados: 389/636 (OpenLDAP), 53 (bind9),
-# 123/udp (NTP) y 8080 (ERPNext). Ojo: 53/udp y 123/udp suelen chocar con Windows (ICS, w32time): ver el documento.
-# NO VERIFICADO: adaptación escrita sin poder ejecutarla (Docker no estaba disponible).
+# SE ARRANCA EN UN SOLO HOST junto con los otros dos compose: sistema/docker-compose.yml lo incluye
+# (include:) con override-pc3.yml y test.env, y levantar-sistema.sh lo levanta todo. Cada red es un bridge de Docker
+# con la subred de su VLAN. El diseño con VLAN 802.1Q y switch es un anexo que no se despliega (diseno-red/).
 
 networks:
-  # Bridges locales. NET_RRHH / NET_INFRA solo cambian si chocan con la LAN del laboratorio (ver .env.example).
+  # Bridges locales. NET_RRHH / NET_INFRA solo cambian si chocan con la LAN del laboratorio (ver test.env del arnés).
   vlan40_rrhh:
     driver: bridge
     ipam:
@@ -368,7 +365,7 @@ services:
       LDAP_DOMAIN: reservaviva.local
       LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD}
       # LDAPS (636) con certificados propios generados por scripts/generar-certificados.sh (lo ejecuta
-      # deploy.sh). Los generados por la imagen usan una CA caducada. Además, LDAP_TLS_VERIFY_CLIENT
+      # levantar-sistema.sh). Los generados por la imagen usan una CA caducada. Además, LDAP_TLS_VERIFY_CLIENT
       # por defecto es "demand" (exige certificado al CLIENTE) y hace que slapd corte la conexión de
       # cualquier cliente sin certificado propio ("TLS negotiation failure").
       LDAP_TLS: "true"
