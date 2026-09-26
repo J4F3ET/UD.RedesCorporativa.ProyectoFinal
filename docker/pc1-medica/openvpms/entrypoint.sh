@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Primer arranque de OpenVPMS sin pasos manuales: espera a MySQL, escribe la configuración,
 # crea el esquema y carga los datos base UNA vez, genera el WAR y lanza Tomcat.
-# Es idempotente: si la base ya tiene esquema, solo arranca Tomcat.
+# Si la inicialización ya terminó (marcas en el volumen de estado), solo arranca Tomcat. Si un arranque anterior se
+# interrumpió, ver init-lib.sh: qué se recupera solo y qué exige intervención.
 set -euo pipefail
 
 : "${OPENVPMS_DB_HOST:?falta OPENVPMS_DB_HOST}"
@@ -53,35 +54,14 @@ fi
 cp "${STATE_DIR}/openvpms.properties" "${PROPS}"
 chmod 600 "${PROPS}" "${STATE_DIR}/openvpms.properties"
 
-tables=$(mysql --host="${OPENVPMS_DB_HOST}" --port="${DB_PORT}" --user=root \
-  --password="${OPENVPMS_DB_ROOT_PASSWORD}" -N -B \
-  -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME}'" 2>/dev/null || echo 0)
-
 cd "${OPENVPMS_HOME}/bin"
-# La inicialización se reanuda por etapas: si un arranque se interrumpe a mitad (p. ej. por una clave
-# rechazada), el siguiente completa solo lo que falta. Las marcas viven junto a openvpms.properties.
+# Inicialización por etapas (esquema, datos base, clave de admin, plantillas), reanudable tras una interrupción.
+# Toda la lógica, incluido qué cubre y qué NO, está documentada en init-lib.sh y probada sin Docker por test-reanudable.sh.
 MARK="${STATE_DIR}/init"
 mkdir -p "${MARK}"
-[ "${tables}" -eq 0 ] && rm -f "${MARK}"/*   # base vacía o recreada: empezar de cero
-
-step() {  # step <marca> <descripción> <comando...>
-  local name="$1" desc="$2"; shift 2
-  if [ -f "${MARK}/${name}" ]; then return 0; fi
-  echo "[openvpms] ${desc}..."
-  "$@"
-  touch "${MARK}/${name}"
-}
-step schema    "Creando esquema"             ./toolbox database --create --host=% -u root -p "${OPENVPMS_DB_ROOT_PASSWORD}"
-step data      "Cargando datos base"         ./dataload.sh setup
-step adminpass "Fijando clave de admin"      ./toolbox user --setpassword admin -p "${OPENVPMS_ADMIN_PASSWORD}"
-# El release 2.4.0.1 trae una plantilla ('Investigation') que apunta a un tipo inexistente
-# (act.patientInvestigation): el cargador se detiene ahí, con ~37 plantillas cargadas. Solo afecta a
-# plantillas de impresión, no al arranque; se avisa y se continúa.
-load_templates() {
-  ./toolbox template --load --size A4 --all \
-    || echo "[openvpms] AVISO: la carga de plantillas terminó con error (conocido en 2.4.0.1); algunas plantillas de impresión no están cargadas." >&2
-}
-step templates "Cargando plantillas (A4)"    load_templates
+# shellcheck source=init-lib.sh
+. "${OPENVPMS_INIT_LIB:-/init-lib.sh}"
+inicializar
 echo "[openvpms] Inicialización completa."
 
 if [ ! -f "${CATALINA_HOME}/webapps/openvpms.war" ]; then
@@ -89,7 +69,10 @@ if [ ! -f "${CATALINA_HOME}/webapps/openvpms.war" ]; then
   ./toolbox war
   war=$(find "${OPENVPMS_HOME}" -name openvpms.war -print -quit)
   [ -n "${war}" ] || { echo "[openvpms] toolbox war no generó openvpms.war" >&2; exit 1; }
-  cp "${war}" "${CATALINA_HOME}/webapps/openvpms.war"
+  # Copia con otro nombre y renombra: si el contenedor muere a mitad de la copia, Tomcat no encuentra un .war truncado
+  # (el `[ ! -f openvpms.war ]` de arriba lo daría por bueno) y la siguiente vez se genera de nuevo.
+  cp "${war}" "${CATALINA_HOME}/webapps/openvpms.war.tmp"
+  mv "${CATALINA_HOME}/webapps/openvpms.war.tmp" "${CATALINA_HOME}/webapps/openvpms.war"
 fi
 
 cd "${CATALINA_HOME}"

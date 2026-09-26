@@ -8,6 +8,8 @@
 **Parent:** `HANDOFF_standalone-9e6e8d31_windows-docker-desktop-pivot_2026-09-20.md`
 **Prior chain:** `…_lab-3pcs-pruebas-reales_2026-09-19` > `…_diagramas-y-ldap-en-master_2026-09-19` > `…_windows-docker-desktop-pivot_2026-09-20` > this
 
+> **Nota (2026-09-20, posterior a H14):** las tablas de imágenes de este handoff (Tabla 2 y la de servicios, con `frappe/erpnext:v15.121.3`) describen el arnés tal como estaba entonces. Desde H14 todos los servicios de ERPNext usan `ghcr.io/frappe/hrms:v15.64.1@sha256:b7ba52bc9aeb288f47d0aea9dc94635843ea1a7a83c45df724449f613b2f6395` (ancla `&erpnext_image` de `docker/pc3-administracion-infra/docker-compose.yml`). No se reescribe el cuerpo: es el registro de aquella sesión.
+
 ---
 
 ## Since Last Handoff

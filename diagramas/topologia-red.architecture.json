@@ -289,7 +289,7 @@
       "type": "frontend",
       "label": "ERPNext HR (nginx)",
       "sublabel": "VLAN40 · .40.10:8080",
-      "tag": "frappe/erpnext:v15",
+      "tag": "ghcr.io/frappe/hrms:v15.64.1",
       "pos": [
         962,
         150

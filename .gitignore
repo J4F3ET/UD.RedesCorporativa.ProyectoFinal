@@ -2,3 +2,6 @@
 docker/*/.env
 docker/*/certs/
 docker/pc3-administracion-infra/bind/zones/db.reservaviva.local
+
+# Salidas de levantar-sistema.sh verificar
+pruebas/smoke-test-3-pcs/resultados/
