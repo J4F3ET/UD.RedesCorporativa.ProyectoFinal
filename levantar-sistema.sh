@@ -139,7 +139,7 @@ generar_zona() {
   local dir="${RAIZ}/docker/pc3-administracion-infra/bind/zones"
   local tpl="${dir}/db.reservaviva.local.tpl" out="${dir}/db.reservaviva.local"
   [ -f "${tpl}" ] || fallo "Falta la plantilla ${tpl}"
-  # Mismas IP que usa el arnes (pruebas/smoke-test-3-pcs/README.md). Equivale a generar-zona.ps1, sin PowerShell.
+  # Mismas IP que usa el arnes (pruebas/smoke-test-3-pcs/README.md).
   local ip1=10.10.10.10 ip2=10.10.30.10 ip3=10.10.99.10 serial
   serial="$(date +%Y%m%d%H)"
   tr -d '\r' <"${tpl}" | sed -e "s/\${IP_PC1}/${ip1}/g" -e "s/\${IP_PC2}/${ip2}/g" \
@@ -262,6 +262,38 @@ esperar_sano() {
   done
 }
 
+# Pretix no crea su administrador por variables de entorno: trae admin@localhost con clave "admin". Se crea el de
+# test.env (PRETIX_ADMIN_EMAIL / PRETIX_ADMIN_PASSWORD) y se borra admin@localhost. Idempotente. Antes lo hacia
+# init_admins en docker/pc2-operaciones/deploy.sh (despliegue en 3 PCs, retirado). La clave va por el entorno de
+# docker exec, no por la linea de comandos.
+crear_admin_pretix() {
+  paso "Administrador de Pretix"
+  local email
+  email="$(valor_env PRETIX_ADMIN_EMAIL "")"
+  [ -n "${email}" ] || fallo "Falta PRETIX_ADMIN_EMAIL en ${ENV_FILE}."
+  [ -n "$(valor_env PRETIX_ADMIN_PASSWORD "")" ] || fallo "Falta PRETIX_ADMIN_PASSWORD en ${ENV_FILE}."
+  local intento
+  for intento in 1 2 3 4 5 6; do
+    if ADM_EMAIL="${email}" ADM_PASS="$(valor_env PRETIX_ADMIN_PASSWORD "")"         docker exec -i -e ADM_EMAIL -e ADM_PASS pretix-web python -m pretix shell >/dev/null 2>&1 <<'PY'
+import os
+from pretix.base.models import User
+email = os.environ["ADM_EMAIL"]
+if not User.objects.filter(email__iexact=email).exists():
+    User.objects.create_superuser(email, os.environ["ADM_PASS"])
+if email.lower() != "admin@localhost":
+    User.objects.filter(email="admin@localhost").delete()
+assert User.objects.filter(email__iexact=email, is_staff=True).exists()
+assert not User.objects.filter(email="admin@localhost").exists()
+PY
+    then
+      info "Listo: ${email} (admin@localhost eliminado)"
+      return 0
+    fi
+    sleep 10
+  done
+  fallo "No se pudo crear el administrador de Pretix. Volver a ejecutar el script es seguro."
+}
+
 # --- Acciones -------------------------------------------------------------------------------------------------------
 
 accesos() {
@@ -299,6 +331,7 @@ accion_arrancar() {
     fallo "docker compose up fallo. Volver a ejecutar el script es seguro: retoma donde quedo."
   fi
   esperar_sano
+  crear_admin_pretix
   paso "Sistema en marcha: los 25 servicios estan sanos"
   accesos
   info ""
