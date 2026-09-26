@@ -3,7 +3,7 @@
 > **Conclusión:** ninguna de las dos aplicaciones se integra con `ldaps://ldap.reservaviva.local:636`
 > de forma limpia y con la cadena de la CA verificada. Siguiendo el plan (Fase 2, "si una app no lo
 > soporta limpiamente, documentarlo como limitación en vez de forzarlo"), **no se modificó ningún
-> compose ni imagen**: ambas siguen con el administrador local que crea `deploy.sh`
+> compose ni imagen**: ambas siguen con su administrador local (el de Pretix lo crea `levantar-sistema.sh`)
 > (Pretix: `PRETIX_ADMIN_*`; OpenVPMS: `OPENVPMS_ADMIN_PASSWORD`).
 > Fecha de la evaluación: 2026-09-19. Imágenes: `pretix/standalone:stable` (pretix 2026.7.0),
 > OpenVPMS 2.4.0.1 (Dockerfile de `docker/pc1-medica/openvpms`).
@@ -63,7 +63,7 @@ Se instalaría con un Dockerfile derivado (`pip install pretix-ldap` + `auth_bac
 
 **Decisión:** no incluir el plugin. Añadirlo exigiría (a) una imagen propia, (b) un plugin de un
 solo mantenedor y (c) parchearlo para verificar la CA: exactamente lo que el plan pide no hacer.
-Pretix sigue con el superusuario de `deploy.sh` (y `admin@localhost` borrado; no se reintroduce).
+Pretix sigue con el superusuario que crea `levantar-sistema.sh` (y `admin@localhost` borrado; no se reintroduce).
 
 ## 3. Qué queda probado y qué no
 

@@ -13,7 +13,7 @@ Clonar y ejecutar un solo script levanta la arquitectura completa (los 3 PCs, 25
 
 Genera lo que no va en git (CA interna y certificado LDAPS, zona DNS), construye la imagen de OpenVPMS, levanta los 25 servicios, **espera a que todos estén sanos** y muestra las direcciones de acceso (`http://localhost:18080/openvpms`, `:18081` ERPNext, `:18082` Pretix, `:18083` InvenTree). Se puede volver a ejecutar sin riesgo: si un arranque se corta, retoma donde quedó. Otras acciones: `estado`, `verificar` (segmentación, DNS, NTP y LDAP), `detener` (sin borrar datos) y `borrar` (borra también los datos; pide confirmación).
 
-**Requisitos:** Docker Desktop (con Git for Windows en Windows) o Docker Engine en Linux/WSL, con Compose 2.24.4 o superior. Al menos **~7 GB de RAM libre**: los 25 servicios consumen unos 5,7 GB en el equipo. El primer arranque descarga varios GB de imágenes (solo la de ERPNext/hrms ocupa 3,2 GB). A eso se suma la inicialización: medido por separado, unos 13 min la cadena de OpenVPMS y unos 15 min el sitio de ERPNext, que corren en paralelo. Los siguientes arranques tardan unos minutos. El arranque completo de los 25 servicios aún no se ha cronometrado de punta a punta. Las contraseñas de laboratorio (desechables) están en `pruebas/smoke-test-3-pcs/test.env`.
+**Requisitos:** Docker Desktop (con Git for Windows en Windows) o Docker Engine en Linux/WSL, con Compose 2.24.4 o superior. Al menos **~7 GB de RAM libre**: los 25 servicios consumen unos 5,7 GB en el equipo. El primer arranque descarga varios GB de imágenes (solo la de ERPNext/hrms ocupa 3,2 GB). A eso se suma la inicialización: medido por separado, unos 13 min la cadena de OpenVPMS y unos 15 min el sitio de ERPNext, que corren en paralelo. Los siguientes arranques tardan unos minutos. Medido el 26/09/2026 en un equipo de 14 GB: **25/25 sanos en 15 min 45 s** (con las imágenes ya descargadas e inicializando OpenVPMS desde cero). Las contraseñas de laboratorio (desechables) están en `pruebas/smoke-test-3-pcs/test.env`.
 
 En Windows con Docker Engine dentro de WSL (sin Docker Desktop), el lanzador deja una sesión de WSL abierta en segundo plano. Sin ella, al cerrarse la última terminal Docker se detiene y se lleva los contenedores. `detener` la cierra.
 
@@ -49,35 +49,27 @@ No todo lo que describe este repositorio se ha demostrado de la misma manera. Ha
 docs/
   arquitectura-3-equipos-departamentos.md   # diseño vigente (VLANs, matriz de segmentación, plan de pruebas, puesta en marcha)
 docker/
-  pc1-medica/            # OpenVPMS (VLAN 10) — docker-compose.yml, deploy.sh, .env.example
-  pc2-operaciones/       # Pretix + InvenTree (VLAN 20/30) — docker-compose.yml, deploy.sh, .env.example
-  pc3-administracion-infra/  # ERPNext HR + OpenLDAP/DNS/NTP (VLAN 40/99) — docker-compose.yml, deploy.sh, .env.example
+  pc1-medica/            # OpenVPMS (VLAN 10): docker-compose.yml + imagen propia (openvpms/)
+  pc2-operaciones/       # Pretix + InvenTree (VLAN 20/30): docker-compose.yml
+  pc3-administracion-infra/  # ERPNext HR + OpenLDAP/DNS/NTP (VLAN 40/99): docker-compose.yml, ldap/, bind/
 diagramas/               # topología y flujo de datos (HTML interactivo, generados con Archify)
 pruebas/
-  smoke-test-3-pcs/      # arnés vigente: los 3 compose reales en un solo host
-  software-un-host/      # HISTÓRICO, no ejecutar (evidencia de la primera ronda)
+  smoke-test-3-pcs/      # arnés vigente: los 3 compose reales en un solo host (lo usa levantar-sistema.sh)
 despliegue/
   README.md              # ANEXO DE DISEÑO: ¿switch L2 o L3? cómo saberlo y a qué receta ir (no aplica al laboratorio Windows)
   l3-switch/             # receta completa si el switch enruta (SVIs + ACL en el switch); trae scripts/, switch/, pruebas/ y diagramas/
   l2-fallback/           # receta completa si el switch solo conmuta (PC-3 enruta con nftables); misma estructura
-  comun/                 # biblioteca de los simuladores de la matriz (ejecutables en Docker Desktop)
+  comun/                 # biblioteca de los simuladores de la matriz y de los scripts de VLAN (ip-gestion.sh)
 scripts/
-  generar-certificados.sh                   # CA interna + certificado de LDAPS (636); lo ejecuta el deploy.sh de PC-3
-  perfil.sh, ip-gestion.sh                  # bibliotecas que hacen "source" los deploy.sh (validan PERFIL; IP de gestión opcional)
-  systemd/reserva-viva-pc{1,2,3}.service    # persistencia al reiniciar cada PC
+  generar-certificados.sh                   # CA interna + certificado de LDAPS (636); lo ejecuta levantar-sistema.sh
+levantar-sistema.sh / .ps1 / .cmd           # arranque plug and play de todo el sistema en un host
 ```
 
 ## Puesta en marcha
 
-**Laboratorio (tres PCs Windows con Docker Desktop):** sigue la guía [`docs/puesta-en-marcha-windows.md`](docs/puesta-en-marcha-windows.md) (pasos, verificación y demostración de la segmentación con los simuladores). La referencia técnica y las decisiones (qué cambió en los compose, choques de puertos con Windows, cortafuegos) están en [`docs/despliegue-windows-docker-desktop.md`](docs/despliegue-windows-docker-desktop.md). Sustituyen a los `deploy.sh` y a los tutoriales de `tutoriales/`, que asumen Linux, `sudo`, un switch con VLANs y Ubuntu Server; no sigas esos documentos en el laboratorio. **La guía aún no se ha probado de punta a punta** (ver su apartado 5). Lo que sí se puede ejecutar hoy en Windows es la prueba de humo (siguiente sección) y los simuladores de segmentación (`despliegue/*/pruebas/`).
+El sistema se despliega en **un solo equipo** con `levantar-sistema` (ver [Arranque rápido](#arranque-rápido-todo-el-sistema-en-un-solo-equipo)). El despliegue en 3 PCs (scripts `deploy.sh`/`deploy.ps1`, `.env.example` por PC, servicios systemd, tutoriales y guías de Windows) se retiró del repositorio el 26/09/2026 para reducir la curva de aprendizaje. Se puede recuperar del historial de git (ver el commit que lo retiró).
 
-**Diseño con switch (anexo, Linux):** si algún día se dispusiera de un switch con VLANs y PCs Linux, la receta está en [`despliegue/README.md`](despliegue/README.md) (averigua antes si el switch es L2 o L3) y cada PC trae un `deploy.sh` que hace todo en el orden correcto (VLANs → firewall si aplica → `docker compose up -d`):
-
-```bash
-cd docker/pc1-medica && cp .env.example .env && nano .env && sudo ./deploy.sh
-```
-
-Detalle de ese camino (incluidos los servicios systemd) en la sección 8 de [`docs/arquitectura-3-equipos-departamentos.md`](docs/arquitectura-3-equipos-departamentos.md). Los tutoriales de [`tutoriales/`](tutoriales/) pertenecen a este mismo camino.
+**Diseño con switch (anexo):** la receta con VLANs 802.1Q y switch L2/L3 se conserva como diseño de red en [`despliegue/README.md`](despliegue/README.md), con sus simuladores de segmentación. No se despliega.
 
 ## Diagramas
 
@@ -90,7 +82,6 @@ Detalle de ese camino (incluidos los servicios systemd) en la sección 8 de [`do
 
 ## Pendientes clave
 
-- Guía de puesta en marcha para Windows con Docker Desktop: publicada en [`docs/puesta-en-marcha-windows.md`](docs/puesta-en-marcha-windows.md); **pendiente de verificarla de punta a punta** (el arranque completo se interrumpió por falta de memoria del sistema; ver el apartado 5 de la guía).
 - Paquete de preparación previa (Fase 0) para un laboratorio con Internet limitada: imágenes de las aplicaciones por etiqueta, la de OpenVPMS ya construida, certificados ya generados y `nicolaka/netshoot` si se van a demostrar los simuladores. En verificación.
 - Diseño con switch (L2/L3): sin validar contra hardware real. Queda documentado como limitación conocida.
 - ~~Construir el Dockerfile propio de OpenVPMS~~ **Hecho** (`docker/pc1-medica/openvpms/Dockerfile`).

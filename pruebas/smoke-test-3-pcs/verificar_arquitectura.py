@@ -378,7 +378,7 @@ def bloque_dns(ctx, m, zonas):
     imprime("\n== 2. DNS: se consulta a dns-interno de verdad (los contenedores normales usan extra_hosts / DNS de Docker)")
     dns_ip = ctx["ips"]["dns-interno"][99]
     if zonas is None:
-        reg("zona reservaviva.local generada", "FAIL", f"falta {ZONA}. Generarla como dice README.md (generar-zona.ps1).")
+        reg("zona reservaviva.local generada", "FAIL", f"falta {ZONA}. Generarla con: levantar-sistema.sh preparar.")
         return
     nombres = [(f"{h}.reservaviva.local", ip) for h, ip in zonas.items()]
     inf = vantage(ctx["pref"] + RED[99], {"dns": [(h, dns_ip, h) for h, _ in nombres] + [

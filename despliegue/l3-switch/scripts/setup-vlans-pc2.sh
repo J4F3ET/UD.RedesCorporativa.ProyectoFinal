@@ -10,13 +10,13 @@
 # de este script las quita. Pensado para correr a mano o desde el servicio systemd en cada arranque.
 #
 # Excepción opcional: IP_GESTION (en el .env) añade UNA dirección de gestión en UNA sola de las dos VLAN
-# (para copiar ca.crt por scp y hacer ping). En ambas a la vez el script se niega: ver scripts/ip-gestion.sh.
+# (para copiar ca.crt por scp y hacer ping). En ambas a la vez el script se niega: ver despliegue/comun/ip-gestion.sh.
 #
 # Uso: IFACE=enp2s0 ./setup-vlans-pc2.sh   (deploy.sh exporta IFACE desde el .env)
 
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/ip-gestion.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../../comun/ip-gestion.sh"
 
 : "${IFACE:?definir IFACE (nombre real de la tarjeta de red de PC-2, p. ej. enp2s0) en el .env}"
 
@@ -31,7 +31,7 @@ for vlan in 20 30; do
   ip link set "${sub}" up
 done
 
-# IP de gestión opcional (IP_GESTION del .env; vacía = sin IP). Ver scripts/ip-gestion.sh.
+# IP de gestión opcional (IP_GESTION del .env; vacía = sin IP). Ver despliegue/comun/ip-gestion.sh.
 gestion_aplicar "${IP_GESTION:-}" "20:${IFACE}.20" "30:${IFACE}.30"
 
 echo "Sub-interfaces activas:"
