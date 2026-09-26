@@ -1,7 +1,7 @@
 # Verificación de la arquitectura en un host (`verificar_arquitectura.py`)
 
 Objetivo: demostrar que la topología diseñada **se comporta como está diseñada**, no solo que los contenedores arrancan.
-Estado: **guion escrito, NO EJECUTADO contra el arnés** (no se podía levantar). Solo se ejecutó `--autotest` (ver abajo).
+Estado: **ejecutado contra el sistema completo** el 26/09/2026 con `levantar-sistema.sh verificar`: 92 PASS, 0 FAIL (cifras en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md)).
 
 ## La topología que se prueba
 
@@ -89,5 +89,5 @@ Un destino inalcanzable y un nombre que no resuelve dan resultados parecidos y s
 | Clasificador de conexiones, cliente DNS (compresión, NXDOMAIN, REFUSED, timeout), cliente SNTP, lector de zona | **Verificado** con `--autotest` en WSL contra sockets locales (PASS). En Windows el caso "puerto cerrado" falla por un artefacto de loopback (sin RST inmediato); en Linux/WSL pasa. |
 | Modo `--sonda` por stdin (el que corre dentro del contenedor, sin `__file__`) | **Verificado** en WSL sin Docker |
 | Fallo limpio con el arnés apagado (7 FAIL en prerrequisitos, exit 1, sin excepción) | **Verificado** |
-| Todo lo que toca contenedores: segmentación, DNS, NTP, ldapprobe/probe/ldaplogin | **NO VERIFICADO** (arnés sin levantar) |
-| Supuestos: puertos 8080/80/8000/8000 de las apps, `chronyd -Q` con la imagen de cturra, `--network container:<app>` | **NO VERIFICADO** |
+| Todo lo que toca contenedores: segmentación, DNS, NTP, ldapprobe/probe/ldaplogin | **Verificado** el 26/09/2026 contra los 25 servicios (92 PASS, 0 FAIL, incluida la persistencia) |
+| Supuestos: puertos 8080/80/8000/8000 de las apps, `chronyd -Q` con la imagen de cturra, `--network container:<app>` | **Verificado** en esa misma ejecución (los bloques que dependen de ellos dan PASS) |

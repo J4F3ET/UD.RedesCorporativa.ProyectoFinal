@@ -98,6 +98,6 @@ Prueba el **kernel de Linux**, no el switch del laboratorio (no valida la sintax
 
 ## Estado de validación
 
-Ninguno de los dos perfiles se ha probado todavía contra un switch real: **pendiente de hardware**. Lo probado es la capa de software en un solo host y, con los simuladores de arriba, el comportamiento de la matriz sobre el kernel de Linux (ver [`../pruebas/smoke-test-3-pcs/verificar_arquitectura.md`](../pruebas/smoke-test-3-pcs/verificar_arquitectura.md)). Por eso cada receta dice, paso a paso, cómo comprobar que salió bien y qué guardar como evidencia.
+Ninguno de los dos perfiles se ha probado todavía contra un switch real: **pendiente de hardware**. Lo probado es la capa de software en un solo host y, con los simuladores de arriba, el comportamiento de la matriz sobre el kernel de Linux (ver [`../sistema/verificar_arquitectura.md`](../sistema/verificar_arquitectura.md)). Por eso cada receta dice, paso a paso, cómo comprobar que salió bien y qué guardar como evidencia.
 
 El diseño completo (direccionamiento y matriz) está en [`arquitectura-3-equipos-departamentos.md`](arquitectura-3-equipos-departamentos.md); no lo necesitas para seguir las recetas.

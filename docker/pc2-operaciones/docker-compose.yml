@@ -1,7 +1,7 @@
 # PC-2 — Servidor de Operaciones
 # Departamentos: Taquilla y Boletería (Pretix) + Logística y Almacén (InvenTree)
 #
-# SE ARRANCA EN UN SOLO HOST junto con los otros dos compose: pruebas/smoke-test-3-pcs/docker-compose.yml lo incluye
+# SE ARRANCA EN UN SOLO HOST junto con los otros dos compose: sistema/docker-compose.yml lo incluye
 # (include:) con override-pc2.yml y test.env, y levantar-sistema.sh lo levanta todo. Cada red es un bridge de Docker
 # con la subred de su VLAN. El diseño con VLAN 802.1Q y switch es un anexo que no se despliega (diseno-red/).
 

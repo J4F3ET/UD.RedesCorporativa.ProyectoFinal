@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Verificacion de que la ARQUITECTURA (no solo los contenedores) se comporta como esta disenada, en un host.
 
-NO VERIFICADO: escrito sin poder ejecutarlo contra el arnes (no se puede levantar). Solo se ejecuto `--autotest`,
-que prueba la mecanica (clasificador de conexiones, cliente DNS, cliente SNTP, lector de zona) contra sockets
-locales, sin tocar Docker ni el proyecto. Ver verificar_arquitectura.md para el alcance y sus limites.
+Ejecutado contra el sistema completo el 2026-09-26 (levantar-sistema.sh verificar: 92 PASS, 0 FAIL). `--autotest`
+prueba la mecanica (clasificador de conexiones, cliente DNS, cliente SNTP, lector de zona) contra sockets locales,
+sin tocar Docker. Ver verificar_arquitectura.md para el alcance y sus limites.
 
 Requisito: el arnes levantado (`docker compose up -d` en esta carpeta) y sano. Ejecutar donde `docker` sea el cliente
 nativo (p. ej. dentro de WSL), igual que ldaplogin.py. Sin dependencias fuera de la libreria estandar.
@@ -28,7 +28,7 @@ import argparse, errno, json, re, socket, struct, subprocess, sys, threading, ti
 from pathlib import Path
 
 AQUI = Path(__file__).resolve().parent
-RAIZ = AQUI.parent.parent
+RAIZ = AQUI.parent
 ZONA = RAIZ / "docker/pc3-administracion-infra/bind/zones/db.reservaviva.local"
 ETIQUETA = "verificacion-arquitectura=1"   # solo se borran contenedores efimeros con esta etiqueta
 # depto -> (contenedor de la app dual-homed, puerto TCP donde escucha). Cada app esta ademas en vlan99_infra.

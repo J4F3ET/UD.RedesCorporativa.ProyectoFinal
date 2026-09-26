@@ -1,7 +1,7 @@
 # Simulador del perfil L3 (switch con SVIs y ACL) en un solo host
 
 Ejecuta la **matriz de segmentación** (sección 4 de `diseno-red/arquitectura-3-equipos-departamentos.md`) sin
-hardware ni levantar las apps. Lo que el arnés `pruebas/smoke-test-3-pcs/` no puede hacer (allí las apps
+hardware ni levantar las apps. Lo que el arnés `sistema/` no puede hacer (allí las apps
 comparten una red bridge y no hay separación) se hace aquí con el kernel de Linux:
 
 | En el laboratorio | En el simulador |

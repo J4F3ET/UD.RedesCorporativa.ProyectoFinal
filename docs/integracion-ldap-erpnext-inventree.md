@@ -1,6 +1,6 @@
 # Integración LDAPS: ERPNext e InvenTree
 
-Probada en el arnés `pruebas/smoke-test-3-pcs/` (un solo host, redes `bridge`) el 2026-09-19. No valida macvlan ni el switch.
+Probada en el arnés `sistema/` (un solo host, redes `bridge`) el 2026-09-19. No valida macvlan ni el switch.
 
 ## Diseño
 - Directorio: `dc=reservaviva,dc=local`, con una OU por departamento (`ou=medica`, `ou=operaciones`, `ou=rrhh`), `ou=servicios` con la cuenta de solo lectura `cn=svc-lectura` y usuarios de prueba. Definición en `docker/pc3-administracion-infra/ldap/` (ver su README para usuarios y claves).
