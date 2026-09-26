@@ -3,7 +3,7 @@
 #
 # SE ARRANCA EN UN SOLO HOST junto con los otros dos compose: pruebas/smoke-test-3-pcs/docker-compose.yml lo incluye
 # (include:) con override-pc3.yml y test.env, y levantar-sistema.sh lo levanta todo. Cada red es un bridge de Docker
-# con la subred de su VLAN. El diseño con VLAN 802.1Q y switch es un anexo que no se despliega (despliegue/).
+# con la subred de su VLAN. El diseño con VLAN 802.1Q y switch es un anexo que no se despliega (diseno-red/).
 
 networks:
   # Bridges locales. NET_RRHH / NET_INFRA solo cambian si chocan con la LAN del laboratorio (ver test.env del arnés).

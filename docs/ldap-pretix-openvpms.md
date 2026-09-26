@@ -71,7 +71,7 @@ Pretix sigue con el superusuario que crea `levantar-sistema.sh` (y `admin@localh
 |---|---|
 | OpenVPMS con LDAP | No soportado (sin `spring-security-ldap`, sin clases LDAP, usuarios en MySQL) |
 | Pretix con LDAP | Solo plugin de terceros; sin verificación TLS (demostrado); no integrado |
-| Login real con clave errónea/correcta vía LDAP en estas dos apps | **No aplicable** (no hay integración); el login local ya está cubierto en `docs/prueba-smoke-test-resultados.md` §8 |
+| Login real con clave errónea/correcta vía LDAP en estas dos apps | **No aplicable** (no hay integración); el login local ya está cubierto en `docs/prueba-smoke-test-resultados.md` §8 (retirado; se lee con `git show 95e0da4:docs/prueba-smoke-test-resultados.md`) |
 | Verificación de `ldaps://` con `Tls(CERT_REQUIRED)` y `ca.crt` desde el contenedor de Pretix | Falla sin la CA, como debe |
 
 Las apps que sí pueden integrarse limpiamente (ERPNext e InvenTree) las lleva otra sesión

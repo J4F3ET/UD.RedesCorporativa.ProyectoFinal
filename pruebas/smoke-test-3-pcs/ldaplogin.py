@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Revalidacion de la autenticacion LDAPS de ERPNext e InvenTree en el arnes de un host.
 
-NO VERIFICADO: escrito sin poder ejecutarlo (Docker no estaba disponible). Endpoints, credenciales y
-codigos de respuesta salen de docs/prueba-smoke-test-resultados.md §9.3, no de una ejecucion de este script.
+Verificado el 2026-09-26 con `levantar-sistema.sh verificar` (casos 1-4 en PASS). Endpoints, credenciales y codigos
+de respuesta salieron de docs/prueba-smoke-test-resultados.md §9.3 (retirado; `git show 95e0da4:docs/prueba-smoke-test-resultados.md`).
 
 Requisito: el arnes ya levantado (`docker compose up -d` en esta carpeta) y con las apps sanas.
 Uso (desde esta carpeta):
@@ -35,7 +35,7 @@ MALA = "clave-incorrecta-xyz"
 # Nombre real del despliegue (pc2: INVENTREE_LDAP_SERVER_URI) y presente en el SAN del certificado.
 # NO usar ldaps://localhost: libldap canonicaliza el nombre al hostname del contenedor (p. ej.
 # 4f89b94c57b9), que no esta en el SAN, y la verificacion falla aunque LDAPS funcione (ver
-# docs/prueba-smoke-test-resultados.md, ejecucion de 2026-09-20).
+# docs/prueba-smoke-test-resultados.md, ejecucion de 2026-09-20; retirado, ver git show 95e0da4).
 LDAP_URI = "ldaps://ldap.reservaviva.local:636"
 
 # Se ejecuta dentro del contenedor: imprime "<status> <cuerpo recortado>". Sin dependencias externas.
