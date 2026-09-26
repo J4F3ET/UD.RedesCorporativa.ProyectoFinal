@@ -25,6 +25,8 @@ LDAP_IP="${LDAP_IP:-10.10.99.10}"
 OUT="${CERTS_DIR:-${REPO_ROOT}/docker/pc3-administracion-infra/certs}"
 FORZAR=false
 INSTALAR_CA=true
+GENERADA_CA=false
+GENERADO_LDAP=false
 for arg in "$@"; do
   case "${arg}" in
     --forzar) FORZAR=true ;;
@@ -48,6 +50,7 @@ vigente() {  # vigente <cert>: existe y no vence en ${DIAS_MIN} días
 # --- 1. CA interna ---------------------------------------------------------------------------------
 if ${FORZAR} || [ ! -f ca.key ] || ! vigente ca.crt; then
   echo "[certs] Generando la CA interna..."
+  GENERADA_CA=true
   rm -f ca.key ca.crt ldap.key ldap.crt   # una CA nueva invalida el certificado anterior
   openssl genrsa -out ca.key 4096 2>/dev/null
   openssl req -x509 -new -key ca.key -sha256 -days 3650 \
@@ -68,6 +71,8 @@ cubre_direcciones() {  # el certificado actual incluye la IP y el nombre esperad
 if ${FORZAR} || [ ! -f ldap.key ] || ! vigente ldap.crt \
    || ! openssl verify -CAfile ca.crt ldap.crt >/dev/null 2>&1 || ! cubre_direcciones; then
   echo "[certs] Generando el certificado de OpenLDAP (ldap.${DOMAIN}, ${LDAP_IP})..."
+  GENERADO_LDAP=true
+  rm -f ldap.key ldap.crt   # pueden ser del contenedor (uid 911): no se sobrescriben, se sustituyen
   openssl genrsa -out ldap.key 2048 2>/dev/null
   openssl req -new -key ldap.key -subj "/O=Zoologico Reserva Viva/CN=ldap.${DOMAIN}" -out ldap.csr
   cat > ldap.ext <<EOF
@@ -84,14 +89,21 @@ else
 fi
 
 # Permisos: la clave de la CA solo para el dueño; el resto lo lee el contenedor (arranca como root).
-chmod 600 ca.key ldap.key
-chmod 644 ca.crt ldap.crt
+# Solo sobre lo generado en ESTA ejecución: al arrancar, el contenedor de OpenLDAP (osixia) se apropia de los certificados
+# montados (uid 911), y desde entonces el usuario del host ya no puede hacerles chmod. Tocarlos siempre hacía fallar la
+# segunda ejecución con "Operation not permitted", aunque no hubiera nada que regenerar.
+if ${GENERADA_CA}; then chmod 600 ca.key; chmod 644 ca.crt; fi
+if ${GENERADO_LDAP}; then chmod 600 ldap.key; chmod 644 ldap.crt; fi
 
 # --- 3. Copiar la CA pública a donde la necesitarán los clientes de LDAPS ---------------------------
 for pc in pc1-medica pc2-operaciones; do
   mkdir -p "${REPO_ROOT}/docker/${pc}/certs"
-  cp ca.crt "${REPO_ROOT}/docker/${pc}/certs/ca.crt"
-  chmod 644 "${REPO_ROOT}/docker/${pc}/certs/ca.crt"
+  destino="${REPO_ROOT}/docker/${pc}/certs/ca.crt"
+  # Solo si cambió: misma razón que los chmod de arriba (un contenedor puede haberse apropiado de la copia).
+  if ! cmp -s ca.crt "${destino}"; then
+    cp ca.crt "${destino}"
+    chmod 644 "${destino}"
+  fi
 done
 
 # --- 4. Confianza a nivel del host (solo root) ------------------------------------------------------

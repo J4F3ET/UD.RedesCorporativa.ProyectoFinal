@@ -2,6 +2,23 @@
 
 Arquitectura de red corporativa para el Zoológico Reserva Viva (empresa ficticia del entregable de Redes Corporativas). El diseño propone un switch administrable con VLANs 802.1Q + Docker (VLANs vía `macvlan`) para dar solución a las problemáticas de negocio de 4 departamentos, con un directorio centralizado (OpenLDAP) y sin conexión a Internet. **Los PCs del laboratorio son Windows con Docker Desktop**, que no permite `macvlan` ni 802.1Q sobre la tarjeta de red: por eso la segmentación por VLAN se valida por simulación y no sobre hardware (ver [Estado de validación](#estado-de-validación)).
 
+## Arranque rápido: todo el sistema en un solo equipo
+
+Clonar y ejecutar un solo script levanta la arquitectura completa (los 3 PCs, 25 servicios) en una sola máquina:
+
+| Sistema | Cómo |
+|---|---|
+| Windows | Doble clic en **`levantar-sistema.cmd`**, o `.\levantar-sistema.ps1` en PowerShell |
+| Linux / WSL / macOS | `./levantar-sistema.sh` |
+
+Genera lo que no va en git (CA interna y certificado LDAPS, zona DNS), construye la imagen de OpenVPMS, levanta los 25 servicios, **espera a que todos estén sanos** y muestra las direcciones de acceso (`http://localhost:18080/openvpms`, `:18081` ERPNext, `:18082` Pretix, `:18083` InvenTree). Se puede volver a ejecutar sin riesgo: si un arranque se corta, retoma donde quedó. Otras acciones: `estado`, `verificar` (segmentación, DNS, NTP y LDAP), `detener` (sin borrar datos) y `borrar` (borra también los datos; pide confirmación).
+
+**Requisitos:** Docker Desktop (con Git for Windows en Windows) o Docker Engine en Linux/WSL, con Compose 2.24.4 o superior. Al menos **~7 GB de RAM libre**: los 25 servicios consumen unos 5,7 GB en el equipo. El primer arranque descarga varios GB de imágenes (solo la de ERPNext/hrms ocupa 3,2 GB). A eso se suma la inicialización: medido por separado, unos 13 min la cadena de OpenVPMS y unos 15 min el sitio de ERPNext, que corren en paralelo. Los siguientes arranques tardan unos minutos. El arranque completo de los 25 servicios aún no se ha cronometrado de punta a punta. Las contraseñas de laboratorio (desechables) están en `pruebas/smoke-test-3-pcs/test.env`.
+
+En Windows con Docker Engine dentro de WSL (sin Docker Desktop), el lanzador deja una sesión de WSL abierta en segundo plano. Sin ella, al cerrarse la última terminal Docker se detiene y se lleva los contenedores. `detener` la cierra.
+
+Un equipo demuestra que la arquitectura funciona, pero no demuestra el switch físico ni el etiquetado 802.1Q (ver [Estado de validación](#estado-de-validación)).
+
 ## Estado actual: 3 equipos separados por departamento
 
 El diseño propuesto distribuye las aplicaciones en **3 computadores físicos**, uno por grupo de departamentos (en el laboratorio, tres PCs Windows con Docker Desktop). En el diseño de red completo se conectarían a un switch con puertos access/trunk según corresponda. Esto reemplaza un diseño previo de 2 equipos.
