@@ -49,6 +49,9 @@ try:
     r = urllib.request.urlopen(req, timeout=30); print(r.status, r.read()[:200].decode("utf8", "replace"))
 except urllib.error.HTTPError as e:
     print(e.code, e.read()[:200].decode("utf8", "replace"))
+except Exception as e:
+    # Timeout, conexion cortada...: una linea legible en vez de un traceback que se recorta a 200 caracteres.
+    print("None", type(e).__name__ + ":", e)
 """
 HTTP_INV = r"""
 import sys, base64, urllib.request, urllib.error
@@ -59,6 +62,9 @@ try:
     r = urllib.request.urlopen(req, timeout=30); print(r.status, r.read()[:200].decode("utf8", "replace"))
 except urllib.error.HTTPError as e:
     print(e.code, e.read()[:200].decode("utf8", "replace"))
+except Exception as e:
+    # Timeout, conexion cortada...: una linea legible en vez de un traceback que se recorta a 200 caracteres.
+    print("None", type(e).__name__ + ":", e)
 """
 
 
@@ -153,7 +159,18 @@ def esperar_apps(limite=1500):
         s1, _ = http("erpnext-backend", HTTP_ERP, ERP_USER, MALA, SITE)
         s2, _ = http("inventree-app", HTTP_INV, INV_USER, MALA)
         if s1 is not None and s2 is not None and s1 != 404:
+            break
+        time.sleep(15)
+    else:
+        return False
+    # Responder a la clave erronea no basta: el primer login correcto de ERPNext tras `up -d` (abre la
+    # conexion LDAP y crea la sesion) puede agotar los 30 s con gunicorn aun en frio (H18). Se reintenta
+    # el login correcto, dentro del mismo limite, hasta que devuelva 200.
+    while time.time() < fin:
+        s, t = http("erpnext-backend", HTTP_ERP, ERP_USER, ERP_PASS, SITE)
+        if s == 200:
             return True
+        print(f"  ERPNext aun no acepta el login correcto: status={s} {t[:80]}")
         time.sleep(15)
     return False
 
