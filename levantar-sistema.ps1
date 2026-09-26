@@ -5,7 +5,7 @@
 #   .\levantar-sistema.ps1 verificar        # segmentacion, DNS, NTP y LDAP
 #   .\levantar-sistema.ps1 detener          # para todo sin borrar datos
 #   .\levantar-sistema.ps1 borrar           # borra contenedores Y datos (pide confirmacion)
-#   Opciones: -Distro <nombre WSL>  -Forzar  -Completo  -Si  -TimeoutMin <min>
+#   Opciones: -Distro <nombre WSL>  -Forzar  -Rapido  -Si  -TimeoutMin <min>
 #
 # Si PowerShell no deja ejecutar scripts, usa levantar-sistema.cmd (doble clic) o:
 #   powershell -ExecutionPolicy Bypass -File .\levantar-sistema.ps1
@@ -24,7 +24,7 @@ param(
     [string]$Accion = 'arrancar',
     [string]$Distro = '',
     [switch]$Forzar,
-    [switch]$Completo,
+    [switch]$Rapido,
     [switch]$Si,
     [int]$TimeoutMin = 45
 )
@@ -46,7 +46,7 @@ if ($Accion -eq 'ayuda') { Get-Content -LiteralPath $PSCommandPath -TotalCount 1
 # Argumentos para levantar-sistema.sh
 $ArgsSh = @($Accion)
 if ($Forzar) { $ArgsSh += '--forzar' }
-if ($Completo) { $ArgsSh += '--completo' }
+if ($Rapido) { $ArgsSh += '--rapido' }
 if ($Si) { $ArgsSh += '--si' }
 if ($TimeoutMin -ne 45) { $ArgsSh += @('--timeout', "$TimeoutMin") }
 
