@@ -1,12 +1,18 @@
 # DNS interno: bind9 (Infraestructura, VLAN 99)
 
-Servidor autoritativo de la zona `reservaviva.local`, sin recursión hacia Internet.
+Servidor autoritativo de la zona `reservaviva.lan`, sin recursión hacia Internet. Sirve la misma zona con dos contenidos (split horizon), según quién pregunte.
 
 - **Servicio de compose:** `dns` (contenedor `dns-interno`).
+- **Vistas** (en `named.conf`):
+  - `interna`: los contenedores de las VLAN (subredes `10.10.x.0/24` sin su gateway `.1`). Cada nombre apunta a la IP del contenedor que da el servicio, como en el diseño.
+  - `lan`: cualquier otro cliente, es decir, el propio equipo anfitrión y, en modo intranet, los equipos de la LAN. `openvpms`, `pretix`, `inventree`, `rrhh` y `dns` apuntan a la IP del anfitrión (`INTRANET_IP`: `127.0.0.1` en modo local, la IP de la LAN en modo intranet), donde escuchan el proxy web y el DNS. `ldap` y `ntp` no están en esta vista a propósito: OpenLDAP y NTP solo se publican en `127.0.0.1` y en puertos desplazados, así que un nombre que llevara a la IP de la LAN llevaría a un puerto cerrado.
+- **Por qué se excluye el gateway `.1`.** Una consulta del anfitrión al puerto publicado llega a bind9 con el gateway del bridge como origen (Docker la reenvía así). Ese cliente es el anfitrión, no un contenedor, y debe recibir la vista `lan`.
 - **Ficheros:**
-  - `named.conf`: configuración de bind9 (solo la zona interna; `recursion no`).
-  - `zones/db.reservaviva.local.tpl`: plantilla de la zona. Es lo único que se edita.
-  - `zones/db.reservaviva.local`: la zona que monta el contenedor. **No está en git:** la genera `levantar-sistema.sh preparar` desde la plantilla, con la IP de cada contenedor, y el arranque reinicia `dns-interno` si cambió.
-- Las aplicaciones no lo usan para encontrar LDAP (usan `extra_hosts`); `sistema/verificar_arquitectura.py` lo consulta de verdad y comprueba que cada nombre apunta al contenedor que da ese servicio.
+  - `named.conf`: configuración de bind9 (las dos vistas, `recursion no`).
+  - `zones/db.reservaviva.lan.tpl`: plantilla de la vista interna.
+  - `zones/db.reservaviva.lan.vista-lan.tpl`: plantilla de la vista lan.
+  - Generados, **no están en git:** `zones/db.reservaviva.lan`, `zones/db.reservaviva.lan.vista-lan` y `zones/acl-interna.conf` (las subredes de la vista interna). Los genera `levantar-sistema.sh preparar` (también `arrancar`) desde las plantillas y las subredes `NET_*`; solo reescribe un fichero si cambió algo más que el serial, y el arranque reinicia `dns-interno` si alguno (o `named.conf`) es más nuevo que el contenedor.
+- **Publicación:** modo local, `127.0.0.1:1053` udp y tcp (`DNS_BIND_IP` y `DNS_PORT` de `sistema/test.env`); modo intranet, `<IP de la LAN>:53` (el lanzador exporta las dos variables solo para esa ejecución).
+- Las aplicaciones no lo usan para encontrar LDAP (usan `extra_hosts`). `sistema/verificar_arquitectura.py` lo consulta de verdad por las dos vistas: desde `vlan99_infra` (cada nombre apunta al contenedor que da ese servicio) y desde el anfitrión por el puerto publicado (cada aplicación apunta a la IP del proxy web).
 
-Direcciones IP y puertos: [`../../docs/arquitectura.md`](../../docs/arquitectura.md).
+El dominio antes era `reservaviva.local`. Se cambió porque `.local` está reservado a mDNS (RFC 6762): macOS, Linux con Avahi y los móviles lo resuelven por multicast y no preguntan a este DNS. Direcciones IP y puertos: [`../../docs/arquitectura.md`](../../docs/arquitectura.md).

@@ -1,8 +1,11 @@
 .env
 # CA interna, certificado LDAPS y sus claves: cada instalacion genera los suyos (servicios/ca/generar-certificados.sh)
 servicios/ca/certs/
-# Zona DNS generada desde la plantilla .tpl por levantar-sistema.sh
-servicios/bind9/zones/db.reservaviva.local
+# Zonas DNS (vista interna y vista lan) y ACL de la vista interna, generadas desde las plantillas por levantar-sistema.sh
+servicios/bind9/zones/db.reservaviva.lan
+servicios/bind9/zones/db.reservaviva.lan.vista-lan
+servicios/bind9/zones/acl-interna.conf
+servicios/bind9/zones/*.tmp
 # LDIF del primer arranque de OpenLDAP, con los hashes de las claves de sistema/test.env (levantar-sistema.sh preparar)
 servicios/openldap/generado/
 

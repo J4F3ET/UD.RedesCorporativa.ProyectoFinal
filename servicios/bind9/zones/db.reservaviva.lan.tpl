@@ -1,14 +1,15 @@
-; PLANTILLA de la zona reservaviva.local. NO se monta tal cual: levantar-sistema.sh (generar_zona) la convierte en
-; db.reservaviva.local sustituyendo cada marcador IP_<NOMBRE> por la IP fija del contenedor que da ese servicio en el
-; sistema de un host, y SERIAL por la fecha. db.reservaviva.local esta en .gitignore. Editar SOLO esta plantilla.
+; PLANTILLA de la zona reservaviva.lan para la VISTA INTERNA (clientes de las VLAN 10.10.x). NO se monta tal cual:
+; levantar-sistema.sh (generar_zona) la convierte en db.reservaviva.lan sustituyendo cada marcador IP_<NOMBRE> por la IP
+; fija del contenedor que da ese servicio en el sistema de un host, y SERIAL por la fecha. db.reservaviva.lan esta en
+; .gitignore. Editar SOLO esta plantilla. La vista "lan" (el host y los equipos de la LAN) usa db.reservaviva.lan.vista-lan.tpl.
 $TTL 300
-@       IN SOA  dns.reservaviva.local. admin.reservaviva.local. (
+@       IN SOA  dns.reservaviva.lan. admin.reservaviva.lan. (
                 ${SERIAL} ; serial
                 3600       ; refresh
                 600        ; retry
                 86400      ; expire
                 300 )      ; negative TTL
-        IN NS   dns.reservaviva.local.
+        IN NS   dns.reservaviva.lan.
 
 ; --- Infraestructura (vlan99): openldap, dns-interno (bind9), ntp-interno ---
 dns         IN A ${IP_DNS}
