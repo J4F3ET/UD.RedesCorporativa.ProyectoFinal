@@ -90,7 +90,6 @@ servicios/                          # una carpeta por servicio, con su README
 sistema/                            # test.env (variables y claves de laboratorio) y la verificación
 docs/                               # arquitectura, operación, seguridad, aplicaciones, resultados vigentes e integración LDAP
 diseno-red/                         # ANEXO: diseño con switch L2/L3, VLANs 802.1Q, matriz y diagramas (no se despliega)
-plans/handoffs/                     # último traspaso de trabajo y su plan
 ```
 
 Todo `docker compose` se ejecuta desde la raíz con `--env-file sistema/test.env`. En `docker-compose.yml` los servicios se agrupan por departamento, igual que en el diseño de la Entrega 1 (3 equipos), y cada VLAN es una red bridge.
