@@ -27,7 +27,7 @@ certificado de OpenLDAP. `levantar-sistema.sh` lo ejecuta en cada `preparar` y e
 |---|---|---|---|
 | `ca.crt` | Certificado público de la CA. Es lo que deben confiar los clientes de LDAPS | RSA 4096, SHA-256, 3650 días, `CA:TRUE` (crítica), `keyCertSign, cRLSign`; sujeto `O=Zoologico Reserva Viva, CN=Reserva Viva CA interna` | 644 |
 | `ca.key` | Clave privada de la CA. **No se monta en ningún contenedor** | — | 600 |
-| `ldap.crt` | Certificado de servidor de OpenLDAP, firmado por la CA | RSA 2048, SHA-256, 825 días, `serverAuth`; SAN `DNS:ldap.reservaviva.local`, `DNS:openldap`, `DNS:localhost`, `IP:10.10.99.10`, `IP:127.0.0.1` | 644 |
+| `ldap.crt` | Certificado de servidor de OpenLDAP, firmado por la CA | RSA 2048, SHA-256, 825 días, `serverAuth`; SAN `DNS:ldap.reservaviva.lan`, `DNS:openldap`, `DNS:localhost`, `IP:10.10.99.10`, `IP:127.0.0.1` | 644 |
 | `ldap.key` | Clave privada de OpenLDAP | — | 600 |
 
 El script trabaja con `umask 077`. Opciones: `--forzar` lo regenera todo, y `--sin-instalar-ca` evita instalar `ca.crt` en
@@ -41,7 +41,9 @@ El script es idempotente. Si los certificados existen y son válidos, no toca na
 - **La CA** (y con ella el certificado de OpenLDAP), con `--forzar`, si falta `ca.key` o si a `ca.crt` le quedan menos de
   30 días de vigencia.
 - **Solo el certificado de OpenLDAP**, con `--forzar`, si falta `ldap.key`, si a `ldap.crt` le quedan menos de 30 días, si
-  `ldap.crt` no lo firma la `ca.crt` actual o si su SAN no incluye `ldap.reservaviva.local` y `10.10.99.10`.
+  `ldap.crt` no lo firma la `ca.crt` actual o si su SAN no incluye `ldap.reservaviva.lan` y `10.10.99.10`. Así se
+  regeneró el 27/09/2026, al pasar el dominio de `.local` a `.lan`: solo `ldap.crt`/`ldap.key`, con la misma CA, sin tocar
+  a los clientes (que confían en `ca.crt`).
 
 Los permisos (`chmod`) se aplican **solo a lo generado en esa ejecución**. Al arrancar, la imagen de OpenLDAP
 (`osixia/openldap`) se apropia de los certificados montados (uid 911), y desde entonces el usuario del equipo ya no puede
@@ -49,7 +51,17 @@ cambiarles los permisos. Por la misma razón, el script borra y crea los fichero
 OpenLDAP los monta sin `:ro`.
 
 Si se regeneran con el sistema en marcha, los contenedores que los montan siguen viendo los ficheros anteriores hasta que
-se recrean. Este paso no está automatizado, y el efecto no se ha verificado en este sistema.
+se recrean. Para OpenLDAP, un reinicio **no basta**: con `--copy-service`, la imagen copia sus certificados a
+`/container/run/service` solo en el primer arranque de cada contenedor, y slapd usa esa copia. Se comprobó el 27/09/2026:
+tras regenerar `ldap.crt` y reiniciar `openldap`, seguía sirviendo el certificado antiguo y el login LDAPS de ERPNext e
+InvenTree fallaba. Por eso `arrancar` **recrea** `openldap` (con sus mismos volúmenes) cuando `ldap.crt` es más nuevo que
+el contenedor (`recrear_ldap_si_cert_nuevo`), y después reinicia los dos clientes LDAPS, `inventree-app` y
+`erpnext-backend`: el mismo día, con `openldap` ya sirviendo el certificado nuevo, InvenTree siguió rechazando el login LDAP
+(401, sin ningún error en su log) hasta reiniciar `inventree-app`, mientras un proceso nuevo dentro del mismo contenedor
+autenticaba bien. Queda estado TLS/LDAP en los procesos de gunicorn; la causa exacta no se identificó. Tras el reinicio,
+`ldaplogin.py` pasó. También se reinicia `erpnext-hr`: al reiniciarse, `erpnext-backend` puede cambiar de IP en
+`erpnext_internal` y el nginx de `erpnext-hr` seguía llamando a la antigua (502 en `rrhh`). Si se regenerase la CA, habría que recrear también `inventree-app` y `erpnext-backend` para que
+monten la `ca.crt` nueva, y eso no está automatizado.
 
 ### Quién monta qué
 
@@ -76,9 +88,9 @@ creó Docker, volver a ejecutar `preparar` y recrear los contenedores afectados.
 
 ### Qué aplicación usa LDAP
 
-Solo ERPNext e InvenTree, las dos por LDAPS (`ldaps://ldap.reservaviva.local:636`) y verificando el certificado de
+Solo ERPNext e InvenTree, las dos por LDAPS (`ldaps://ldap.reservaviva.lan:636`) y verificando el certificado de
 OpenLDAP con la CA interna; OpenVPMS y Pretix no usan LDAP. Cómo lo configura cada aplicación, qué se comprueba y por
-qué las otras dos no se integran: [`ldap.md`](ldap.md). El nombre `ldap.reservaviva.local` se fija con `extra_hosts`
+qué las otras dos no se integran: [`ldap.md`](ldap.md). El nombre `ldap.reservaviva.lan` se fija con `extra_hosts`
 para que coincida con el SAN del certificado sin depender del DNS.
 
 OpenLDAP tiene `LDAP_TLS_VERIFY_CLIENT: never`: no pide certificado a los clientes. También escucha en **389 sin
@@ -181,17 +193,38 @@ intentos, el arranque termina con error.
 
 ### Qué se publica
 
-Todos los puertos se publican en `127.0.0.1` (`PUBLISH_IP` y `DNS_BIND_IP` en `sistema/test.env`). **Solo se accede desde
-el propio equipo**, no desde la red local. La lista de puertos está en
-[`arquitectura.md`, "Puertos publicados"](arquitectura.md#7-puertos-publicados); OpenLDAP publica también el puerto sin
-cifrar.
+En **modo local** (el de por defecto) todos los puertos se publican en `127.0.0.1` (`PUBLISH_IP`, `DNS_BIND_IP` e
+`INTRANET_IP` en `sistema/test.env`). **Solo se accede desde el propio equipo**, no desde la red local. La lista de puertos
+está en [`arquitectura.md`, "Puertos publicados"](arquitectura.md#7-puertos-publicados); OpenLDAP publica también el
+puerto sin cifrar.
 
-Si `PUBLISH_IP` o `DNS_BIND_IP` faltaran en `test.env`, el compose publica igualmente en `127.0.0.1`: todos los `ports:`
-del `docker-compose.yml` único usan `${PUBLISH_IP:-127.0.0.1}` o `${DNS_BIND_IP:-127.0.0.1}` (hasta el 27/09/2026 el valor
-por defecto era `0.0.0.0`, todas las interfaces). Para abrir el acceso a otros equipos, publicar en la IP de la interfaz
-de intranet/VPN, nunca en `0.0.0.0`: ver
-[`operacion.md`, "Acceso desde otros equipos de la intranet"](operacion.md#acceso-desde-otros-equipos-de-la-intranet)
-(no probado).
+Si alguna de esas variables faltara en `test.env`, el compose publica igualmente en `127.0.0.1`: todos los `ports:` del
+`docker-compose.yml` único usan `${PUBLISH_IP:-127.0.0.1}`, `${DNS_BIND_IP:-127.0.0.1}` o `${INTRANET_IP:-127.0.0.1}`
+(hasta el 27/09/2026 el valor por defecto era `0.0.0.0`, todas las interfaces). Nada se publica nunca en `0.0.0.0`.
+
+### Modo intranet: qué se expone y por qué es opcional
+
+El **modo intranet** (`levantar-sistema --intranet`) publica **solo dos puertos** en la IP de la LAN del equipo: el proxy
+web (80/tcp), que da acceso a las cuatro aplicaciones por su nombre, y el DNS (53/udp y tcp). OpenLDAP, NTP y el acceso
+directo 1808x siguen en `127.0.0.1`. Es **opcional y no persistente** (un `arrancar` sin la opción vuelve al modo local)
+por una razón concreta: las contraseñas de laboratorio están **públicas en git**. Con el modo intranet activo, cualquier
+equipo de la misma red puede entrar como administrador en OpenVPMS, Pretix, InvenTree y ERPNext, y todo viaja por HTTP
+sin cifrar. Solo debe usarse en una red de laboratorio, y lo razonable es volver al modo local al terminar.
+
+El DNS expuesto no amplía la superficie: es autoritativo solo de `reservaviva.lan` y no hace recursión, así que no sirve
+como resolvedor abierto ni para ataques de amplificación. A la LAN no le anuncia `ldap` ni `ntp`, y a un cliente de la
+LAN nunca le da una IP de contenedor (vista `lan`, [arquitectura.md](arquitectura.md#la-zona-reservavivalan-y-sus-dos-vistas)).
+
+**Alcance de las reglas de cortafuegos** que crea `sistema/habilitar-intranet-windows.ps1` (y que `-Deshacer` quita):
+
+- Firewall de Windows: tres reglas de **entrada** (`ReservaViva-HTTP-TCP-80`, `ReservaViva-DNS-UDP-53`,
+  `ReservaViva-DNS-TCP-53`), solo desde la **subred local** de la interfaz elegida (por ejemplo `192.168.1.0/24`), en todos
+  los perfiles: la Wi-Fi del equipo de medida está en perfil "Pública", y una regla solo para "Privada" no aplicaría.
+- Firewall de Hyper-V: las mismas tres reglas para la VM de WSL (`VMCreatorId` de WSL), también limitadas a la subred.
+- Nada más: no abre otros puertos, no cambia la acción por defecto de ningún perfil y no toca ICS ni Portmaster.
+
+`networkingMode=mirrored` cambia la red de **toda** la distro de WSL, no solo la de Docker: cualquier servicio que escuche
+dentro de WSL queda en las interfaces de Windows, aunque sin las reglas de entrada anteriores el cortafuegos lo filtra.
 
 ### Qué aísla el sistema
 
@@ -218,7 +251,8 @@ OpenLDAP, DNS y NTP. Las direcciones están en [`arquitectura.md`](arquitectura.
 - **El equipo anfitrión no está en ninguna VLAN.** Cualquier proceso del equipo llega a todos los puertos publicados en
   127.0.0.1, sea del departamento que sea. Además, en Linux/WSL el anfitrión suele poder alcanzar directamente las IP de
   los bridges; es un comportamiento general de Docker que `verificar` no comprueba.
-- Tampoco se prueban el etiquetado 802.1Q, el switch físico ni el acceso desde otros equipos. La lista completa está en
+- Tampoco se prueban el etiquetado 802.1Q, el switch físico ni el acceso desde otros equipos (los pasos para probarlo
+  están en [`operacion.md`](operacion.md#acceso-desde-la-lan)). La lista completa está en
   "Qué NO puede demostrar un solo host" de `verificar_arquitectura.md`.
 
 ## 6. Buenas prácticas y pendientes
@@ -255,4 +289,5 @@ después: siguen en el historial de git.
   lugar de una compartida.
 - Custodia de `ca.key` fuera del equipo que sirve los servicios, y un procedimiento de renovación de certificados con la
   recreación de los contenedores.
-- HTTPS en las cuatro aplicaciones: hoy se sirven por HTTP en 127.0.0.1.
+- HTTPS en las cuatro aplicaciones: hoy se sirven por HTTP, en 127.0.0.1 y, en modo intranet, en la LAN por el proxy web.
+  El sitio natural para TLS sería ese proxy, con un certificado de la CA interna.

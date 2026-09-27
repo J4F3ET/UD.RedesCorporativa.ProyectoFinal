@@ -14,7 +14,7 @@ Sale con codigo 0 solo si todos los casos ejecutados dan PASS.
 Casos:
   1. Login con usuario LDAP correcto        -> 200 (ERPNext) / 200 + token (InvenTree)
   2. Contrasena erronea                     -> rechazo (401/403; ERPNext devuelve 417)
-  3. ldapsearch por LDAPS con la CA         -> OK con verificacion completa (nombre ldap.reservaviva.local);
+  3. ldapsearch por LDAPS con la CA         -> OK con verificacion completa (nombre ldap.reservaviva.lan);
                                                y FALLA con una CA ajena por "peer cert untrusted"
   4. Persistencia tras down sin -v + up -d  -> los casos 1-3 dan el mismo resultado
 Las peticiones HTTP se hacen con `docker exec` DENTRO de los contenedores de las apps (con macvlan/bridge
@@ -30,7 +30,7 @@ RAIZ = AQUI.parent   # donde esta docker-compose.yml
 ENV_FILE = RAIZ / "sistema" / "test.env"
 # El caso 4 llama a compose desde la raiz y con el fichero de variables: sin --env-file fallarian las variables ":?".
 COMPOSE = ["docker", "compose", "--env-file", "sistema/test.env"]
-SITE = "rrhh.reservaviva.local"
+SITE = "rrhh.reservaviva.local"   # nombre del SITIO de ERPNext (identificador interno), no el nombre DNS (.lan)
 BASE = "dc=reservaviva,dc=local"
 CA_EN_OPENLDAP = "/container/service/slapd/assets/certs/ca.crt"
 
@@ -55,7 +55,7 @@ MALA = "clave-incorrecta-xyz"
 # NO usar ldaps://localhost: libldap canonicaliza el nombre al hostname del contenedor (p. ej.
 # 4f89b94c57b9), que no esta en el SAN, y la verificacion falla aunque LDAPS funcione (ver
 # docs/prueba-smoke-test-resultados.md, ejecucion de 2026-09-20; retirado, ver git show 95e0da4).
-LDAP_URI = "ldaps://ldap.reservaviva.local:636"
+LDAP_URI = "ldaps://ldap.reservaviva.lan:636"
 
 # Se ejecuta dentro del contenedor: imprime "<status> <cuerpo recortado>". Sin dependencias externas.
 HTTP_ERP = r"""
@@ -121,7 +121,7 @@ def ldapsearch(usuario, ou, clave, ca="real"):
     else:
         pre = ("openssl req -x509 -newkey rsa:2048 -nodes -keyout /dev/null -out /tmp/ajena.crt "
                "-subj /CN=CA-ajena -days 1 >/dev/null 2>&1; export LDAPTLS_CACERT=/tmp/ajena.crt")
-    # Contenedor efimero con el DNS del laboratorio: ldap.reservaviva.local se resuelve como en produccion.
+    # Contenedor efimero con el DNS del laboratorio: ldap.reservaviva.lan se resuelve como en produccion.
     # --volumes-from openldap aporta el volumen de certificados (ca.crt).
     cmd = ["docker", "run", "--rm", "--network", red, "--dns", dns, "--volumes-from", "openldap",
            "--entrypoint", "", "-e", "LDAPTLS_REQCERT=demand", "-e", "CLAVE_LDAP", imagen, "sh", "-c",

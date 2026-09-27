@@ -44,7 +44,7 @@ Las claves de estos usuarios y de `svc-lectura` están solo en `sistema/test.env
 
 ### Lo común
 
-- **Servidor:** `ldaps://ldap.reservaviva.local:636`. El nombre lo fija `extra_hosts` hacia la IP de `openldap`, para que
+- **Servidor:** `ldaps://ldap.reservaviva.lan:636`. El nombre lo fija `extra_hosts` hacia la IP de `openldap`, para que
   coincida con el certificado sin depender del DNS ([arquitectura.md](arquitectura.md#6-flujos)).
 - **Verificación TLS:** contra la CA interna, montada desde `servicios/ca/certs/ca.crt` en `/certs/ca.crt` (solo lectura)
   en `inventree-app` y `erpnext-backend`. Con la CA del sistema, o con otra CA, la conexión falla.
