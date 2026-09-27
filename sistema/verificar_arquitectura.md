@@ -39,7 +39,22 @@ ya local, referencia con digest) con `--pull=never`, y la de `ntp-interno`; llev
    ni `vlan99_infra`; un cliente con la pila de red de la app (`--network container:<app>`, dual-homed) **sí** alcanza
    `openldap:389/636` y **no** otros departamentos.
 2. **DNS.** Se consulta a `10.10.99.11` de verdad: cada registro de `bind/zones/db.reservaviva.local` (autoritativo, igual que la
-   zona), un nombre inexistente (NXDOMAIN) y `example.com` (REFUSED: sin recursión).
+   zona), un nombre inexistente (NXDOMAIN) y `example.com` (REFUSED: sin recursión). Además, cada uno de los 7 nombres de la
+   zona debe apuntar a la IP real (`docker inspect`) del contenedor que da ese servicio; si no, es **FAIL**:
+
+   | Nombre | Contenedor | Red en la que se toma su IP |
+   |---|---|---|
+   | `dns` | `dns-interno` | vlan99 |
+   | `ldap` | `openldap` | vlan99 |
+   | `ntp` | `ntp-interno` | vlan99 |
+   | `openvpms` | `openvpms-app` | vlan10 |
+   | `pretix` | `pretix-web` | vlan20 |
+   | `inventree` | `inventree-app` | vlan30 |
+   | `rrhh` | `erpnext-hr` | vlan40 |
+
+   `rrhh` apunta a `erpnext-hr` y no a `erpnext-backend`: `erpnext-hr` es el nginx de ERPNext, el único contenedor de RRHH que
+   atiende HTTP a los usuarios (escucha en 8080 y es el que publica `ERPNEXT_PORT` en el host). `erpnext-backend` (gunicorn,
+   puerto 8000) no publica nada y solo se llega a él a través de ese nginx. Comprobado con `docker inspect` el 26/09/2026.
 3. **NTP.** `chronyc tracking` dentro de `ntp-interno`, un cliente SNTP que valida modo/stratum/LI/offset, y un cliente chrony
    real (`chronyd -Q`, no toca el reloj) que debe aceptar al servidor.
 4. **Consolidación.** Invoca `ldapprobe.py`, `probe.py` y `ldaplogin.py --persistencia` (caso 4, que no se ha ejecutado nunca);

@@ -36,6 +36,13 @@ APPS = {10: ("openvpms-app", 8080), 20: ("pretix-web", 80), 30: ("inventree-app"
 APP_DEPTO = {a: d for d, (a, _) in APPS.items()}
 RED = {10: "vlan10_medica", 20: "vlan20_taquilla", 30: "vlan30_logistica", 40: "vlan40_rrhh", 99: "vlan99_infra"}
 CONSULTA_DNS = "ldap.reservaviva.local"
+# nombre de la zona -> (contenedor que da ese servicio, VLAN donde se le busca la IP real). bloque_dns compara la zona
+# generada con `docker inspect`. rrhh -> erpnext-hr: es el nginx de ERPNext, el unico contenedor de RRHH que atiende HTTP
+# a los usuarios (escucha en 8080 y es el que publica ERPNEXT_PORT en el host); erpnext-backend (gunicorn, 8000) no
+# publica nada y solo se le llega a traves de ese nginx. Comprobado con docker inspect el 26/09/2026.
+ZONA_ESPERADA = {"dns": ("dns-interno", 99), "ldap": ("openldap", 99), "ntp": ("ntp-interno", 99),
+                 "openvpms": ("openvpms-app", 10), "pretix": ("pretix-web", 20), "inventree": ("inventree-app", 30),
+                 "rrhh": ("erpnext-hr", 40)}
 
 
 # ------------------------------------------------------------------------------------------------
@@ -252,6 +259,13 @@ def zona():
             if (m := re.match(r"^(\S+)\s+IN\s+A\s+(\S+)", l))}
 
 
+def ip_real(ctx, contenedor, d):
+    """IP del contenedor en la VLAN d ('' si no esta en ella). Reutiliza lo ya inspeccionado en los prerrequisitos."""
+    if contenedor in ctx["ips"]:
+        return ctx["ips"][contenedor].get(d, "")
+    return (redes_de(contenedor) or {}).get(ctx["pref"] + RED[d], "")
+
+
 def estado_docker():
     r = sh(["systemctl", "show", "docker", "-p", "ExecMainStartTimestamp"], timeout=30)
     return (r.stdout or r.stderr).strip() or f"rc={r.returncode}"
@@ -399,13 +413,14 @@ def bloque_dns(ctx, m, zonas):
     d = por["externo"]
     reg("example.com -> REFUSED (sin recursion: la zona interna no sale a Internet)",
         "PASS" if "error" not in d and d["rcode"] == 5 else "FAIL", f"respuesta={d}")
-    reales = {"dns": ctx["ips"]["dns-interno"][99], "ntp": ctx["ips"]["ntp-interno"][99], "ldap": ctx["ips"]["openldap"][99]}
-    dif = [f"{h}: la zona dice {zonas[h]}, el contenedor real esta en {reales[h]}" for h in reales
-           if h in zonas and zonas[h] != reales[h]]
-    reg("los nombres dns/ntp/ldap apuntan al contenedor que los sirve", "INFO" if dif else "PASS",
-        "\n".join(dif) or "coinciden"
-        + ("\nEn el laboratorio real un solo PC-3 (una IP) aloja los tres servicios, asi que la zona es correcta alli; en "
-           "el arnes de un host dns/ntp resuelven a la IP de openldap." if dif else ""))
+    # Cada nombre de la zona debe resolver a la IP real (docker inspect) del contenedor que da ese servicio.
+    for h, (cont, d_) in ZONA_ESPERADA.items():
+        real = ip_real(ctx, cont, d_) or f"(sin IP en vlan{d_})"
+        nombre = f"zona: {h}.reservaviva.local apunta a {cont} (su IP real en vlan{d_})"
+        if h not in zonas:
+            reg(nombre, "FAIL", f"la zona no tiene el nombre '{h}'; {cont} esta en {real}")
+        else:
+            reg(nombre, "PASS" if zonas[h] == real else "FAIL", f"la zona dice {zonas[h]}, el contenedor real esta en {real}")
     imprime("  -- los clientes solo de departamento NO deben alcanzar el DNS interno (UDP; control = la consulta de arriba)")
     ctl = all(por[h]["rcode"] == 0 for h, _ in nombres if "error" not in por[h]) and "error" not in por[nombres[0][0]]
     for d_, (app, _) in APPS.items():
