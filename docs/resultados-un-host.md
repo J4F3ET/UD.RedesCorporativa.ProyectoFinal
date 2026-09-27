@@ -46,10 +46,15 @@ Ajustes que llevaron a esta cifra, sin quitar ninguna función:
 
 | Pasada | Resultado |
 |---|---|
-| 26/09 17:18, rápida (sin persistencia) | 192 PASS, 28 INFO. El único FAIL era el marcador deliberado "caso 4 no ejecutado", que ya no existe: `verificar` es completo por defecto |
+| 26/09 17:18, rápida (sin persistencia) | 192 PASS, 28 INFO. El único FAIL era el marcador deliberado "caso 4 no ejecutado", que `--rapido` deja siempre (por eso `verificar` es completo por defecto) |
 | 26/09 17:22, completa, antes de H18 | 91 PASS, 1 FAIL. El FAIL fue el caso 4a: carrera de arranque del test, no pérdida de datos |
 | 26/09 17:47, completa, con H18 corregido | **92 PASS, 0 FAIL, 14 INFO, RC=0** |
 | 26/09 18:17, completa, tras renombrar el arnés a `sistema/` | **92 PASS, 0 FAIL, 14 INFO, RC=0** (misma configuración resuelta de compose antes y después del renombrado) |
+| 26/09 21:28, rápida, con la comprobación de la zona ampliada a sus 7 nombres y **antes** de corregirla | 95 PASS, 5 FAIL, 13 INFO. Cuatro FAIL de la zona (`dns`, `ntp`, `pretix` y `rrhh` no apuntaban a su contenedor: H21) y el marcador de `--rapido`. Es la prueba de que el test detecta H21 (`sistema/resultados/verificacion-20260926-212844.txt`) |
+| 26/09 21:59, completa, tras corregir la zona (H21), LDAP/DNS/NTP de las apps y las URL de Pretix e InvenTree (H20) | **99 PASS, 0 FAIL, 13 INFO, RC=0** (`sistema/resultados/verificacion-20260926-215946.txt`) |
+| 26/09 22:19, completa, con el `docker-compose.yml` único en la raíz y los ficheros en `servicios/` | **99 PASS, 0 FAIL, 13 INFO, RC=0** (`sistema/resultados/verificacion-20260926-221919.txt`). Configuración resuelta de compose igual a la de la pasada anterior salvo las rutas de origen de los montajes |
+
+Desde el 26/09 21:59 hay 99 PASS y no 92: la comprobación "los nombres dns/ntp/ldap apuntan al contenedor que los sirve", que era 1 INFO, pasó a ser una comprobación por cada uno de los 7 nombres de la zona (7 PASS). De ahí también 13 INFO en vez de 14.
 
 En todas las pasadas válidas, `ExecMainStartTimestamp` de `docker.service` es el mismo antes y después: el demonio no se reinició durante la prueba.
 
@@ -57,9 +62,9 @@ Qué cubre cada bloque (detalle en [`../sistema/verificar_arquitectura.md`](../s
 
 - **Prerrequisitos:** las 4 apps en su VLAN y en la 99. OpenVPMS 10.10.10.10/.99.24, Pretix .20.10/.99.21, InvenTree .30.10/.99.22, ERPNext .40.11/.99.23. OpenLDAP .99.10, DNS .99.11, NTP .99.12.
 - **Segmentación:** controles positivos, negativos entre departamentos, y alcance de LDAP solo desde las apps dual-homed.
-  - Los **12 INFO** de la pasada rápida son el tráfico de una app a otra por la VLAN 99. Es un hallazgo previsto: la VLAN 99 es un único dominio L2.
-- **DNS:** registros autoritativos, NXDOMAIN, `REFUSED` para nombres externos, y solo responde a las apps dual-homed.
-- **NTP:** stratum 10 (fuente local, H11), SNTP válido, un cliente `chronyd -Q` real acepta la fuente, y aislamiento por VLAN.
+  - **12 de los 13 INFO** son el tráfico de una app a otra por la VLAN 99. Es un hallazgo previsto: la VLAN 99 es un único dominio L2.
+- **DNS:** registros autoritativos, NXDOMAIN, `REFUSED` para nombres externos, y solo responde a las apps dual-homed. Cada uno de los 7 nombres de la zona apunta al contenedor que da ese servicio (`rrhh` → `erpnext-hr`, el nginx de ERPNext).
+- **NTP:** stratum 10 (fuente local, H11), SNTP válido, un cliente `chronyd -Q` real acepta la fuente, y aislamiento por VLAN. El INFO restante es `chronyc sources`, que se muestra como contexto.
 - **LDAP/LDAPS:**
   - Login LDAP de `rrhh.prueba` en ERPNext (200) y de `logistica.prueba` en InvenTree (200 con token).
   - Clave errónea: 417 en ERPNext y 401 en InvenTree.
@@ -85,3 +90,5 @@ Resuelto el 26/09/2026:
 
 - **H18:** carrera de arranque en el caso 4 de `ldaplogin.py`.
 - **H19:** el arranque de un host no creaba el administrador de Pretix y dejaba `admin@localhost` con la clave `admin`. Ahora lo hace `levantar-sistema.sh`.
+- **H20** (`41d54ef`): Pretix e InvenTree tenían como URL propia `http://10.10.30.10:<puerto>`, que es la IP de `inventree-app` en la VLAN 30 (resto del diseño de 3 equipos). Efecto medido antes del arreglo: la interfaz web de InvenTree (`http://localhost:18083/web`) respondía 500 ("INVE-E7: the visited path does not match the SITE_URL"). Pretix servía el login solo porque admite `localhost` como excepción. Ahora ambas usan `http://localhost:<puerto>`. Comprobado desde el host: `/web` de InvenTree 200; `/control/login` de Pretix 200 con token CSRF; un POST de login con credenciales inventadas se rechaza por credenciales, no por CSRF. El login real en un navegador no se ha probado en esta pasada.
+- **H21** (`4b7aadb`; la comprobación que lo detecta, `de18b7a`): la zona DNS ponía `dns`, `ntp` y `rrhh` en la IP de `openldap` y `pretix` en la de `inventree-app`. Ahora cada nombre apunta al contenedor que da ese servicio, y `verificar` lo comprueba nombre por nombre.

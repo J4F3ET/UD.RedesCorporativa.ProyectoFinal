@@ -78,7 +78,7 @@ Un destino inalcanzable y un nombre que no resuelve dan resultados parecidos y s
 - En NTP, un cliente que recibe respuesta con LI=3 ("no sincronizado") o stratum fuera de 1–15 la rechazaría: FAIL.
   Si `chronyd -Q` responde "No suitable source", el cliente rechazó al servidor: es un **hallazgo**, no un fallo del guion.
 
-## Hallazgos previstos (leer los `INFO`; no se han observado, salen de leer los ficheros)
+## Hallazgos (leer los `INFO`; observados en las pasadas de [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md))
 
 - **`vlan99_infra` es un único dominio L2 compartido por las 4 apps.** Aunque los departamentos estén aislados, una app dual-homed
   probablemente alcance a otra por su IP de infraestructura. En el diseño de 3 equipos (anexo `diseno-red/`) lo limita su matriz de firewall,
@@ -107,5 +107,5 @@ Un destino inalcanzable y un nombre que no resuelve dan resultados parecidos y s
 | Clasificador de conexiones, cliente DNS (compresión, NXDOMAIN, REFUSED, timeout), cliente SNTP, lector de zona | **Verificado** con `--autotest` en WSL contra sockets locales (PASS). En Windows el caso "puerto cerrado" falla por un artefacto de loopback (sin RST inmediato); en Linux/WSL pasa. |
 | Modo `--sonda` por stdin (el que corre dentro del contenedor, sin `__file__`) | **Verificado** en WSL sin Docker |
 | Fallo limpio con el sistema apagado (7 FAIL en prerrequisitos, exit 1, sin excepción) | **Verificado** |
-| Todo lo que toca contenedores: segmentación, DNS, NTP, ldapprobe/probe/ldaplogin | **Verificado** el 26/09/2026 contra los 25 servicios (92 PASS, 0 FAIL, incluida la persistencia) |
+| Todo lo que toca contenedores: segmentación, DNS, NTP, ldapprobe/probe/ldaplogin | **Verificado** el 26/09/2026 contra los 25 servicios, incluida la persistencia (cifras en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md)) |
 | Supuestos: puertos 8080/80/8000/8000 de las apps, `chronyd -Q` con la imagen de cturra, `--network container:<app>` | **Verificado** en esa misma ejecución (los bloques que dependen de ellos dan PASS) |

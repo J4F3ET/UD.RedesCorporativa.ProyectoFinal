@@ -60,7 +60,7 @@ Los usuarios aparecen al terminar el arranque. Las contraseñas de laboratorio, 
 - **NTP:** el servidor responde con un stratum válido, un cliente chrony real lo acepta, y solo es alcanzable desde la VLAN 99.
 - **LDAP/LDAPS:** login LDAP real en ERPNext e InvenTree; clave errónea rechazada; `ldapsearch` por LDAPS que valida con la CA interna y falla con una CA ajena. También comprueba que todo sobrevive a un `down` + `up -d`.
 
-Último resultado: **92 PASS, 0 FAIL** (26/09/2026). Las cifras están en [`docs/resultados-un-host.md`](docs/resultados-un-host.md).
+El último resultado y las cifras de cada pasada están en [`docs/resultados-un-host.md`](docs/resultados-un-host.md).
 
 **Lo que un solo equipo no puede demostrar:**
 
