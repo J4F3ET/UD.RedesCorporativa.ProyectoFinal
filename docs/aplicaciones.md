@@ -83,7 +83,7 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 
 - Probado: `logistica.prueba` entra y `rrhh.prueba` es rechazado (otra OU).
 - `taquilla.prueba` también está en `ou=operaciones`, así que por configuración también entraría. **No verificado.**
-- Las claves de estos usuarios están en [`servicios/openldap/README.md`](../servicios/openldap/README.md).
+- Las claves de estos usuarios están en `sistema/test.env` (`LDAP_PRUEBA_<UID>_PASSWORD`; tabla en [`servicios/openldap/README.md`](../servicios/openldap/README.md)).
 - Un usuario LDAP se crea en InvenTree en su primer login, **sin permisos**: el administrador tiene que asignárselos.
 
 **Particularidades.** `inventree-worker` espera a que `inventree-app` esté `healthy` para no competir con él por las migraciones. `INVENTREE_AUTO_UPDATE` aplica las migraciones al arrancar.
@@ -111,7 +111,7 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 **LDAP: sí.** `erpnext-ldap-config` deja configurado "LDAP Settings" de Frappe: LDAPS con la CA interna y búsqueda solo en `ou=rrhh`. Detalle y pruebas en [ldap.md](ldap.md).
 
 - Probado por la API: `rrhh.prueba` entra, y `logistica.prueba` y `vet.prueba` son rechazados.
-- La clave de `rrhh.prueba` está en [`servicios/openldap/README.md`](../servicios/openldap/README.md).
+- La clave de `rrhh.prueba` es `LDAP_PRUEBA_RRHH_PASSWORD` en `sistema/test.env` ([`servicios/openldap/README.md`](../servicios/openldap/README.md)).
 - El botón "Login with LDAP" del formulario `/login` no se ha probado en el navegador.
 - El usuario se crea en el primer login y sin permisos útiles: falta asignarle un empleado y sus roles de HR.
 

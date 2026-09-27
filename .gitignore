@@ -3,6 +3,8 @@
 servicios/ca/certs/
 # Zona DNS generada desde la plantilla .tpl por levantar-sistema.sh
 servicios/bind9/zones/db.reservaviva.local
+# LDIF del primer arranque de OpenLDAP, con los hashes de las claves de sistema/test.env (levantar-sistema.sh preparar)
+servicios/openldap/generado/
 
 # Salidas de levantar-sistema.sh verificar
 sistema/resultados/

@@ -10,9 +10,8 @@ Reserva Viva es un **laboratorio académico**, no un despliegue de producción:
 
 - Todas las contraseñas están en [`../sistema/test.env`](../sistema/test.env). Ese fichero **está versionado en git**,
   así que sus valores están en el historial del repositorio. Son claves **desechables** de laboratorio.
-- Las claves de los usuarios LDAP de prueba están en claro en el README de
-  [`../servicios/openldap/`](../servicios/openldap/README.md). Además, la clave de la cuenta de servicio aparece en un
-  comentario de [`10-estructura.ldif`](../servicios/openldap/10-estructura.ldif).
+- `sistema/test.env` es la **única** fuente de claves, también las del directorio LDAP: ningún otro fichero versionado
+  (LDIF, README, scripts) contiene una clave. Los LDIF con los hash se generan en cada `preparar` (sección 3).
 - Hay que **rotar todas las claves** si el repositorio se hace público o si alguien usa este sistema fuera del laboratorio
   (ver la sección 6). Borrar `test.env` en un commit nuevo no basta: el historial conserva los valores.
 
@@ -87,7 +86,8 @@ cifrar**, pero las dos aplicaciones integradas usan solo el 636.
 
 ### Árbol del directorio (DIT)
 
-Base `dc=reservaviva,dc=local`, definido en [`10-estructura.ldif`](../servicios/openldap/10-estructura.ldif):
+Base `dc=reservaviva,dc=local`, definido en la plantilla
+[`10-estructura.ldif.tpl`](../servicios/openldap/10-estructura.ldif.tpl):
 
 ```
 dc=reservaviva,dc=local
@@ -100,6 +100,13 @@ dc=reservaviva,dc=local
 
 Los LDIF se cargan **solo en el primer arranque, con el volumen `ldap_data` vacío**. Cambiar el LDIF no modifica un
 directorio que ya existe.
+
+**Cómo se generan los LDIF.** Las plantillas versionadas `servicios/openldap/*.ldif.tpl` no llevan claves, sino
+marcadores `${SSHA_<CUENTA>}`. `levantar-sistema.sh preparar` (también dentro de `arrancar`) los sustituye por el hash
+`{SSHA}` (SHA-1 con 8 bytes de sal aleatoria, calculado con `openssl`; la clave no pasa por la línea de comandos de ningún
+proceso) de la variable correspondiente de `test.env`, y escribe el resultado en `servicios/openldap/generado/`, que está
+ignorada por git y es la carpeta que el compose monta como bootstrap de la imagen. Si falta una variable, `preparar`
+se detiene con `definir <VARIABLE> en sistema/test.env`. El README y las plantillas no llegan al contenedor.
 
 ### Cuentas con privilegios en el directorio y sus ACL
 
@@ -121,17 +128,27 @@ eso un usuario de otro departamento no entra. La búsqueda no filtra por grupos,
 
 ### Usuarios de prueba
 
-Definidos en [`20-usuarios-prueba.ldif`](../servicios/openldap/20-usuarios-prueba.ldif), con las claves guardadas como hash
-SSHA. Están organizados por OU, no por grupos. Qué usuario entra en qué aplicación está en
+Definidos en la plantilla [`20-usuarios-prueba.ldif.tpl`](../servicios/openldap/20-usuarios-prueba.ldif.tpl); en el
+directorio sus claves quedan como hash SSHA. Están organizados por OU, no por grupos. Qué usuario entra en qué aplicación está en
 [`ldap.md`](ldap.md#2-el-directorio). Los usuarios LDAP se crean en la aplicación al primer login y **sin permisos**: se
 los asigna un administrador.
 
 **Dónde están las claves:**
 
-- Las de los usuarios de prueba y la de `svc-lectura`: README de [`../servicios/openldap/`](../servicios/openldap/README.md).
-- La de `svc-lectura` que usan las aplicaciones: `ERPNEXT_LDAP_BIND_PASSWORD` e `INVENTREE_LDAP_BIND_PASSWORD` en
-  [`../sistema/test.env`](../sistema/test.env). Las dos deben coincidir con el hash de `10-estructura.ldif`.
-- La del administrador del directorio: `LDAP_ADMIN_PASSWORD` en `sistema/test.env`.
+Todas en [`../sistema/test.env`](../sistema/test.env), y solo ahí:
+
+| Cuenta | Variable |
+|---|---|
+| `cn=svc-lectura,ou=servicios` (la usan InvenTree y ERPNext para buscar) | `LDAP_SVC_LECTURA_PASSWORD` |
+| `vet.prueba` | `LDAP_PRUEBA_VET_PASSWORD` |
+| `logistica.prueba` | `LDAP_PRUEBA_LOGISTICA_PASSWORD` |
+| `taquilla.prueba` | `LDAP_PRUEBA_TAQUILLA_PASSWORD` |
+| `rrhh.prueba` | `LDAP_PRUEBA_RRHH_PASSWORD` |
+| `cn=admin` (administrador del directorio) | `LDAP_ADMIN_PASSWORD` (la aplica la propia imagen) |
+
+La misma variable alimenta el hash del LDIF de `svc-lectura` y la configuración de las dos aplicaciones
+(`docker-compose.yml`), así que no pueden desincronizarse en un primer arranque. `sistema/ldaplogin.py` lee las de
+`rrhh.prueba` y `logistica.prueba` del mismo fichero.
 
 ## 4. Credenciales iniciales por aplicación
 
@@ -169,9 +186,12 @@ el propio equipo**, no desde la red local. La lista de puertos está en
 [`arquitectura.md`, "Puertos publicados"](arquitectura.md#7-puertos-publicados); OpenLDAP publica también el puerto sin
 cifrar.
 
-Si `PUBLISH_IP` o `DNS_BIND_IP` faltaran en `test.env`, el compose publica en `0.0.0.0`, es decir, en todas las
-interfaces: todos los `ports:` del `docker-compose.yml` único usan `${PUBLISH_IP:-0.0.0.0}` o `${DNS_BIND_IP:-0.0.0.0}`.
-Por eso no hay que quitar esas variables.
+Si `PUBLISH_IP` o `DNS_BIND_IP` faltaran en `test.env`, el compose publica igualmente en `127.0.0.1`: todos los `ports:`
+del `docker-compose.yml` único usan `${PUBLISH_IP:-127.0.0.1}` o `${DNS_BIND_IP:-127.0.0.1}` (hasta el 27/09/2026 el valor
+por defecto era `0.0.0.0`, todas las interfaces). Para abrir el acceso a otros equipos, publicar en la IP de la interfaz
+de intranet/VPN, nunca en `0.0.0.0`: ver
+[`operacion.md`, "Acceso desde otros equipos de la intranet"](operacion.md#acceso-desde-otros-equipos-de-la-intranet)
+(no probado).
 
 ### Qué aísla el sistema
 
@@ -208,14 +228,16 @@ OpenLDAP, DNS y NTP. Las direcciones están en [`arquitectura.md`](arquitectura.
 Cambiar `sistema/test.env` **no basta** en un sistema ya inicializado. Casi todas las claves se aplican una sola vez: al
 crear el volumen, el sitio o el usuario (tabla de la sección 4). Hay dos caminos:
 
-- **Laboratorio desechable:** cambiar todos los valores de `test.env`, cambiar las claves y los hash SSHA de los LDIF de
-  `servicios/openldap/` (y su README), y reinicializar con `levantar-sistema.sh borrar`. **Esto borra todos los datos**:
-  bases de datos, sitio de ERPNext y directorio LDAP.
+- **Laboratorio desechable:** cambiar los valores de `test.env` y reinicializar con `levantar-sistema.sh borrar`; el
+  siguiente `arrancar` genera los LDIF con los hash nuevos. **Esto borra todos los datos**: bases de datos, sitio de
+  ERPNext y directorio LDAP. Si solo cambian claves de LDAP, basta con reinicializar el directorio: parar y quitar
+  `openldap`, borrar sus dos volúmenes (`ldap_data` y `ldap_config`) y `arrancar` (procedimiento probado en
+  [`resultados-un-host.md`](resultados-un-host.md)).
 - **Conservando los datos:**
   1. Cambiar cada clave dentro de su servicio: en la aplicación, en la base de datos, o con `ldappasswd` en el directorio.
   2. Poner el mismo valor en `test.env`, para que los arranques siguientes y `verificar` sigan funcionando.
-  3. Para `svc-lectura`, actualizar a la vez la entrada del directorio, `ERPNEXT_LDAP_BIND_PASSWORD` e
-     `INVENTREE_LDAP_BIND_PASSWORD`, y recrear `erpnext-ldap-config` e `inventree-app`.
+  3. Para `svc-lectura`, actualizar a la vez la entrada del directorio y `LDAP_SVC_LECTURA_PASSWORD`, y recrear
+     `erpnext-ldap-config` e `inventree-app`.
 
   Ningún script automatiza este camino y **no se ha probado**.
 

@@ -246,8 +246,8 @@ ambos en 8080, y 53/udp y 123/udp suelen estar ocupados en Windows.
 Ningún otro contenedor publica puertos: `erpnext-backend` (gunicorn, 8000) y las bases de datos solo son alcanzables
 desde sus redes.
 
-**Si faltara una variable**, el compose usa sus valores por defecto: la dirección `0.0.0.0` (todas las interfaces, es
-decir, expuesto a la red local) y los puertos originales (8080, 8080, 80, 8000, 389, 636, 53 y 123). Con esos valores
+**Si faltara una variable**, el compose usa sus valores por defecto: la dirección `127.0.0.1` (igual que `test.env`; antes
+era `0.0.0.0`, todas las interfaces) y los puertos originales (8080, 8080, 80, 8000, 389, 636, 53 y 123). Con esos valores
 OpenVPMS y ERPNext chocarían en el 8080. Hay que arrancar siempre con `--env-file sistema/test.env`, como hace
 `levantar-sistema`.
 
