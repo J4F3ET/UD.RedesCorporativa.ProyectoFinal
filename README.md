@@ -44,12 +44,7 @@ Los usuarios aparecen al terminar el arranque. Las contraseñas de laboratorio, 
 | `detener` | Para los contenedores sin borrar datos |
 | `borrar` | Borra contenedores **y datos**. Pide confirmación |
 
-**Requisitos:**
-
-- **Docker:** Docker Desktop (en Windows, con Git for Windows) o Docker Engine en Linux/WSL, con Compose 2.24.4 o superior.
-- **Memoria:** unos **7 GB de RAM libre**. Los 22 contenedores permanentes usan unos 4,6 GiB, y en el equipo cuestan unos 5,7 GB.
-- **Primer arranque:** descarga varios GB de imágenes (la de ERPNext/hrms ocupa 3,2 GB) e inicializa las bases de datos. Medido: **25/25 sanos en 15 min 45 s**, con las imágenes ya descargadas. Los arranques siguientes tardan unos minutos.
-- **Docker Engine dentro de WSL** (sin Docker Desktop): el lanzador de Windows deja una sesión de WSL abierta en segundo plano. Sin ella, Docker se detiene al cerrarse la última terminal y se lleva los contenedores. `detener` cierra esa sesión.
+**Requisitos:** Docker Desktop (en Windows, con Git for Windows) o Docker Engine en Linux/WSL, con Compose 2.24.4 o superior, y unos **7 GB de RAM libre**. El primer arranque descarga varios GB de imágenes (la de ERPNext/hrms ocupa 3,2 GB). Los requisitos completos, el `.wslconfig` recomendado, qué hacer tras reiniciar el PC y las trampas de Windows/WSL están en [`docs/operacion.md`](docs/operacion.md). Las cifras medidas de memoria y de arranque, en [`docs/resultados-un-host.md`](docs/resultados-un-host.md).
 
 ## Qué demuestra `verificar`
 
@@ -69,6 +64,14 @@ El último resultado y las cifras de cada pasada están en [`docs/resultados-un-
 - La matriz de firewall sobre interfaces reales.
 
 Además, la VLAN 99 es un único dominio L2 compartido por las 4 aplicaciones. `verificar` lo reporta como `INFO`, porque es un hallazgo previsto del diseño.
+
+## Documentación
+
+- [`docs/arquitectura.md`](docs/arquitectura.md): los 25 servicios por departamento, las redes y sus IP, y los flujos de LDAP, DNS y NTP.
+- [`docs/operacion.md`](docs/operacion.md): cómo arrancar, vigilar, detener y validar el sistema, y las trampas de Windows/WSL.
+- [`docs/seguridad.md`](docs/seguridad.md): la CA interna, LDAPS, las ACL y cuentas de servicio, los secretos de laboratorio y lo que un host no aísla.
+- [`docs/aplicaciones.md`](docs/aplicaciones.md): cada aplicación con su departamento, URL, usuario inicial e integración LDAP.
+- [`docs/resultados-un-host.md`](docs/resultados-un-host.md): las cifras medidas (arranque, memoria, pasadas de `verificar`) y los pendientes.
 
 ## Mapa del repositorio
 

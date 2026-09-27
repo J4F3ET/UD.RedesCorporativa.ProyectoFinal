@@ -6,3 +6,6 @@ servicios/bind9/zones/db.reservaviva.local
 
 # Salidas de levantar-sistema.sh verificar
 sistema/resultados/
+
+# Worktrees y ficheros locales de sesiones de agentes
+.claude/
