@@ -288,6 +288,19 @@ preparar() {
   preparar_imagen_openvpms
 }
 
+# "up -d" no recrea un contenedor cuya configuracion no cambio: si un arranque anterior lo dejo unhealthy (p. ej.
+# pretix-web tras migrar contra una base que aun no aceptaba conexiones), el siguiente "up -d" aborta enseguida con
+# "dependency failed to start" y el arranque no se puede retomar. Se reinician esos contenedores (sin tocar datos) para
+# que su arranque se repita; "up -d" vuelve a esperar a que queden sanos.
+reiniciar_unhealthy() {
+  local ids
+  ids="$(docker ps -q --filter "label=com.docker.compose.project=${PROYECTO}" --filter health=unhealthy)"
+  [ -n "${ids}" ] || return 0
+  paso "Reiniciando contenedores que quedaron unhealthy en un arranque anterior"
+  # shellcheck disable=SC2086
+  docker restart ${ids} | sed 's/^/    /'
+}
+
 # --- Espera a que todo este sano ------------------------------------------------------------------------------------
 
 # Estado de un contenedor en una linea: servicio|politica de reinicio|estado|codigo de salida|salud|reinicios
@@ -421,6 +434,7 @@ accion_arrancar() {
   comprobar_requisitos
   comprobar_memoria
   preparar
+  reiniciar_unhealthy
   paso "Levantando los 25 servicios (la primera vez descarga varios GB de imagenes)"
   if ! dc up -d; then
     diagnostico
