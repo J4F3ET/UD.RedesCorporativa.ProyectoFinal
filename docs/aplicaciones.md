@@ -63,6 +63,7 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 - **El administrador lo crea el script, no la imagen (H19).** La imagen de Pretix trae de fábrica un superusuario `admin@localhost` con una clave conocida. Tras el arranque, `levantar-sistema.sh` (función `crear_admin_pretix`) crea `admin@reservaviva.local` si no existe y **borra `admin@localhost`**. Si Pretix se levanta a mano con `docker compose up` sin el script, ese paso no ocurre: hay que ejecutar el script o repetirlo a mano.
 - **Primer arranque.** `pretix-web` migra la base antes de responder. Por eso `pretix-worker` y `pretix-cron` esperan a que esté `healthy`.
 - **URL de Pretix e InvenTree (H20, resuelto en `41d54ef`).** `PRETIX_PRETIX_URL` e `INVENTREE_SITE_URL` apuntaban a la IP de `inventree-app` (resto del diseño de 3 equipos), lo que hacía responder 500 (INVE-E7) a la interfaz `/web` de InvenTree, y pasaron a ser `http://localhost:<puerto>`. Como Pretix solo acepta el `Host` de esa URL (o `localhost`), hay que entrar por http://localhost:18082 y no por `127.0.0.1`, que responde 400.
+- **Aviso "unexpected origin" en el log: inofensivo y esperado.** Pretix 2026.7.0 calcula el origen esperado sin puerto (`http://localhost`, de `PRETIX_PRETIX_URL`) y lo compara con el que manda el navegador (`http://localhost:18082`). Al no coincidir, la vista de login y la vista `bad_origin_report` (`@csrf_exempt`) solo registran un `warning`; el resultado del login no depende de esa comparación, así que no lo bloquea.
 
 ## InvenTree: Logística y Almacén
 
@@ -86,6 +87,9 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 - Un usuario LDAP se crea en InvenTree en su primer login, **sin permisos**: el administrador tiene que asignárselos.
 
 **Particularidades.** `inventree-worker` espera a que `inventree-app` esté `healthy` para no competir con él por las migraciones. `INVENTREE_AUTO_UPDATE` aplica las migraciones al arrancar.
+
+- **Estáticos (H22, resuelto).** `INVENTREE_AUTO_UPDATE` solo migra: no recoge los estáticos, y la interfaz `/web` fallaba con "INVE-E1" porque `/static/web/assets/*.js` redirigía a `/web`. Ahora el `command` de `inventree-app` ejecuta `invoke static` antes de gunicorn. Detalle en [resultados-un-host.md](resultados-un-host.md).
+- **`/media` sin servir (defecto latente).** Sin `DEBUG`, nadie sirve `/media`: las imágenes de artículos y los adjuntos que se suban no se verán. Hoy solo existe `media/report` (plantillas de informes y etiquetas, que se usan en el servidor), así que no se pierde nada. Arreglarlo exige un proxy delante (un contenedor nuevo y la descarga de su imagen): pendiente de decisión del usuario.
 
 ## ERPNext (HR): Recursos Humanos
 

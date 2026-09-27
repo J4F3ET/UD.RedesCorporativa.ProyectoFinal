@@ -53,6 +53,7 @@ Ajustes que llevaron a esta cifra, sin quitar ninguna función:
 | 26/09 21:28, rápida, con la comprobación de la zona ampliada a sus 7 nombres y **antes** de corregirla | 95 PASS, 5 FAIL, 13 INFO. Cuatro FAIL de la zona (`dns`, `ntp`, `pretix` y `rrhh` no apuntaban a su contenedor: H21) y el marcador de `--rapido`. Es la prueba de que el test detecta H21 (`sistema/resultados/verificacion-20260926-212844.txt`) |
 | 26/09 21:59, completa, tras corregir la zona (H21), LDAP/DNS/NTP de las apps y las URL de Pretix e InvenTree (H20) | **99 PASS, 0 FAIL, 13 INFO, RC=0** (`sistema/resultados/verificacion-20260926-215946.txt`) |
 | 26/09 22:19, completa, con el `docker-compose.yml` único en la raíz y los ficheros en `servicios/` | **99 PASS, 0 FAIL, 13 INFO, RC=0** (`sistema/resultados/verificacion-20260926-221919.txt`). Configuración resuelta de compose igual a la de la pasada anterior salvo las rutas de origen de los montajes |
+| 26/09 22:46, completa, con H22 corregido | **99 PASS, 0 FAIL, 13 INFO, RC=0** (`sistema/resultados/verificacion-20260926-224652.txt`). Tras el `down`/`up` del caso 4, `/static` de InvenTree sigue respondiendo 200 |
 
 Desde el 26/09 21:59 hay 99 PASS y no 92: la comprobación "los nombres dns/ntp/ldap apuntan al contenedor que los sirve", que era 1 INFO, pasó a ser una comprobación por cada uno de los 7 nombres de la zona (7 PASS). De ahí también 13 INFO en vez de 14.
 
@@ -85,6 +86,8 @@ Qué cubre cada bloque (detalle en [`../sistema/verificar_arquitectura.md`](../s
 | — | Los simuladores de `diseno-red/` no se han vuelto a ejecutar tras moverlos (necesitan `nicolaka/netshoot`) | validación |
 | — | Diseño con switch L2/L3 sin probar contra hardware real | limitación conocida |
 | — | Rotar las contraseñas de laboratorio de `sistema/test.env` si el repositorio se hace público | seguridad |
+| — | InvenTree no sirve `/media` sin `DEBUG`: las imágenes de artículos y los adjuntos que se suban no se verán. Hoy solo existe `media/report`, así que no se pierde nada. Arreglarlo exige un proxy (contenedor nuevo): decisión del usuario | funcionalidad |
+| — | El login real de Pretix con `admin@reservaviva.local` en un navegador no lo ha hecho ningún agente (la clave no se puede leer desde la sesión): lo comprueba el usuario | validación |
 
 Resuelto el 26/09/2026:
 
@@ -92,3 +95,4 @@ Resuelto el 26/09/2026:
 - **H19:** el arranque de un host no creaba el administrador de Pretix y dejaba `admin@localhost` con la clave `admin`. Ahora lo hace `levantar-sistema.sh`.
 - **H20** (`41d54ef`): Pretix e InvenTree tenían como URL propia `http://10.10.30.10:<puerto>`, que es la IP de `inventree-app` en la VLAN 30 (resto del diseño de 3 equipos). Efecto medido antes del arreglo: la interfaz web de InvenTree (`http://localhost:18083/web`) respondía 500 ("INVE-E7: the visited path does not match the SITE_URL"). Pretix servía el login solo porque admite `localhost` como excepción. Ahora ambas usan `http://localhost:<puerto>`. Comprobado desde el host: `/web` de InvenTree 200; `/control/login` de Pretix 200 con token CSRF; un POST de login con credenciales inventadas se rechaza por credenciales, no por CSRF. El login real en un navegador no se ha probado en esta pasada.
 - **H21** (`4b7aadb`; la comprobación que lo detecta, `de18b7a`): la zona DNS ponía `dns`, `ntp` y `rrhh` en la IP de `openldap` y `pretix` en la de `inventree-app`. Ahora cada nombre apunta al contenedor que da ese servicio, y `verificar` lo comprueba nombre por nombre.
+- **H22** (`afabb20`): la interfaz web de InvenTree (`/web`) no cargaba ("INVE-E1"). Causa: whitenoise sirve `/static` desde `STATIC_ROOT` (`/home/inventree/data/static`, en el volumen `inventree_data`) y solo lo indexa al arrancar, pero ese directorio estaba vacío porque `INVENTREE_AUTO_UPDATE` solo migra y nunca se ejecutó `invoke static`; `/static/web/assets/*.js` respondía 302 hacia `/web`. Arreglo: el `command` de `inventree-app` ejecuta `invoke static` y después, con `exec`, el mismo CMD de la imagen (gunicorn). Comprobado desde el host: `/static/web/assets/index-C2rs8w4F.js` 200 `text/javascript`, `/static/img/favicon/favicon-32x32.png` 200, `STATIC_ROOT` con 71 MB; un segundo `arrancar` RC=0 sin recrear el contenedor, y la pasada completa de `verificar` del 26/09 22:46 en verde (también tras su `down`/`up`).

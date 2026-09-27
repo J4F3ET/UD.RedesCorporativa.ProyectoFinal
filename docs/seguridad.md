@@ -194,9 +194,9 @@ el propio equipo**, no desde la red local.
 | bind9 | 1053 (UDP y TCP) |
 | NTP | 1123/udp |
 
-Si `PUBLISH_IP` o `DNS_BIND_IP` faltaran en `test.env`, los compose actuales publican en `0.0.0.0`, es decir, en todas las
-interfaces. **No está verificado** que el compose único mantenga ese valor por defecto. En cualquier caso, no hay que
-quitar esas variables.
+Si `PUBLISH_IP` o `DNS_BIND_IP` faltaran en `test.env`, el compose publica en `0.0.0.0`, es decir, en todas las
+interfaces: todos los `ports:` del `docker-compose.yml` único usan `${PUBLISH_IP:-0.0.0.0}` o `${DNS_BIND_IP:-0.0.0.0}`.
+Por eso no hay que quitar esas variables.
 
 ### Qué aísla el sistema
 

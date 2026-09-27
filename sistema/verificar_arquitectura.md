@@ -59,7 +59,7 @@ ya local, referencia con digest) con `--pull=never`, y la de `ntp-interno`; llev
    puerto 8000) no publica nada y solo se llega a él a través de ese nginx. Comprobado con `docker inspect` el 26/09/2026.
 3. **NTP.** `chronyc tracking` dentro de `ntp-interno`, un cliente SNTP que valida modo/stratum/LI/offset, y un cliente chrony
    real (`chronyd -Q`, no toca el reloj) que debe aceptar al servidor.
-4. **Consolidación.** Invoca `ldapprobe.py`, `probe.py` y `ldaplogin.py --persistencia` (caso 4, que no se ha ejecutado nunca);
+4. **Consolidación.** Invoca `ldapprobe.py`, `probe.py` y `ldaplogin.py --persistencia` (caso 4, ya ejecutado: ver la tabla de estado);
    no los duplica.
 
 ## Cómo se lee un resultado (esto decide si la prueba vale algo)

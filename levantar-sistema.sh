@@ -4,7 +4,7 @@
 #   git clone <repo> && cd <repo> && ./levantar-sistema.sh
 #
 # En Windows se usa levantar-sistema.ps1 (o doble clic en levantar-sistema.cmd), que elige donde ejecutar este script
-# (WSL con Docker Engine, o Git Bash con Docker Desktop) y mantiene viva la sesion de WSL.
+# (Git Bash si Docker Desktop esta en marcha; si no, una distro de WSL con Docker Engine) y mantiene viva la sesion de WSL.
 #
 # Acciones:
 #   arrancar   (por defecto) prepara todo, levanta los 25 servicios y espera a que esten sanos
@@ -36,7 +36,7 @@ ENV_FILE="sistema/test.env"           # relativo a RAIZ: dc() se ejecuta siempre
 PROYECTO="reservaviva-smoke"          # "name:" de docker-compose.yml
 MARCA_SESION="reservaviva-keepalive"  # proceso que levantar-sistema.ps1 deja vivo en WSL
 
-# Coste medido: 15 de los 25 contenedores = 3.627 MiB en docker stats; el conjunto completo se estima en ~4,7-5,1 GiB.
+# Umbral de memoria para la VM de Docker. El consumo medido de los 25 contenedores esta en docs/resultados-un-host.md.
 MIN_VM_GIB=6
 
 ACCION="arrancar"
@@ -295,7 +295,7 @@ esperar_sano() {
     [ "${ok}" -eq "${n}" ] && return 0
     if [ "$(date +%s)" -ge "${limite}" ]; then
       diagnostico "${pendientes[@]%%(*}"
-      fallo "Tras ${TIMEOUT_MIN} min siguen sin estar listos: ${pendientes[*]}. Puedes esperar mas con: $0 --timeout 90"
+      fallo "Tras ${TIMEOUT_MIN} min siguen sin estar listos: ${pendientes[*]}. Puedes esperar mas con: $0 --timeout 90 (desde PowerShell: -TimeoutMin 90)"
     fi
     sleep 20
   done

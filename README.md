@@ -88,7 +88,7 @@ servicios/                          # una carpeta por servicio, con su README
   ntp/                              # Infraestructura: servidor de hora
   ca/                               # CA interna + certificado LDAPS (lo ejecuta levantar-sistema.sh)
 sistema/                            # test.env (variables y claves de laboratorio) y la verificación
-docs/                               # resultados vigentes e integración LDAP de cada aplicación
+docs/                               # arquitectura, operación, seguridad, aplicaciones, resultados vigentes e integración LDAP
 diseno-red/                         # ANEXO: diseño con switch L2/L3, VLANs 802.1Q, matriz y diagramas (no se despliega)
 plans/handoffs/                     # último traspaso de trabajo y su plan
 ```

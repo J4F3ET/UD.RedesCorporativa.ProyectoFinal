@@ -15,10 +15,12 @@ El compose es el `docker-compose.yml` de la raíz (25 servicios) y se usa **desd
 
 ```bash
 ./levantar-sistema.sh preparar                                  # CA, certificado LDAPS y zona DNS (no están en git)
-docker compose --env-file sistema/test.env up -d                # primer arranque ~10 min (migraciones)
+docker compose --env-file sistema/test.env up -d                # primer arranque: el lento (migraciones)
 docker compose --env-file sistema/test.env ps                   # estado
 docker compose --env-file sistema/test.env down -v              # BORRA todo, datos incluidos
 ```
+
+Los tiempos medidos del arranque están en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md).
 
 `preparar` genera la zona DNS (bind9 monta `servicios/bind9/zones/db.reservaviva.local`): sustituye en la plantilla cada `IP_<NOMBRE>` por la IP fija del contenedor que da ese servicio.
 
