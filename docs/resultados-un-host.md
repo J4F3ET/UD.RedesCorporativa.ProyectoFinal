@@ -61,7 +61,7 @@ En todas las pasadas válidas, `ExecMainStartTimestamp` de `docker.service` es e
 
 Qué cubre cada bloque (detalle en [`../sistema/verificar_arquitectura.md`](../sistema/verificar_arquitectura.md)):
 
-- **Prerrequisitos:** las 4 apps en su VLAN y en la 99. OpenVPMS 10.10.10.10/.99.24, Pretix .20.10/.99.21, InvenTree .30.10/.99.22, ERPNext .40.11/.99.23. OpenLDAP .99.10, DNS .99.11, NTP .99.12.
+- **Prerrequisitos:** las 4 apps en su VLAN y en la 99, y OpenLDAP, DNS y NTP en la 99, cada uno con la IP fija de [`arquitectura.md`](arquitectura.md#4-servicios).
 - **Segmentación:** controles positivos, negativos entre departamentos, y alcance de LDAP solo desde las apps dual-homed.
   - **12 de los 13 INFO** son el tráfico de una app a otra por la VLAN 99. Es un hallazgo previsto: la VLAN 99 es un único dominio L2.
 - **DNS:** registros autoritativos, NXDOMAIN, `REFUSED` para nombres externos, y solo responde a las apps dual-homed. Cada uno de los 7 nombres de la zona apunta al contenedor que da ese servicio (`rrhh` → `erpnext-hr`, el nginx de ERPNext).

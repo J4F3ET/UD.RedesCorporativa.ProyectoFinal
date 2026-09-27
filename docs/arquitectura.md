@@ -159,7 +159,7 @@ la doble conexión la tiene `erpnext-backend`, que es quien habla con OpenLDAP; 
 `vlan40_rrhh` y en `erpnext_internal`. Los contenedores auxiliares (bases de datos, Redis, workers) solo están en su red
 y no llegan a la infraestructura.
 
-OpenVPMS y Pretix no usan LDAP ([ldap-pretix-openvpms.md](ldap-pretix-openvpms.md)), pero conservan la pata en
+OpenVPMS y Pretix no usan LDAP ([ldap.md](ldap.md)), pero conservan la pata en
 `vlan99_infra` para llegar a DNS y NTP, igual que en el diseño.
 
 **Lo que un solo host no aísla:** `vlan99_infra` es un único dominio L2 compartido por las cuatro aplicaciones, así que
@@ -181,7 +181,7 @@ comprobación que lo muestra, en [`verificar_arquitectura.md`](../sistema/verifi
 
 En ERPNext, `erpnext-ldap-config` solo escribe "LDAP Settings" en la base; no se conecta a OpenLDAP y por eso no
 necesita `vlan99_infra`. Detalle y pruebas en
-[integracion-ldap-erpnext-inventree.md](integracion-ldap-erpnext-inventree.md); cuentas y ACL en
+[ldap.md](ldap.md); cuentas y ACL en
 [seguridad.md](seguridad.md#3-ldap-y-ldaps).
 
 ### Resolución de nombres: DNS de Docker frente a bind9

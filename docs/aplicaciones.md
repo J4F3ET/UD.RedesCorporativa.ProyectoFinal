@@ -32,7 +32,7 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 
 **Primera entrada.** En http://localhost:18080/openvpms, con el usuario `admin` y la clave de `OPENVPMS_ADMIN_PASSWORD`. El `entrypoint.sh` la fija en cada inicialización con `toolbox user --setpassword admin` y rechaza arrancar si no cumple la política de OpenVPMS: mínimo 8 caracteres, con mayúscula, minúscula, número y un carácter especial.
 
-**LDAP: no.** OpenVPMS 2.4.0.1 no trae soporte LDAP: sus usuarios viven en la base MySQL. Ningún usuario LDAP de prueba entra aquí, tampoco `vet.prueba`, aunque exista en `ou=medica`. La evaluación completa está en [ldap-pretix-openvpms.md](ldap-pretix-openvpms.md).
+**LDAP: no.** OpenVPMS 2.4.0.1 no trae soporte LDAP: sus usuarios viven en la base MySQL. Ningún usuario LDAP de prueba entra aquí, tampoco `vet.prueba`, aunque exista en `ou=medica`. La evaluación completa está en [ldap.md](ldap.md#6-openvpms-2401-sin-soporte-ldap).
 
 **Particularidades.**
 
@@ -56,7 +56,7 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 
 **Primera entrada.** En http://localhost:18082 (el panel de administración es `/control/`), con el correo `admin@reservaviva.local` (`PRETIX_ADMIN_EMAIL`) y la clave de `PRETIX_ADMIN_PASSWORD`.
 
-**LDAP: no.** Pretix no trae backend LDAP. El único plugin disponible es de terceros y no verifica el certificado del servidor, así que no se integró. Detalle en [ldap-pretix-openvpms.md](ldap-pretix-openvpms.md). El usuario `taquilla.prueba` existe en el directorio, pero no sirve para entrar en Pretix.
+**LDAP: no.** Pretix no trae backend LDAP. El único plugin disponible es de terceros y no verifica el certificado del servidor, así que no se integró. Detalle en [ldap.md](ldap.md#7-pretix-solo-con-un-plugin-de-terceros-que-no-verifica-tls). El usuario `taquilla.prueba` existe en el directorio, pero no sirve para entrar en Pretix.
 
 **Particularidades.**
 
@@ -79,7 +79,7 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 
 **Primera entrada.** En http://localhost:18083, con el usuario `admin` y la clave de `INVENTREE_ADMIN_PASSWORD`. InvenTree crea este superusuario al arrancar si no existe. El nombre sale de `INVENTREE_ADMIN_USER`, que `test.env` no define, así que se usa el valor por defecto del compose, `admin`.
 
-**LDAP: sí.** Autentica contra OpenLDAP por LDAPS, verificando la cadena con la CA interna, y busca a los usuarios solo en `ou=operaciones`. Detalle y pruebas en [integracion-ldap-erpnext-inventree.md](integracion-ldap-erpnext-inventree.md).
+**LDAP: sí.** Autentica contra OpenLDAP por LDAPS, verificando la cadena con la CA interna, y busca a los usuarios solo en `ou=operaciones`. Detalle y pruebas en [ldap.md](ldap.md).
 
 - Probado: `logistica.prueba` entra y `rrhh.prueba` es rechazado (otra OU).
 - `taquilla.prueba` también está en `ou=operaciones`, así que por configuración también entraría. **No verificado.**
@@ -108,7 +108,7 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 
 **Primera entrada.** En http://localhost:18081, con el usuario `Administrator` y la clave de `ERPNEXT_ADMIN_PASSWORD`. El sitio se llama `rrhh.reservaviva.local` y nginx lo sirve para cualquier nombre de host, así que `localhost` funciona.
 
-**LDAP: sí.** `erpnext-ldap-config` deja configurado "LDAP Settings" de Frappe: LDAPS con la CA interna y búsqueda solo en `ou=rrhh`. Detalle y pruebas en [integracion-ldap-erpnext-inventree.md](integracion-ldap-erpnext-inventree.md).
+**LDAP: sí.** `erpnext-ldap-config` deja configurado "LDAP Settings" de Frappe: LDAPS con la CA interna y búsqueda solo en `ou=rrhh`. Detalle y pruebas en [ldap.md](ldap.md).
 
 - Probado por la API: `rrhh.prueba` entra, y `logistica.prueba` y `vet.prueba` son rechazados.
 - La clave de `rrhh.prueba` está en [`servicios/openldap/README.md`](../servicios/openldap/README.md).
@@ -125,19 +125,10 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 
 Las cuatro aplicaciones comparten tres servicios en la VLAN 99. Cada aplicación está en la VLAN de su departamento y en la VLAN 99 para llegar a ellos. Direcciones, reglas y flujos, en [arquitectura.md](arquitectura.md). La CA y las cuentas de servicio, en [seguridad.md](seguridad.md).
 
-| Servicio | Contenedor | Carpeta | Puerto en el equipo | Uso |
-|---|---|---|---|---|
-| OpenLDAP (`osixia/openldap:1.5.0`) | `openldap` | [`servicios/openldap/`](../servicios/openldap/) | `localhost:1389` (LDAP) y `localhost:1636` (LDAPS) | Directorio `dc=reservaviva,dc=local`, una OU por departamento |
-| bind9 9.18 | `dns-interno` | [`servicios/bind9/`](../servicios/bind9/) | `localhost:1053` (UDP y TCP) | Zona autoritativa `reservaviva.local` |
-| NTP (`cturra/ntp`) | `ntp-interno` | [`servicios/ntp/`](../servicios/ntp/) | `localhost:1123/udp` | Hora de referencia local (stratum 10) |
+| Servicio | Contenedor | Carpeta | Uso |
+|---|---|---|---|
+| OpenLDAP (`osixia/openldap:1.5.0`) | `openldap` | [`servicios/openldap/`](../servicios/openldap/) | Directorio `dc=reservaviva,dc=local`, una OU por departamento |
+| bind9 9.18 | `dns-interno` | [`servicios/bind9/`](../servicios/bind9/) | Zona autoritativa `reservaviva.local` |
+| NTP (`cturra/ntp`) | `ntp-interno` | [`servicios/ntp/`](../servicios/ntp/) | Hora de referencia local (stratum 10) |
 
-Usuarios de prueba del directorio, sin sus claves:
-
-| `uid` | OU | Aplicación en la que entra |
-|---|---|---|
-| `vet.prueba` | `ou=medica` | Ninguna (OpenVPMS no usa LDAP) |
-| `logistica.prueba` | `ou=operaciones` | InvenTree |
-| `taquilla.prueba` | `ou=operaciones` | InvenTree por configuración (no verificado); Pretix no usa LDAP |
-| `rrhh.prueba` | `ou=rrhh` | ERPNext |
-
-Las aplicaciones buscan a los usuarios con la cuenta de solo lectura `cn=svc-lectura,ou=servicios`, cuya clave está en `INVENTREE_LDAP_BIND_PASSWORD` y `ERPNEXT_LDAP_BIND_PASSWORD`. Los LDIF solo se cargan con el volumen `ldap_data` vacío.
+Sus puertos en el equipo están en [arquitectura.md](arquitectura.md#7-puertos-publicados). Los usuarios de prueba del directorio y en qué aplicación entra cada uno, en [ldap.md](ldap.md#2-el-directorio).

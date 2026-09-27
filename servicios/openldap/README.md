@@ -5,7 +5,7 @@ Directorio central del zoológico, con LDAPS (636) firmado por la CA interna de 
 - **Servicio de compose:** `openldap` (imagen `osixia/openldap`).
 - **Ficheros:** `05-acl-servicio.ldif` (permisos de la cuenta de servicio), `10-estructura.ldif` (una OU por departamento)
   y `20-usuarios-prueba.ldif` (usuarios de prueba), más este README.
-- Lo usan ERPNext e InvenTree: [`../../docs/integracion-ldap-erpnext-inventree.md`](../../docs/integracion-ldap-erpnext-inventree.md).
+- Lo usan ERPNext e InvenTree: [`../../docs/ldap.md`](../../docs/ldap.md).
   Direcciones IP y puertos: [`../../docs/arquitectura.md`](../../docs/arquitectura.md).
 
 ## Bootstrap

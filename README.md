@@ -39,7 +39,7 @@ Los usuarios aparecen al terminar el arranque. Las contraseñas de laboratorio, 
 | Acción | Qué hace |
 |---|---|
 | `arrancar` (por defecto) | Prepara todo, levanta el sistema y espera a que esté sano |
-| `verificar` | Comprueba la arquitectura contra el sistema en marcha (ver abajo); tarda unos 15 min. Con `--rapido` omite la prueba de persistencia |
+| `verificar` | Comprueba la arquitectura contra el sistema en marcha (ver abajo). Con `--rapido` omite la prueba de persistencia |
 | `estado` | Estado de cada servicio y direcciones de acceso |
 | `detener` | Para los contenedores sin borrar datos |
 | `borrar` | Borra contenedores **y datos**. Pide confirmación |
@@ -70,7 +70,8 @@ Además, la VLAN 99 es un único dominio L2 compartido por las 4 aplicaciones. `
 - [`docs/arquitectura.md`](docs/arquitectura.md): los 25 servicios por departamento, las redes y sus IP, y los flujos de LDAP, DNS y NTP.
 - [`docs/operacion.md`](docs/operacion.md): cómo arrancar, vigilar, detener y validar el sistema, y las trampas de Windows/WSL.
 - [`docs/seguridad.md`](docs/seguridad.md): la CA interna, LDAPS, las ACL y cuentas de servicio, los secretos de laboratorio y lo que un host no aísla.
-- [`docs/aplicaciones.md`](docs/aplicaciones.md): cada aplicación con su departamento, URL, usuario inicial e integración LDAP.
+- [`docs/aplicaciones.md`](docs/aplicaciones.md): cada aplicación con su departamento, URL, usuario inicial y particularidades.
+- [`docs/ldap.md`](docs/ldap.md): qué aplicaciones autentican por LDAPS, cómo, qué se comprueba, y por qué Pretix y OpenVPMS no.
 - [`docs/resultados-un-host.md`](docs/resultados-un-host.md): las cifras medidas (arranque, memoria, pasadas de `verificar`) y los pendientes.
 
 ## Mapa del repositorio
@@ -88,7 +89,7 @@ servicios/                          # una carpeta por servicio, con su README
   ntp/                              # Infraestructura: servidor de hora
   ca/                               # CA interna + certificado LDAPS (lo ejecuta levantar-sistema.sh)
 sistema/                            # test.env (variables y claves de laboratorio) y la verificación
-docs/                               # arquitectura, operación, seguridad, aplicaciones, resultados vigentes e integración LDAP
+docs/                               # arquitectura, operación, seguridad, aplicaciones, LDAP y resultados vigentes
 diseno-red/                         # ANEXO: diseño con switch L2/L3, VLANs 802.1Q, matriz y diagramas (no se despliega)
 ```
 
@@ -109,8 +110,7 @@ El despliegue en 3 PCs se retiró del repositorio el 26/09/2026 para reducir la 
 
 ## Integración LDAP por aplicación
 
-- **ERPNext e InvenTree** autentican contra OpenLDAP por LDAPS con la CA interna: [`docs/integracion-ldap-erpnext-inventree.md`](docs/integracion-ldap-erpnext-inventree.md).
-- **Pretix y OpenVPMS** no se integran de forma limpia y usan administradores locales. Es una limitación documentada: [`docs/ldap-pretix-openvpms.md`](docs/ldap-pretix-openvpms.md).
+**ERPNext e InvenTree** autentican contra OpenLDAP por LDAPS con la CA interna. **Pretix y OpenVPMS** no se integran de forma limpia y usan administradores locales: es una limitación documentada. Detalle en [`docs/ldap.md`](docs/ldap.md).
 
 ## Pendientes
 
