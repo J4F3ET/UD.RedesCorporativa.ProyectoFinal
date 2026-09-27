@@ -385,7 +385,7 @@ services:
     networks:
       vlan99_infra:
         ipv4_address: ${NET_INFRA:-10.10.99}.10
-    # Publicados en la LAN para PC-1 y PC-2 (extra_hosts de sus contenedores apunta a IP_PC3:636).
+    # Publicados en PUBLISH_IP para las herramientas del host (ldapsearch...). Las apps llegan por vlan99_infra (extra_hosts).
     ports:
       - "${PUBLISH_IP:-0.0.0.0}:${LDAP_PORT:-389}:389"
       - "${PUBLISH_IP:-0.0.0.0}:${LDAPS_PORT:-636}:636"

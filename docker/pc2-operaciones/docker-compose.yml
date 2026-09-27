@@ -217,10 +217,10 @@ services:
       INVENTREE_LDAP_SEARCH_BASE_DN: ou=operaciones,dc=reservaviva,dc=local
       # El valor por defecto de la imagen es "(uid= %(user)s)" (con espacio) y no encuentra a nadie.
       INVENTREE_LDAP_SEARCH_FILTER_STR: (uid=%(user)s)
-    # ldap.reservaviva.local lo resuelve ESTA línea, no bind9 (los contenedores usan el DNS de Docker). Apunta a la IP LAN
-    # de PC-3, donde openldap publica 636; el nombre coincide con el certificado de OpenLDAP (SAN).
+    # ldap.reservaviva.local lo resuelve ESTA línea, no bind9 (los contenedores usan el DNS de Docker). Apunta a openldap
+    # en vlan99_infra, a la que inventree-app tambien esta conectada; el nombre coincide con el certificado de OpenLDAP (SAN).
     extra_hosts:
-      - "ldap.reservaviva.local:${IP_PC3:?definir IP_PC3 (IP LAN de PC-3) en .env}"
+      - "ldap.reservaviva.local:${NET_INFRA:-10.10.99}.10"
     # Host = IP_PC2, como INVENTREE_SITE_URL: hoy InvenTree tambien acepta 127.0.0.1, pero depender de esa tolerancia
     # es el mismo defecto latente que tuvo Pretix.
     healthcheck:

@@ -96,11 +96,11 @@ services:
       # con el arnés completo, y los ~800 MiB de consumo son una estimación. NO VERIFICADO en un arranque real: que el
       # primer arranque de OpenVPMS quepa en 768m de heap (y el efecto sobre los ~5 min medidos).
       CATALINA_OPTS: "-Xms128m -Xmx768m"
-      # Variables informativas: OpenVPMS 2.4.0.1 no tiene soporte LDAP y nada en el repo las lee. OpenLDAP, bind9 y
-      # ntp viven en PC-3 (389/636, 53 y 123/udp publicados en su IP LAN); las tres se alcanzan por IP_PC3.
-      LDAP_HOST: ${IP_PC3:?definir IP_PC3 (IP LAN de PC-3) en .env}
-      DNS_HOST: ${IP_PC3}
-      NTP_HOST: ${IP_PC3}
+      # Variables informativas: OpenVPMS 2.4.0.1 no tiene soporte LDAP y nada en el repo las lee. Son las IP de
+      # openldap, dns-interno y ntp-interno en vlan99_infra, a la que openvpms-app tambien esta conectada.
+      LDAP_HOST: ${NET_INFRA:-10.10.99}.10
+      DNS_HOST: ${NET_INFRA:-10.10.99}.11
+      NTP_HOST: ${NET_INFRA:-10.10.99}.12
     volumes:
       - openvpms_state:/var/lib/openvpms-state   # openvpms.properties (incluye la clave de cifrado)
     networks:
