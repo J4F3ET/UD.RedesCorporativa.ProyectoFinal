@@ -455,6 +455,9 @@ reiniciar_dns_si_zona_nueva() {
 # certificado, los workers de gunicorn de InvenTree siguieron rechazando el login LDAP (401, sin ningun error en el log)
 # hasta reiniciar inventree-app, mientras un proceso nuevo dentro del mismo contenedor autenticaba bien: queda estado de
 # TLS/LDAP por proceso. La causa exacta no se identifico; reiniciar es barato y solo ocurre cuando cambia el certificado.
+# Tras erpnext-backend se reinicia tambien erpnext-hr: su nginx resuelve la IP del backend solo al arrancar, y el
+# backend puede volver con otra IP en erpnext_internal (red sin IP fija). Medido el 27/09/2026: el backend paso de
+# 10.201.0.10 a 10.201.0.9, erpnext-hr siguio llamando a la vieja ("No route to host") y rrhh respondia 502.
 recrear_ldap_si_cert_nuevo() {
   local creado t_ldap t_cert c
   creado="$(docker inspect --format '{{.Created}}' openldap 2>/dev/null)" || return 0
@@ -463,7 +466,7 @@ recrear_ldap_si_cert_nuevo() {
   if [ "${t_cert}" -gt "${t_ldap}" ]; then
     paso "El certificado de OpenLDAP es mas nuevo que el contenedor openldap: se recrea para que lo cargue (datos conservados)"
     dc up -d --no-deps --force-recreate openldap
-    for c in inventree-app erpnext-backend; do
+    for c in inventree-app erpnext-backend erpnext-hr; do
       [ "$(docker inspect --format '{{.State.Running}}' "${c}" 2>/dev/null)" = "true" ] && dc restart "${c}"
     done
   fi
