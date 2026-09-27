@@ -1,6 +1,6 @@
 ; PLANTILLA de la zona reservaviva.local. NO se monta tal cual: levantar-sistema.sh (generar_zona) la convierte en
-; db.reservaviva.local sustituyendo ${IP_PC1}, ${IP_PC2} e ${IP_PC3} por las IP de los contenedores del arnés
-; y fija el serial. db.reservaviva.local esta en .gitignore. Editar SOLO esta plantilla.
+; db.reservaviva.local sustituyendo cada marcador IP_<NOMBRE> por la IP fija del contenedor que da ese servicio en el
+; sistema de un host, y SERIAL por la fecha. db.reservaviva.local esta en .gitignore. Editar SOLO esta plantilla.
 $TTL 300
 @       IN SOA  dns.reservaviva.local. admin.reservaviva.local. (
                 ${SERIAL} ; serial
@@ -10,18 +10,19 @@ $TTL 300
                 300 )      ; negative TTL
         IN NS   dns.reservaviva.local.
 
-; --- PC-3: infraestructura (OpenLDAP, bind9, NTP) ---
-dns         IN A ${IP_PC3}
-ldap        IN A ${IP_PC3}
-ntp         IN A ${IP_PC3}
+; --- Infraestructura (vlan99): openldap, dns-interno (bind9), ntp-interno ---
+dns         IN A ${IP_DNS}
+ldap        IN A ${IP_LDAP}
+ntp         IN A ${IP_NTP}
 
-; --- PC-1: Medica ---
-openvpms    IN A ${IP_PC1}
+; --- Medica (vlan10): openvpms-app ---
+openvpms    IN A ${IP_OPENVPMS}
 
-; --- PC-2: Taquilla e Inventario ---
-pretix      IN A ${IP_PC2}
+; --- Taquilla (vlan20): pretix-web ---
+pretix      IN A ${IP_PRETIX}
 
-inventree   IN A ${IP_PC2}
+; --- Logistica (vlan30): inventree-app ---
+inventree   IN A ${IP_INVENTREE}
 
-; --- PC-3: RRHH (ERPNext) ---
-rrhh        IN A ${IP_PC3}
+; --- RRHH (vlan40): erpnext-hr, el nginx de ERPNext que atiende a los usuarios ---
+rrhh        IN A ${IP_RRHH}

@@ -81,8 +81,9 @@ Un destino inalcanzable y un nombre que no resuelve dan resultados parecidos y s
 - **`vlan99_infra` es un único dominio L2 compartido por las 4 apps.** Aunque los departamentos estén aislados, una app dual-homed
   probablemente alcance a otra por su IP de infraestructura. Lo limita en el laboratorio real la matriz de firewall de PC-3,
   no el bridge. El guion lo marca `INFO`, con la salida literal.
-- **La zona apunta `dns` y `ntp` a `10.10.99.10`**, la IP de `openldap`, no a `dns-interno` (.11) ni `ntp-interno` (.12). En el
-  laboratorio real un PC-3 con una sola IP aloja los tres servicios y es correcto; en el arnés de un host es una discrepancia.
+- **H21 (resuelto el 26/09/2026): la zona ya no hereda las IP del diseño de 3 equipos.** Antes ponía `dns`, `ntp` y `rrhh` en
+  `10.10.99.10` (la IP de `openldap`) y `pretix` en `10.10.30.10` (la de `inventree-app`). La prueba en rojo, antes del arreglo,
+  dio FAIL en esos cuatro nombres. Ahora `levantar-sistema.sh` sustituye un marcador por nombre y los 7 deben dar PASS.
 - **H11**: `/opt/startup.sh` de la imagen NTP escribe `server 127.127.1.1` **y** `local stratum 10`. `127.127.1.1` es notación de
   ntpd para el reloj local; chrony lo trata como un servidor normal e inalcanzable. Lo que sirve hora es `local stratum 10`,
   así que el stratum publicado debe ser 10. El guion lo comprueba (`chronyc tracking`) y muestra `chronyc sources`.

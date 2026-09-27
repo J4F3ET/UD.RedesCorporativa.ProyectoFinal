@@ -139,16 +139,45 @@ generar_zona() {
   local dir="${RAIZ}/docker/pc3-administracion-infra/bind/zones"
   local tpl="${dir}/db.reservaviva.local.tpl" out="${dir}/db.reservaviva.local"
   [ -f "${tpl}" ] || fallo "Falta la plantilla ${tpl}"
-  # IP de los contenedores en el sistema de un host (sistema/README.md).
-  local ip1=10.10.10.10 ip2=10.10.30.10 ip3=10.10.99.10 serial
+  # Cada nombre apunta al contenedor que da ese servicio, con la misma IP fija que le da el compose (mismas subredes
+  # NET_* y mismos valores por defecto). rrhh es erpnext-hr, el nginx de ERPNext: el que atiende HTTP a los usuarios.
+  local infra medica taquilla logistica rrhh serial
+  infra="$(valor_env NET_INFRA 10.10.99)";         medica="$(valor_env NET_MEDICA 10.10.10)"
+  taquilla="$(valor_env NET_TAQUILLA 10.10.20)";   logistica="$(valor_env NET_LOGISTICA 10.10.30)"
+  rrhh="$(valor_env NET_RRHH 10.10.40)"
+  local ip_ldap="${infra}.10" ip_dns="${infra}.11" ip_ntp="${infra}.12" ip_openvpms="${medica}.10" \
+        ip_pretix="${taquilla}.10" ip_inventree="${logistica}.10" ip_rrhh="${rrhh}.10"
   serial="$(date +%Y%m%d%H)"
-  tr -d '\r' <"${tpl}" | sed -e "s/\${IP_PC1}/${ip1}/g" -e "s/\${IP_PC2}/${ip2}/g" \
-                             -e "s/\${IP_PC3}/${ip3}/g" -e "s/\${SERIAL}/${serial}/g" >"${out}.tmp"
+  tr -d '\r' <"${tpl}" | sed -e "s/\${IP_DNS}/${ip_dns}/g" -e "s/\${IP_LDAP}/${ip_ldap}/g" \
+                             -e "s/\${IP_NTP}/${ip_ntp}/g" -e "s/\${IP_OPENVPMS}/${ip_openvpms}/g" \
+                             -e "s/\${IP_PRETIX}/${ip_pretix}/g" -e "s/\${IP_INVENTREE}/${ip_inventree}/g" \
+                             -e "s/\${IP_RRHH}/${ip_rrhh}/g" -e "s/\${SERIAL}/${serial}/g" >"${out}.tmp"
   if grep -q '\${[A-Z0-9_]*}' "${out}.tmp"; then
     rm -f "${out}.tmp"; fallo "Quedan marcadores sin sustituir en la plantilla de zona."
   fi
-  mv -f "${out}.tmp" "${out}"
-  info "Generada (openvpms=${ip1} pretix/inventree=${ip2} dns/ldap/ntp/rrhh=${ip3}, serial ${serial})"
+  # Si solo cambia el serial se conserva el fichero anterior: asi su fecha dice cuando cambio la zona de verdad, y
+  # reiniciar_dns_si_zona_nueva solo reinicia bind9 cuando hace falta.
+  if [ -f "${out}" ] && diff -q <(grep -v '; serial$' "${out}") <(grep -v '; serial$' "${out}.tmp") >/dev/null; then
+    rm -f "${out}.tmp"
+    info "Sin cambios (dns=${ip_dns} ldap=${ip_ldap} ntp=${ip_ntp} openvpms=${ip_openvpms} pretix=${ip_pretix}"
+  else
+    mv -f "${out}.tmp" "${out}"
+    info "Generada (dns=${ip_dns} ldap=${ip_ldap} ntp=${ip_ntp} openvpms=${ip_openvpms} pretix=${ip_pretix}"
+  fi
+  info "          inventree=${ip_inventree} rrhh=${ip_rrhh})"
+}
+
+# bind9 lee la zona al arrancar y no vigila el fichero. Si la zona es mas nueva que el arranque de dns-interno (p. ej.
+# tras cambiar la plantilla), se reinicia solo ese contenedor: unos segundos, sin tocar datos.
+reiniciar_dns_si_zona_nueva() {
+  local zona="${RAIZ}/docker/pc3-administracion-infra/bind/zones/db.reservaviva.local" inicio t_zona t_dns
+  inicio="$(docker inspect --format '{{.State.StartedAt}}' dns-interno 2>/dev/null)" || return 0
+  t_dns="$(date -d "${inicio}" +%s 2>/dev/null)" || return 0
+  t_zona="$(stat -c %Y "${zona}" 2>/dev/null)" || return 0
+  if [ "${t_zona}" -gt "${t_dns}" ]; then
+    paso "La zona DNS cambio despues de arrancar dns-interno: se reinicia para que bind9 la lea"
+    dc restart dns
+  fi
 }
 
 validar_compose() {
@@ -330,6 +359,7 @@ accion_arrancar() {
     diagnostico
     fallo "docker compose up fallo. Volver a ejecutar el script es seguro: retoma donde quedo."
   fi
+  reiniciar_dns_si_zona_nueva
   esperar_sano
   crear_admin_pretix
   paso "Sistema en marcha: los 25 servicios estan sanos"

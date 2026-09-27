@@ -6,7 +6,7 @@ Usa `include:` de `docker/pc{1,2,3}-*/docker-compose.yml` (agrupados por departa
 como bridge con la subred de su VLAN y da a cada app su IP fija en `vlan99_infra`. Son 25 servicios. Contraseñas de prueba en `test.env` (desechables).
 
 Antes del primer `up`, genera la zona DNS (bind9 monta `db.reservaviva.local`, que sale de una plantilla y no esta en git):
-`../levantar-sistema.sh preparar` (sustituye en la plantilla IP_PC1=10.10.10.10, IP_PC2=10.10.30.10 e IP_PC3=10.10.99.10)
+`../levantar-sistema.sh preparar` (sustituye en la plantilla cada `IP_<NOMBRE>` por la IP fija del contenedor que da ese servicio)
 
 ```bash
 docker compose pull && docker compose up -d      # primer arranque ~10 min (migraciones)
