@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# levantar-sistema.sh - Levanta la arquitectura completa de Reserva Viva (los 3 PCs, 25 servicios) en UN solo host.
+# levantar-sistema.sh - Levanta la arquitectura completa de Reserva Viva (25 servicios) en UN solo host.
 #
 #   git clone <repo> && cd <repo> && ./levantar-sistema.sh
 #
 # En Windows se usa levantar-sistema.ps1 (o doble clic en levantar-sistema.cmd), que elige donde ejecutar este script
-# (WSL con Docker Engine, o Git Bash con Docker Desktop) y mantiene viva la sesion de WSL.
+# (Git Bash si Docker Desktop esta en marcha; si no, una distro de WSL con Docker Engine) y mantiene viva la sesion de WSL.
 #
 # Acciones:
 #   arrancar   (por defecto) prepara todo, levanta los 25 servicios y espera a que esten sanos
@@ -22,20 +22,21 @@
 # Es idempotente: se puede ejecutar las veces que haga falta. Si un arranque se interrumpe, volver a ejecutarlo
 # retoma donde quedo (la inicializacion de OpenVPMS y la creacion del sitio de ERPNext son reanudables).
 #
-# Usa el arnes de sistema/: los docker-compose.yml reales de los tres PCs, con cada VLAN convertida en
-# un bridge de Docker con su misma subred. Contrasenas de laboratorio (desechables) en sistema/test.env.
+# Usa el docker-compose.yml de la raiz (unico; servicios agrupados por departamento, con cada VLAN como un bridge de
+# Docker con su misma subred) y los ficheros de cada servicio en servicios/. Todo "docker compose" se ejecuta desde la
+# raiz con --env-file sistema/test.env (contrasenas de laboratorio, desechables).
 #
 # Solo ASCII a proposito: la salida se ve igual en cualquier consola de Windows.
 
 set -euo pipefail
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ARNES="${RAIZ}/sistema"
-ENV_FILE="test.env"
-PROYECTO="reservaviva-smoke"          # "name:" de sistema/docker-compose.yml
+ARNES="${RAIZ}/sistema"               # test.env, verificar_arquitectura.py y sus informes
+ENV_FILE="sistema/test.env"           # relativo a RAIZ: dc() se ejecuta siempre desde la raiz
+PROYECTO="reservaviva-smoke"          # "name:" de docker-compose.yml
 MARCA_SESION="reservaviva-keepalive"  # proceso que levantar-sistema.ps1 deja vivo en WSL
 
-# Coste medido: 15 de los 25 contenedores = 3.627 MiB en docker stats; el conjunto completo se estima en ~4,7-5,1 GiB.
+# Umbral de memoria para la VM de Docker. El consumo medido de los 25 contenedores esta en docs/resultados-un-host.md.
 MIN_VM_GIB=6
 
 ACCION="arrancar"
@@ -66,12 +67,13 @@ info()  { printf '    %s\n' "$*"; }
 aviso() { printf '    AVISO: %s\n' "$*" >&2; }
 fallo() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 
-dc() { docker compose --env-file "${ENV_FILE}" "$@"; }
+# Siempre desde la raiz del repositorio (donde esta docker-compose.yml), sea cual sea el directorio actual.
+dc() { (cd "${RAIZ}" && docker compose --env-file "${ENV_FILE}" "$@"); }
 
 # Lee una clave de test.env sin ejecutarlo (tiene contrasenas con caracteres arbitrarios).
 valor_env() {
   local v
-  v="$(grep -E "^$1=" "${ARNES}/${ENV_FILE}" | tail -n 1 | cut -d= -f2- | tr -d '\r')"
+  v="$(grep -E "^$1=" "${RAIZ}/${ENV_FILE}" | tail -n 1 | cut -d= -f2- | tr -d '\r')"
   printf '%s' "${v:-$2}"
 }
 
@@ -89,13 +91,14 @@ comprobar_requisitos() {
   docker info >/dev/null 2>&1 || fallo "Docker no responde. Arranca Docker Desktop, o en Linux/WSL: sudo systemctl start docker"
   docker compose version >/dev/null 2>&1 || fallo "Falta el plugin 'docker compose' (v2)."
 
-  # Los overrides del arnes usan la etiqueta YAML "!override", que existe desde Compose 2.24.4.
+  # Minimo heredado: los antiguos overrides usaban "!override" (Compose 2.24.4). El compose unico ya no lo usa, pero no
+  # se ha probado con versiones anteriores, asi que se sigue exigiendo.
   local ver may min par
   ver="$(docker compose version --short 2>/dev/null | sed 's/^v//')"
   IFS=. read -r may min par <<<"${ver}"
   may="${may:-0}"; min="${min:-0}"; par="${par%%[!0-9]*}"; par="${par:-0}"
   if [ "${may}" -lt 2 ] || { [ "${may}" -eq 2 ] && { [ "${min}" -lt 24 ] || { [ "${min}" -eq 24 ] && [ "${par}" -lt 4 ]; }; }; }; then
-    fallo "Docker Compose ${ver} es demasiado antiguo: hace falta 2.24.4 o superior (por '!override'). Actualiza Docker."
+    fallo "Docker Compose ${ver} es demasiado antiguo: hace falta 2.24.4 o superior. Actualiza Docker."
   fi
   command -v openssl >/dev/null || fallo "Falta openssl (genera la CA y el certificado LDAPS). En Ubuntu/WSL: sudo apt install openssl"
   info "Docker $(docker version --format '{{.Server.Version}}' 2>/dev/null) ($(sistema_docker)), Compose ${ver}"
@@ -131,28 +134,64 @@ comprobar_memoria() {
 preparar_certificados() {
   paso "Certificados LDAPS (CA interna + OpenLDAP)"
   # Idempotente: si existen, son validos y cubren las direcciones, no toca nada. No instala la CA en el host.
-  bash "${RAIZ}/scripts/generar-certificados.sh" --sin-instalar-ca | sed 's/^/    /'
+  bash "${RAIZ}/servicios/ca/generar-certificados.sh" --sin-instalar-ca | sed 's/^/    /'
+  # Si falta un fichero de un bind mount, Docker crea un DIRECTORIO vacio en su lugar y LDAPS falla sin avisar.
+  local f
+  for f in ca.crt ldap.crt ldap.key; do
+    if [ ! -f "${RAIZ}/servicios/ca/certs/${f}" ] || [ ! -s "${RAIZ}/servicios/ca/certs/${f}" ]; then
+      fallo "Falta servicios/ca/certs/${f} (o esta vacio): openldap, inventree-app y erpnext-backend lo montan. Revisa la salida de servicios/ca/generar-certificados.sh."
+    fi
+  done
 }
 
 generar_zona() {
   paso "Zona DNS reservaviva.local"
-  local dir="${RAIZ}/docker/pc3-administracion-infra/bind/zones"
+  local dir="${RAIZ}/servicios/bind9/zones"
   local tpl="${dir}/db.reservaviva.local.tpl" out="${dir}/db.reservaviva.local"
   [ -f "${tpl}" ] || fallo "Falta la plantilla ${tpl}"
-  # Mismas IP que usa el arnes (sistema/README.md).
-  local ip1=10.10.10.10 ip2=10.10.30.10 ip3=10.10.99.10 serial
+  # Cada nombre apunta al contenedor que da ese servicio, con la misma IP fija que le da el compose (mismas subredes
+  # NET_* y mismos valores por defecto). rrhh es erpnext-hr, el nginx de ERPNext: el que atiende HTTP a los usuarios.
+  local infra medica taquilla logistica rrhh serial
+  infra="$(valor_env NET_INFRA 10.10.99)";         medica="$(valor_env NET_MEDICA 10.10.10)"
+  taquilla="$(valor_env NET_TAQUILLA 10.10.20)";   logistica="$(valor_env NET_LOGISTICA 10.10.30)"
+  rrhh="$(valor_env NET_RRHH 10.10.40)"
+  local ip_ldap="${infra}.10" ip_dns="${infra}.11" ip_ntp="${infra}.12" ip_openvpms="${medica}.10" \
+        ip_pretix="${taquilla}.10" ip_inventree="${logistica}.10" ip_rrhh="${rrhh}.10"
   serial="$(date +%Y%m%d%H)"
-  tr -d '\r' <"${tpl}" | sed -e "s/\${IP_PC1}/${ip1}/g" -e "s/\${IP_PC2}/${ip2}/g" \
-                             -e "s/\${IP_PC3}/${ip3}/g" -e "s/\${SERIAL}/${serial}/g" >"${out}.tmp"
+  tr -d '\r' <"${tpl}" | sed -e "s/\${IP_DNS}/${ip_dns}/g" -e "s/\${IP_LDAP}/${ip_ldap}/g" \
+                             -e "s/\${IP_NTP}/${ip_ntp}/g" -e "s/\${IP_OPENVPMS}/${ip_openvpms}/g" \
+                             -e "s/\${IP_PRETIX}/${ip_pretix}/g" -e "s/\${IP_INVENTREE}/${ip_inventree}/g" \
+                             -e "s/\${IP_RRHH}/${ip_rrhh}/g" -e "s/\${SERIAL}/${serial}/g" >"${out}.tmp"
   if grep -q '\${[A-Z0-9_]*}' "${out}.tmp"; then
     rm -f "${out}.tmp"; fallo "Quedan marcadores sin sustituir en la plantilla de zona."
   fi
-  mv -f "${out}.tmp" "${out}"
-  info "Generada (PC-1=${ip1} PC-2=${ip2} PC-3=${ip3}, serial ${serial})"
+  # Si solo cambia el serial se conserva el fichero anterior: asi su fecha dice cuando cambio la zona de verdad, y
+  # reiniciar_dns_si_zona_nueva solo reinicia bind9 cuando hace falta.
+  if [ -f "${out}" ] && diff -q <(grep -v '; serial$' "${out}") <(grep -v '; serial$' "${out}.tmp") >/dev/null; then
+    rm -f "${out}.tmp"
+    info "Sin cambios (dns=${ip_dns} ldap=${ip_ldap} ntp=${ip_ntp} openvpms=${ip_openvpms} pretix=${ip_pretix}"
+  else
+    mv -f "${out}.tmp" "${out}"
+    info "Generada (dns=${ip_dns} ldap=${ip_ldap} ntp=${ip_ntp} openvpms=${ip_openvpms} pretix=${ip_pretix}"
+  fi
+  info "          inventree=${ip_inventree} rrhh=${ip_rrhh})"
+}
+
+# bind9 lee la zona al arrancar y no vigila el fichero. Si la zona es mas nueva que el arranque de dns-interno (p. ej.
+# tras cambiar la plantilla), se reinicia solo ese contenedor: unos segundos, sin tocar datos.
+reiniciar_dns_si_zona_nueva() {
+  local zona="${RAIZ}/servicios/bind9/zones/db.reservaviva.local" inicio t_zona t_dns
+  inicio="$(docker inspect --format '{{.State.StartedAt}}' dns-interno 2>/dev/null)" || return 0
+  t_dns="$(date -d "${inicio}" +%s 2>/dev/null)" || return 0
+  t_zona="$(stat -c %Y "${zona}" 2>/dev/null)" || return 0
+  if [ "${t_zona}" -gt "${t_dns}" ]; then
+    paso "La zona DNS cambio despues de arrancar dns-interno: se reinicia para que bind9 la lea"
+    dc restart dns
+  fi
 }
 
 validar_compose() {
-  paso "Validando la configuracion de los 3 compose"
+  paso "Validando la configuracion de compose"
   dc config -q || fallo "docker compose config fallo: la configuracion no es valida."
   info "$(dc config --services | grep -c .) servicios definidos"
 }
@@ -175,7 +214,7 @@ preparar_imagen_openvpms() {
   cid="$(docker create "${img}")"
   for f in entrypoint.sh init-lib.sh; do
     if ! MSYS2_ARG_CONV_EXCL='*' docker cp "${cid}:/${f}" - 2>/dev/null | tar -xO 2>/dev/null \
-         | cmp -s - "${RAIZ}/docker/pc1-medica/openvpms/${f}"; then
+         | cmp -s - "${RAIZ}/servicios/openvpms/${f}"; then
       distinto=true
     fi
   done
@@ -185,7 +224,7 @@ preparar_imagen_openvpms() {
 }
 
 preparar() {
-  cd "${ARNES}"
+  cd "${RAIZ}"
   preparar_certificados
   generar_zona
   validar_compose
@@ -256,7 +295,7 @@ esperar_sano() {
     [ "${ok}" -eq "${n}" ] && return 0
     if [ "$(date +%s)" -ge "${limite}" ]; then
       diagnostico "${pendientes[@]%%(*}"
-      fallo "Tras ${TIMEOUT_MIN} min siguen sin estar listos: ${pendientes[*]}. Puedes esperar mas con: $0 --timeout 90"
+      fallo "Tras ${TIMEOUT_MIN} min siguen sin estar listos: ${pendientes[*]}. Puedes esperar mas con: $0 --timeout 90 (desde PowerShell: -TimeoutMin 90)"
     fi
     sleep 20
   done
@@ -264,7 +303,7 @@ esperar_sano() {
 
 # Pretix no crea su administrador por variables de entorno: trae admin@localhost con clave "admin". Se crea el de
 # test.env (PRETIX_ADMIN_EMAIL / PRETIX_ADMIN_PASSWORD) y se borra admin@localhost. Idempotente. Antes lo hacia
-# init_admins en docker/pc2-operaciones/deploy.sh (despliegue en 3 PCs, retirado). La clave va por el entorno de
+# init_admins en el deploy.sh del despliegue en 3 equipos (retirado en 95e0da4). La clave va por el entorno de
 # docker exec, no por la linea de comandos.
 crear_admin_pretix() {
   paso "Administrador de Pretix"
@@ -305,11 +344,11 @@ accesos() {
   cat <<EOF
 
     Accesos (solo desde este equipo):
-      PC-1 Medica        OpenVPMS   http://localhost:${p1}/openvpms     usuario: admin
-      PC-2 Taquilla      Pretix     http://localhost:${p3}              usuario: $(valor_env PRETIX_ADMIN_EMAIL admin@reservaviva.local)
-      PC-2 Logistica     InvenTree  http://localhost:${p4}              usuario: $(valor_env INVENTREE_ADMIN_USER admin)
-      PC-3 RRHH          ERPNext    http://localhost:${p2}              usuario: Administrator
-      PC-3 Infra         LDAP localhost:${ldap}  LDAPS localhost:${ldaps}  DNS localhost:${dns}  NTP localhost:${ntp}/udp
+      Medica             OpenVPMS   http://localhost:${p1}/openvpms     usuario: admin
+      Taquilla           Pretix     http://localhost:${p3}              usuario: $(valor_env PRETIX_ADMIN_EMAIL admin@reservaviva.local)
+      Logistica          InvenTree  http://localhost:${p4}              usuario: $(valor_env INVENTREE_ADMIN_USER admin)
+      RRHH               ERPNext    http://localhost:${p2}              usuario: Administrator
+      Infra              LDAP localhost:${ldap}  LDAPS localhost:${ldaps}  DNS localhost:${dns}  NTP localhost:${ntp}/udp
     Contrasenas de laboratorio (desechables): sistema/test.env
 EOF
 }
@@ -330,6 +369,7 @@ accion_arrancar() {
     diagnostico
     fallo "docker compose up fallo. Volver a ejecutar el script es seguro: retoma donde quedo."
   fi
+  reiniciar_dns_si_zona_nueva
   esperar_sano
   crear_admin_pretix
   paso "Sistema en marcha: los 25 servicios estan sanos"
@@ -346,7 +386,7 @@ accion_preparar() {
 }
 
 accion_estado() {
-  cd "${ARNES}"
+  cd "${RAIZ}"
   docker info >/dev/null 2>&1 || fallo "Docker no responde."
   paso "Estado de los servicios"
   dc ps -a --format 'table {{.Service}}\t{{.State}}\t{{.Status}}'
@@ -372,14 +412,14 @@ accion_verificar() {
 }
 
 accion_detener() {
-  cd "${ARNES}"
+  cd "${RAIZ}"
   paso "Deteniendo los contenedores (no se borra nada)"
   dc stop
   info "Detenidos. Para volver a levantarlos: $0 arrancar"
 }
 
 accion_borrar() {
-  cd "${ARNES}"
+  cd "${RAIZ}"
   if ! ${SI}; then
     printf '\nEsto BORRA los contenedores y TODOS los datos (bases de datos, sitio de ERPNext, directorio LDAP).\n'
     printf 'El siguiente arranque volvera a inicializarlo todo (~30 min). Escribe "borrar" para confirmar: '

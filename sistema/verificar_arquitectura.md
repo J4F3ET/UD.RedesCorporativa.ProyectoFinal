@@ -1,12 +1,12 @@
 # Verificación de la arquitectura en un host (`verificar_arquitectura.py`)
 
 Objetivo: demostrar que la topología diseñada **se comporta como está diseñada**, no solo que los contenedores arrancan.
-Estado: **ejecutado contra el sistema completo** el 26/09/2026 con `levantar-sistema.sh verificar`: 92 PASS, 0 FAIL (cifras en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md)).
+Estado: **ejecutado contra el sistema completo** con `levantar-sistema.sh verificar`. Las cifras de cada pasada están en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md).
 
 ## La topología que se prueba
 
-Los `override-pc*.yml` convierten cada VLAN en un bridge de Docker **con su misma subred**, y las cuatro apps se conectan
-además a `vlan99_infra` con IP fija:
+El [`docker-compose.yml`](../docker-compose.yml) de la raíz convierte cada VLAN en un bridge de Docker **con su misma subred**, y las
+cuatro apps se conectan además a `vlan99_infra` con IP fija:
 
 | App | VLAN de departamento | vlan99_infra | Puerto sondeado |
 |---|---|---|---|
@@ -20,7 +20,9 @@ esa es la segmentación que se pone a prueba.
 
 ## Cómo se ejecuta
 
-Con el arnés arriba y sano, **dentro de WSL** (igual que `ldaplogin.py`; el `docker` de Windows es un `.cmd`):
+Lo normal es `./levantar-sistema.sh verificar` (o `.\levantar-sistema.ps1 verificar`), que guarda el informe en `resultados/`.
+A mano, con el sistema arriba y sano, desde esta carpeta y **dentro de WSL** (igual que `ldaplogin.py`; el `docker` de Windows
+es un `.cmd`). El caso 4 de `ldaplogin.py` ejecuta `docker compose --env-file sistema/test.env down` / `up -d` desde la raíz:
 
 ```bash
 python3 verificar_arquitectura.py --informe salida.txt      # todo, incluido ldaplogin.py --persistencia
@@ -38,11 +40,26 @@ ya local, referencia con digest) con `--pull=never`, y la de `ntp-interno`; llev
 1. **Segmentación (prueba negativa).** Un cliente efímero *solo* en una VLAN de departamento no alcanza otro departamento
    ni `vlan99_infra`; un cliente con la pila de red de la app (`--network container:<app>`, dual-homed) **sí** alcanza
    `openldap:389/636` y **no** otros departamentos.
-2. **DNS.** Se consulta a `10.10.99.11` de verdad: cada registro de `bind/zones/db.reservaviva.local` (autoritativo, igual que la
-   zona), un nombre inexistente (NXDOMAIN) y `example.com` (REFUSED: sin recursión).
+2. **DNS.** Se consulta a `10.10.99.11` de verdad: cada registro de `servicios/bind9/zones/db.reservaviva.local` (autoritativo, igual que la
+   zona), un nombre inexistente (NXDOMAIN) y `example.com` (REFUSED: sin recursión). Además, cada uno de los 7 nombres de la
+   zona debe apuntar a la IP real (`docker inspect`) del contenedor que da ese servicio; si no, es **FAIL**:
+
+   | Nombre | Contenedor | Red en la que se toma su IP |
+   |---|---|---|
+   | `dns` | `dns-interno` | vlan99 |
+   | `ldap` | `openldap` | vlan99 |
+   | `ntp` | `ntp-interno` | vlan99 |
+   | `openvpms` | `openvpms-app` | vlan10 |
+   | `pretix` | `pretix-web` | vlan20 |
+   | `inventree` | `inventree-app` | vlan30 |
+   | `rrhh` | `erpnext-hr` | vlan40 |
+
+   `rrhh` apunta a `erpnext-hr` y no a `erpnext-backend`: `erpnext-hr` es el nginx de ERPNext, el único contenedor de RRHH que
+   atiende HTTP a los usuarios (escucha en 8080 y es el que publica `ERPNEXT_PORT` en el host). `erpnext-backend` (gunicorn,
+   puerto 8000) no publica nada y solo se llega a él a través de ese nginx. Comprobado con `docker inspect` el 26/09/2026.
 3. **NTP.** `chronyc tracking` dentro de `ntp-interno`, un cliente SNTP que valida modo/stratum/LI/offset, y un cliente chrony
    real (`chronyd -Q`, no toca el reloj) que debe aceptar al servidor.
-4. **Consolidación.** Invoca `ldapprobe.py`, `probe.py` y `ldaplogin.py --persistencia` (caso 4, que no se ha ejecutado nunca);
+4. **Consolidación.** Invoca `ldapprobe.py`, `probe.py` y `ldaplogin.py --persistencia` (caso 4, ya ejecutado: ver la tabla de estado);
    no los duplica.
 
 ## Cómo se lee un resultado (esto decide si la prueba vale algo)
@@ -61,13 +78,14 @@ Un destino inalcanzable y un nombre que no resuelve dan resultados parecidos y s
 - En NTP, un cliente que recibe respuesta con LI=3 ("no sincronizado") o stratum fuera de 1–15 la rechazaría: FAIL.
   Si `chronyd -Q` responde "No suitable source", el cliente rechazó al servidor: es un **hallazgo**, no un fallo del guion.
 
-## Hallazgos previstos (leer los `INFO`; no se han observado, salen de leer los ficheros)
+## Hallazgos (leer los `INFO`; observados en las pasadas de [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md))
 
 - **`vlan99_infra` es un único dominio L2 compartido por las 4 apps.** Aunque los departamentos estén aislados, una app dual-homed
-  probablemente alcance a otra por su IP de infraestructura. Lo limita en el laboratorio real la matriz de firewall de PC-3,
+  probablemente alcance a otra por su IP de infraestructura. En el diseño de 3 equipos (anexo `diseno-red/`) lo limita su matriz de firewall,
   no el bridge. El guion lo marca `INFO`, con la salida literal.
-- **La zona apunta `dns` y `ntp` a `10.10.99.10`**, la IP de `openldap`, no a `dns-interno` (.11) ni `ntp-interno` (.12). En el
-  laboratorio real un PC-3 con una sola IP aloja los tres servicios y es correcto; en el arnés de un host es una discrepancia.
+- **H21 (resuelto el 26/09/2026): la zona ya no hereda las IP del diseño de 3 equipos.** Antes ponía `dns`, `ntp` y `rrhh` en
+  `10.10.99.10` (la IP de `openldap`) y `pretix` en `10.10.30.10` (la de `inventree-app`). La prueba en rojo, antes del arreglo,
+  dio FAIL en esos cuatro nombres. Ahora `levantar-sistema.sh` sustituye un marcador por nombre y los 7 deben dar PASS.
 - **H11**: `/opt/startup.sh` de la imagen NTP escribe `server 127.127.1.1` **y** `local stratum 10`. `127.127.1.1` es notación de
   ntpd para el reloj local; chrony lo trata como un servidor normal e inalcanzable. Lo que sirve hora es `local stratum 10`,
   así que el stratum publicado debe ser 10. El guion lo comprueba (`chronyc tracking`) y muestra `chronyc sources`.
@@ -78,7 +96,7 @@ Un destino inalcanzable y un nombre que no resuelve dan resultados parecidos y s
 
 - El **etiquetado 802.1Q**, los puertos de acceso/troncal y la asignación de VLAN por puerto.
 - El **switch físico** (comportamiento L2/L3 real, tablas MAC, aislamiento de puertos).
-- La **matriz de firewall** de PC-3 sobre interfaces reales (`firewall-pc3-matriz.sh` es anexo de diseño): aquí no hay
+- La **matriz de firewall** del diseño de 3 equipos sobre interfaces reales (`firewall-pc3-matriz.sh` es anexo de diseño): aquí no hay
   interfaces `vlanXX` ni reglas sobre ellas; el aislamiento lo da Docker, con otro mecanismo.
 - El acceso desde otros equipos por la IP LAN y los puertos publicados (aquí `PUBLISH_IP=127.0.0.1`).
 
@@ -88,6 +106,6 @@ Un destino inalcanzable y un nombre que no resuelve dan resultados parecidos y s
 |---|---|
 | Clasificador de conexiones, cliente DNS (compresión, NXDOMAIN, REFUSED, timeout), cliente SNTP, lector de zona | **Verificado** con `--autotest` en WSL contra sockets locales (PASS). En Windows el caso "puerto cerrado" falla por un artefacto de loopback (sin RST inmediato); en Linux/WSL pasa. |
 | Modo `--sonda` por stdin (el que corre dentro del contenedor, sin `__file__`) | **Verificado** en WSL sin Docker |
-| Fallo limpio con el arnés apagado (7 FAIL en prerrequisitos, exit 1, sin excepción) | **Verificado** |
-| Todo lo que toca contenedores: segmentación, DNS, NTP, ldapprobe/probe/ldaplogin | **Verificado** el 26/09/2026 contra los 25 servicios (92 PASS, 0 FAIL, incluida la persistencia) |
+| Fallo limpio con el sistema apagado (7 FAIL en prerrequisitos, exit 1, sin excepción) | **Verificado** |
+| Todo lo que toca contenedores: segmentación, DNS, NTP, ldapprobe/probe/ldaplogin | **Verificado** el 26/09/2026 contra los 25 servicios, incluida la persistencia (cifras en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md)) |
 | Supuestos: puertos 8080/80/8000/8000 de las apps, `chronyd -Q` con la imagen de cturra, `--network container:<app>` | **Verificado** en esa misma ejecución (los bloques que dependen de ellos dan PASS) |

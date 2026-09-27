@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Prueba SIN Docker ni base de datos del bloque `erpnext-create-site` de docker-compose.yml (H16: idempotencia real).
+# Prueba SIN Docker ni base de datos del bloque `erpnext-create-site` del docker-compose.yml de la raiz (H16: idempotencia real).
 # Extrae el script embebido del YAML (desescapando $$ -> $, como hace compose) y lo ejecuta contra un `bench` simulado.
-# Pareja de ../pc1-medica/openvpms/test-reanudable.sh. Requiere bash, python3 con PyYAML.
-# Uso: bash test-create-site.sh
+# Pareja de ../openvpms/test-reanudable.sh. Requiere bash, python3 con PyYAML.
+# Uso: bash servicios/erpnext/test-create-site.sh
 # NO prueba: el formato real de `bench list-apps`, ni un arranque real de ERPNext.
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-python3 - "$DIR/docker-compose.yml" "$TMP/h16-script.sh" <<'PY' || { echo "no se pudo extraer el script del YAML" >&2; exit 2; }
+python3 - "$DIR/../../docker-compose.yml" "$TMP/h16-script.sh" <<'PY' || { echo "no se pudo extraer el script del YAML" >&2; exit 2; }
 import sys, yaml
 d = yaml.safe_load(open(sys.argv[1]))
 s = d["services"]["erpnext-create-site"]["command"][0]

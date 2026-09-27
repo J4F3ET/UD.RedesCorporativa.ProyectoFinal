@@ -44,12 +44,7 @@ Los usuarios aparecen al terminar el arranque. Las contraseñas de laboratorio, 
 | `detener` | Para los contenedores sin borrar datos |
 | `borrar` | Borra contenedores **y datos**. Pide confirmación |
 
-**Requisitos:**
-
-- **Docker:** Docker Desktop (en Windows, con Git for Windows) o Docker Engine en Linux/WSL, con Compose 2.24.4 o superior.
-- **Memoria:** unos **7 GB de RAM libre**. Los 22 contenedores permanentes usan unos 4,6 GiB, y en el equipo cuestan unos 5,7 GB.
-- **Primer arranque:** descarga varios GB de imágenes (la de ERPNext/hrms ocupa 3,2 GB) e inicializa las bases de datos. Medido: **25/25 sanos en 15 min 45 s**, con las imágenes ya descargadas. Los arranques siguientes tardan unos minutos.
-- **Docker Engine dentro de WSL** (sin Docker Desktop): el lanzador de Windows deja una sesión de WSL abierta en segundo plano. Sin ella, Docker se detiene al cerrarse la última terminal y se lleva los contenedores. `detener` cierra esa sesión.
+**Requisitos:** Docker Desktop (en Windows, con Git for Windows) o Docker Engine en Linux/WSL, con Compose 2.24.4 o superior, y unos **7 GB de RAM libre**. El primer arranque descarga varios GB de imágenes (la de ERPNext/hrms ocupa 3,2 GB). Los requisitos completos, el `.wslconfig` recomendado, qué hacer tras reiniciar el PC y las trampas de Windows/WSL están en [`docs/operacion.md`](docs/operacion.md). Las cifras medidas de memoria y de arranque, en [`docs/resultados-un-host.md`](docs/resultados-un-host.md).
 
 ## Qué demuestra `verificar`
 
@@ -60,7 +55,7 @@ Los usuarios aparecen al terminar el arranque. Las contraseñas de laboratorio, 
 - **NTP:** el servidor responde con un stratum válido, un cliente chrony real lo acepta, y solo es alcanzable desde la VLAN 99.
 - **LDAP/LDAPS:** login LDAP real en ERPNext e InvenTree; clave errónea rechazada; `ldapsearch` por LDAPS que valida con la CA interna y falla con una CA ajena. También comprueba que todo sobrevive a un `down` + `up -d`.
 
-Último resultado: **92 PASS, 0 FAIL** (26/09/2026). Las cifras están en [`docs/resultados-un-host.md`](docs/resultados-un-host.md).
+El último resultado y las cifras de cada pasada están en [`docs/resultados-un-host.md`](docs/resultados-un-host.md).
 
 **Lo que un solo equipo no puede demostrar:**
 
@@ -70,29 +65,42 @@ Los usuarios aparecen al terminar el arranque. Las contraseñas de laboratorio, 
 
 Además, la VLAN 99 es un único dominio L2 compartido por las 4 aplicaciones. `verificar` lo reporta como `INFO`, porque es un hallazgo previsto del diseño.
 
+## Documentación
+
+- [`docs/arquitectura.md`](docs/arquitectura.md): los 25 servicios por departamento, las redes y sus IP, y los flujos de LDAP, DNS y NTP.
+- [`docs/operacion.md`](docs/operacion.md): cómo arrancar, vigilar, detener y validar el sistema, y las trampas de Windows/WSL.
+- [`docs/seguridad.md`](docs/seguridad.md): la CA interna, LDAPS, las ACL y cuentas de servicio, los secretos de laboratorio y lo que un host no aísla.
+- [`docs/aplicaciones.md`](docs/aplicaciones.md): cada aplicación con su departamento, URL, usuario inicial e integración LDAP.
+- [`docs/resultados-un-host.md`](docs/resultados-un-host.md): las cifras medidas (arranque, memoria, pasadas de `verificar`) y los pendientes.
+
 ## Mapa del repositorio
 
 ```
 levantar-sistema.sh / .ps1 / .cmd   # arranque plug and play (la lógica está en el .sh)
-sistema/                            # el sistema en un host: incluye los 3 compose, test.env y la verificación
-docker/
-  pc1-medica/                       # OpenVPMS (VLAN 10): compose + imagen propia (openvpms/)
-  pc2-operaciones/                  # Pretix + InvenTree (VLAN 20/30)
-  pc3-administracion-infra/         # ERPNext HR + OpenLDAP/DNS/NTP (VLAN 40/99): ldap/, bind/
-scripts/generar-certificados.sh     # CA interna + certificado LDAPS (lo ejecuta levantar-sistema.sh)
-docs/                               # resultados vigentes e integración LDAP de cada aplicación
+docker-compose.yml                  # el ÚNICO compose: los 25 servicios, agrupados por departamento
+servicios/                          # una carpeta por servicio, con su README
+  openvpms/                         # Médica (VLAN 10): Dockerfile, inicialización reanudable y su prueba
+  pretix/                           # Taquilla (VLAN 20)
+  inventree/                        # Logística (VLAN 30)
+  erpnext/                          # RRHH (VLAN 40): prueba de erpnext-create-site
+  openldap/                         # Infraestructura (VLAN 99): LDIF de estructura, ACL y usuarios de prueba
+  bind9/                            # Infraestructura: named.conf y plantilla de la zona DNS
+  ntp/                              # Infraestructura: servidor de hora
+  ca/                               # CA interna + certificado LDAPS (lo ejecuta levantar-sistema.sh)
+sistema/                            # test.env (variables y claves de laboratorio) y la verificación
+docs/                               # arquitectura, operación, seguridad, aplicaciones, resultados vigentes e integración LDAP
 diseno-red/                         # ANEXO: diseño con switch L2/L3, VLANs 802.1Q, matriz y diagramas (no se despliega)
 plans/handoffs/                     # último traspaso de trabajo y su plan
 ```
 
-Los servicios se agrupan en `docker/pc1…pc3` por departamento, igual que en el diseño de la Entrega 1 (3 equipos). `sistema/docker-compose.yml` los incluye a los tres y convierte cada VLAN en una red bridge.
+Todo `docker compose` se ejecuta desde la raíz con `--env-file sistema/test.env`. En `docker-compose.yml` los servicios se agrupan por departamento, igual que en el diseño de la Entrega 1 (3 equipos), y cada VLAN es una red bridge.
 
 ## Diseño de red (anexo)
 
 El diseño propuesto reparte los servicios en 3 equipos conectados a un switch con VLANs 802.1Q. La carpeta [`diseno-red/`](diseno-red/README.md) lo conserva:
 
 - La matriz de segmentación: [`arquitectura-3-equipos-departamentos.md`](diseno-red/arquitectura-3-equipos-departamentos.md).
-- Las recetas para un switch L3 (SVIs + ACL) o L2 (PC-3 como router con nftables).
+- Las recetas para un switch L3 (SVIs + ACL) o L2 (el equipo de infraestructura como router con nftables).
 - Los simuladores que reproducen la matriz sobre el kernel de Linux (necesitan la imagen `nicolaka/netshoot`).
 - Los diagramas de topología y de flujo: [`topologia-red.html`](diseno-red/diagramas/topologia-red.html) y [`flujo-datos-segmentacion.html`](diseno-red/diagramas/flujo-datos-segmentacion.html).
 

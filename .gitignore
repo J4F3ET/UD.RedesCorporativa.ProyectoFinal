@@ -1,7 +1,11 @@
 .env
-docker/*/.env
-docker/*/certs/
-docker/pc3-administracion-infra/bind/zones/db.reservaviva.local
+# CA interna, certificado LDAPS y sus claves: cada instalacion genera los suyos (servicios/ca/generar-certificados.sh)
+servicios/ca/certs/
+# Zona DNS generada desde la plantilla .tpl por levantar-sistema.sh
+servicios/bind9/zones/db.reservaviva.local
 
 # Salidas de levantar-sistema.sh verificar
 sistema/resultados/
+
+# Worktrees y ficheros locales de sesiones de agentes
+.claude/

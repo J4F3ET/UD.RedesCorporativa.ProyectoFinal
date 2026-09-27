@@ -6,7 +6,7 @@
 > compose ni imagen**: ambas siguen con su administrador local (el de Pretix lo crea `levantar-sistema.sh`)
 > (Pretix: `PRETIX_ADMIN_*`; OpenVPMS: `OPENVPMS_ADMIN_PASSWORD`).
 > Fecha de la evaluación: 2026-09-19. Imágenes: `pretix/standalone:stable` (pretix 2026.7.0),
-> OpenVPMS 2.4.0.1 (Dockerfile de `docker/pc1-medica/openvpms`).
+> OpenVPMS 2.4.0.1 (Dockerfile de `servicios/openvpms`).
 
 ## 1. OpenVPMS 2.4.0.1 — sin soporte LDAP
 
@@ -48,7 +48,7 @@ Se instalaría con un Dockerfile derivado (`pip install pretix-ldap` + `auth_bac
 **Por qué no se integra (código del plugin leído, 0.2.5, `ldap_connector.py`):**
 1. **No verifica el certificado del servidor.** Crea `Server(bind_url)` sin objeto `Tls`; `ldap3`
    usa entonces `validate=CERT_NONE`. Comprobado contra el OpenLDAP de este repo (CA de
-   `scripts/generar-certificados.sh`, sin darle la CA al cliente, con la imagen de Pretix):
+   `servicios/ca/generar-certificados.sh`, sin darle la CA al cliente, con la imagen de Pretix):
    - como lo hace el plugin: `bind` por `ldaps://` → **`success`, `validate=0`** (acepta cualquier certificado);
    - con `Tls(validate=CERT_REQUIRED)` y sin la CA → `LDAPSocketOpenError` (lo esperado).
    No hay opción en `[ldap]` para una CA ni para `validate`, así que `ca.crt` no se puede usar sin
@@ -80,15 +80,15 @@ Las apps que sí pueden integrarse limpiamente (ERPNext e InvenTree) las lleva o
 ## 4. Cómo repetir la comprobación de TLS
 
 ```bash
-bash scripts/generar-certificados.sh --sin-instalar-ca      # genera la CA y el certificado (ignorados por git)
+bash servicios/ca/generar-certificados.sh --sin-instalar-ca      # genera la CA y el certificado (ignorados por git)
 docker network create ldaptest
 docker run -d --name openldap --network ldaptest \
   -e LDAP_ORGANISATION=RV -e LDAP_DOMAIN=reservaviva.local -e LDAP_ADMIN_PASSWORD=adminpw \
   -e LDAP_TLS_CRT_FILENAME=ldap.crt -e LDAP_TLS_KEY_FILENAME=ldap.key -e LDAP_TLS_CA_CRT_FILENAME=ca.crt \
   -e LDAP_TLS_VERIFY_CLIENT=never \
-  -v "$PWD/docker/pc3-administracion-infra/certs/ldap.crt:/container/service/slapd/assets/certs/ldap.crt" \
-  -v "$PWD/docker/pc3-administracion-infra/certs/ldap.key:/container/service/slapd/assets/certs/ldap.key" \
-  -v "$PWD/docker/pc3-administracion-infra/certs/ca.crt:/container/service/slapd/assets/certs/ca.crt" \
+  -v "$PWD/servicios/ca/certs/ldap.crt:/container/service/slapd/assets/certs/ldap.crt" \
+  -v "$PWD/servicios/ca/certs/ldap.key:/container/service/slapd/assets/certs/ldap.key" \
+  -v "$PWD/servicios/ca/certs/ca.crt:/container/service/slapd/assets/certs/ca.crt" \
   osixia/openldap:1.5.0
 # (no montar los certificados con :ro: la imagen hace chown y slapd no arranca)
 docker run --rm -u 0 --network ldaptest --entrypoint sh pretix/standalone:stable -c 'pip install -q ldap3 &&
