@@ -325,6 +325,11 @@ services:
     restart: unless-stopped
     depends_on:
       - inventree-db
+    # H22: whitenoise sirve /static desde STATIC_ROOT (volumen inventree_data) y solo lo indexa al arrancar, pero
+    # INVENTREE_AUTO_UPDATE solo migra: sin collectstatic el directorio queda vacio y /web falla con "INVE-E1".
+    # Se recogen los estaticos (invoke static, idempotente: --clear por defecto) y luego se ejecuta EXACTAMENTE el CMD
+    # de la imagen (docker image inspect; el ENTRYPOINT init.sh sigue delante y deja el directorio en /home/inventree).
+    command: ["sh", "-c", "invoke static && exec gunicorn -c ./gunicorn.conf.py InvenTree.wsgi -b $${INVENTREE_WEB_ADDR}:$${INVENTREE_WEB_PORT} --chdir $${INVENTREE_BACKEND_DIR}/InvenTree"]
     environment:
       INVENTREE_DB_ENGINE: postgresql
       INVENTREE_DB_HOST: ${NET_LOGISTICA:-10.10.30}.11
