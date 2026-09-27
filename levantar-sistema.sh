@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# levantar-sistema.sh - Levanta la arquitectura completa de Reserva Viva (los 3 PCs, 25 servicios) en UN solo host.
+# levantar-sistema.sh - Levanta la arquitectura completa de Reserva Viva (25 servicios) en UN solo host.
 #
 #   git clone <repo> && cd <repo> && ./levantar-sistema.sh
 #
@@ -22,8 +22,8 @@
 # Es idempotente: se puede ejecutar las veces que haga falta. Si un arranque se interrumpe, volver a ejecutarlo
 # retoma donde quedo (la inicializacion de OpenVPMS y la creacion del sitio de ERPNext son reanudables).
 #
-# Usa el arnes de sistema/: los docker-compose.yml reales de los tres PCs, con cada VLAN convertida en
-# un bridge de Docker con su misma subred. Contrasenas de laboratorio (desechables) en sistema/test.env.
+# Usa sistema/docker-compose.yml, que reune los compose de docker/ (agrupados por departamento), con cada VLAN
+# como un bridge de Docker con su misma subred. Contrasenas de laboratorio (desechables) en sistema/test.env.
 #
 # Solo ASCII a proposito: la salida se ve igual en cualquier consola de Windows.
 
@@ -89,7 +89,7 @@ comprobar_requisitos() {
   docker info >/dev/null 2>&1 || fallo "Docker no responde. Arranca Docker Desktop, o en Linux/WSL: sudo systemctl start docker"
   docker compose version >/dev/null 2>&1 || fallo "Falta el plugin 'docker compose' (v2)."
 
-  # Los overrides del arnes usan la etiqueta YAML "!override", que existe desde Compose 2.24.4.
+  # Los overrides de sistema/ usan la etiqueta YAML "!override", que existe desde Compose 2.24.4.
   local ver may min par
   ver="$(docker compose version --short 2>/dev/null | sed 's/^v//')"
   IFS=. read -r may min par <<<"${ver}"
@@ -139,7 +139,7 @@ generar_zona() {
   local dir="${RAIZ}/docker/pc3-administracion-infra/bind/zones"
   local tpl="${dir}/db.reservaviva.local.tpl" out="${dir}/db.reservaviva.local"
   [ -f "${tpl}" ] || fallo "Falta la plantilla ${tpl}"
-  # Mismas IP que usa el arnes (sistema/README.md).
+  # IP de los contenedores en el sistema de un host (sistema/README.md).
   local ip1=10.10.10.10 ip2=10.10.30.10 ip3=10.10.99.10 serial
   serial="$(date +%Y%m%d%H)"
   tr -d '\r' <"${tpl}" | sed -e "s/\${IP_PC1}/${ip1}/g" -e "s/\${IP_PC2}/${ip2}/g" \
@@ -148,11 +148,11 @@ generar_zona() {
     rm -f "${out}.tmp"; fallo "Quedan marcadores sin sustituir en la plantilla de zona."
   fi
   mv -f "${out}.tmp" "${out}"
-  info "Generada (PC-1=${ip1} PC-2=${ip2} PC-3=${ip3}, serial ${serial})"
+  info "Generada (openvpms=${ip1} pretix/inventree=${ip2} dns/ldap/ntp/rrhh=${ip3}, serial ${serial})"
 }
 
 validar_compose() {
-  paso "Validando la configuracion de los 3 compose"
+  paso "Validando la configuracion de compose"
   dc config -q || fallo "docker compose config fallo: la configuracion no es valida."
   info "$(dc config --services | grep -c .) servicios definidos"
 }
@@ -264,7 +264,7 @@ esperar_sano() {
 
 # Pretix no crea su administrador por variables de entorno: trae admin@localhost con clave "admin". Se crea el de
 # test.env (PRETIX_ADMIN_EMAIL / PRETIX_ADMIN_PASSWORD) y se borra admin@localhost. Idempotente. Antes lo hacia
-# init_admins en docker/pc2-operaciones/deploy.sh (despliegue en 3 PCs, retirado). La clave va por el entorno de
+# init_admins en el deploy.sh del despliegue en 3 equipos (retirado en 95e0da4). La clave va por el entorno de
 # docker exec, no por la linea de comandos.
 crear_admin_pretix() {
   paso "Administrador de Pretix"
@@ -305,11 +305,11 @@ accesos() {
   cat <<EOF
 
     Accesos (solo desde este equipo):
-      PC-1 Medica        OpenVPMS   http://localhost:${p1}/openvpms     usuario: admin
-      PC-2 Taquilla      Pretix     http://localhost:${p3}              usuario: $(valor_env PRETIX_ADMIN_EMAIL admin@reservaviva.local)
-      PC-2 Logistica     InvenTree  http://localhost:${p4}              usuario: $(valor_env INVENTREE_ADMIN_USER admin)
-      PC-3 RRHH          ERPNext    http://localhost:${p2}              usuario: Administrator
-      PC-3 Infra         LDAP localhost:${ldap}  LDAPS localhost:${ldaps}  DNS localhost:${dns}  NTP localhost:${ntp}/udp
+      Medica             OpenVPMS   http://localhost:${p1}/openvpms     usuario: admin
+      Taquilla           Pretix     http://localhost:${p3}              usuario: $(valor_env PRETIX_ADMIN_EMAIL admin@reservaviva.local)
+      Logistica          InvenTree  http://localhost:${p4}              usuario: $(valor_env INVENTREE_ADMIN_USER admin)
+      RRHH               ERPNext    http://localhost:${p2}              usuario: Administrator
+      Infra              LDAP localhost:${ldap}  LDAPS localhost:${ldaps}  DNS localhost:${dns}  NTP localhost:${ntp}/udp
     Contrasenas de laboratorio (desechables): sistema/test.env
 EOF
 }

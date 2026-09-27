@@ -4,9 +4,9 @@
 # cubren las direcciones necesarias, no toca nada. Usar --forzar para regenerarlos.
 #
 # Resultado en docker/pc3-administracion-infra/certs/:
-#   ca.crt   CA pública. Es la que deben confiar los clientes de LDAPS (se copia también a PC-1 y PC-2).
+#   ca.crt   CA pública. Es la que deben confiar los clientes de LDAPS (InvenTree y ERPNext la montan en /certs/ca.crt).
 #   ca.key   clave privada de la CA. NUNCA se monta en un contenedor ni se comparte.
-#   ldap.crt / ldap.key   certificado y clave de OpenLDAP (los monta docker-compose.yml de PC-3).
+#   ldap.crt / ldap.key   certificado y clave de OpenLDAP (los monta el servicio openldap).
 #
 # Uso:  scripts/generar-certificados.sh [--forzar] [--sin-instalar-ca]
 # Variables opcionales: LDAP_DOMAIN (reservaviva.local), LDAP_IP (10.10.99.10), CERTS_DIR.
