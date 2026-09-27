@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Verificacion de que la ARQUITECTURA (no solo los contenedores) se comporta como esta disenada, en un host.
 
-Ejecutado contra el sistema completo el 2026-09-26 (levantar-sistema.sh verificar: 92 PASS, 0 FAIL). `--autotest`
-prueba la mecanica (clasificador de conexiones, cliente DNS, cliente SNTP, lector de zona) contra sockets locales,
-sin tocar Docker. Ver verificar_arquitectura.md para el alcance y sus limites.
+El ultimo resultado contra el sistema completo esta en docs/resultados-un-host.md. `--autotest` prueba la mecanica
+(clasificador de conexiones, cliente DNS por UDP y TCP, cliente SNTP, lector de zona) contra sockets locales, sin tocar
+Docker. Ver verificar_arquitectura.md para el alcance y sus limites.
 
 Requisito: el sistema levantado (`levantar-sistema.sh arrancar`) y sano. Ejecutar donde `docker` sea el cliente
 nativo (p. ej. dentro de WSL), igual que ldaplogin.py. Sin dependencias fuera de la libreria estandar.
@@ -14,8 +14,9 @@ Uso (desde esta carpeta):
     python3 verificar_arquitectura.py --informe out.txt   # ademas guarda la salida completa
     python3 verificar_arquitectura.py --autotest          # solo la mecanica, sin Docker
 
-Bloques: 1 segmentacion (prueba negativa) | 2 DNS (bind9 consultado de verdad) | 3 NTP | 4 consolidacion
-(ldapprobe.py, probe.py, ldaplogin.py, sin duplicarlos).
+Bloques: 1 segmentacion (prueba negativa) | 2 DNS (bind9 consultado de verdad, vista interna) | 3 NTP |
+4 acceso por nombre (vista lan del DNS, proxy web con HTML + estatico, acceso directo por localhost) |
+5 consolidacion (ldapprobe.py, probe.py, ldaplogin.py, sin duplicarlos).
 Cada comprobacion da PASS / FAIL / INFO con la salida literal en la que se apoya. Sale con 0 SOLO si no hay ningun FAIL.
 INFO no cuenta: son hallazgos que hay que leer, no fallos del guion.
 
@@ -24,18 +25,22 @@ resultados parecidos. Aqui los negativos usan SIEMPRE una IP literal (el DNS no 
 (a) el cliente prueba, desde su propia VLAN, que su herramienta funciona (control positivo) y (b) el destino contesta
 desde SU propia VLAN (control del destino). Un timeout sin esos dos controles no prueba nada y se marca FAIL.
 """
-import argparse, errno, json, re, socket, struct, subprocess, sys, threading, time
+import argparse, errno, http.client, json, re, socket, struct, subprocess, sys, threading, time
+from urllib.parse import urljoin
 from pathlib import Path
 
 AQUI = Path(__file__).resolve().parent
 RAIZ = AQUI.parent
-ZONA = RAIZ / "servicios/bind9/zones/db.reservaviva.local"
+DOMINIO = "reservaviva.lan"
+ZONA = RAIZ / "servicios/bind9/zones/db.reservaviva.lan"                 # vista interna (IP de contenedor)
+ZONA_LAN = RAIZ / "servicios/bind9/zones/db.reservaviva.lan.vista-lan"   # vista lan (IP del anfitrion)
+ENV_FILE = AQUI / "test.env"
 ETIQUETA = "verificacion-arquitectura=1"   # solo se borran contenedores efimeros con esta etiqueta
 # depto -> (contenedor de la app dual-homed, puerto TCP donde escucha). Cada app esta ademas en vlan99_infra.
 APPS = {10: ("openvpms-app", 8080), 20: ("pretix-web", 80), 30: ("inventree-app", 8000), 40: ("erpnext-backend", 8000)}
 APP_DEPTO = {a: d for d, (a, _) in APPS.items()}
 RED = {10: "vlan10_medica", 20: "vlan20_taquilla", 30: "vlan30_logistica", 40: "vlan40_rrhh", 99: "vlan99_infra"}
-CONSULTA_DNS = "ldap.reservaviva.local"
+CONSULTA_DNS = f"ldap.{DOMINIO}"
 # nombre de la zona -> (contenedor que da ese servicio, VLAN donde se le busca la IP real). bloque_dns compara la zona
 # generada con `docker inspect`. rrhh -> erpnext-hr: es el nginx de ERPNext, el unico contenedor de RRHH que atiende HTTP
 # a los usuarios (escucha en 8080 y es el que publica ERPNEXT_PORT en el host); erpnext-backend (gunicorn, 8000) no
@@ -43,6 +48,17 @@ CONSULTA_DNS = "ldap.reservaviva.local"
 ZONA_ESPERADA = {"dns": ("dns-interno", 99), "ldap": ("openldap", 99), "ntp": ("ntp-interno", 99),
                  "openvpms": ("openvpms-app", 10), "pretix": ("pretix-web", 20), "inventree": ("inventree-app", 30),
                  "rrhh": ("erpnext-hr", 40)}
+# Acceso por nombre a traves del proxy web (proxy-web, solo en vlan99_infra). Por aplicacion: contenedor e IP en vlan99 a
+# la que llega el proxy, pagina HTML que se pide (la de login: la primera que ve un usuario) y variable de test.env con el
+# puerto del acceso directo. De esa pagina se saca el primer CSS/JS referenciado y tambien se pide (H22: un 200 del HTML
+# no prueba que la web funcione; InvenTree llego a servir el HTML sin estaticos).
+WEB = {"openvpms": ("openvpms-app", "/openvpms/login", "OPENVPMS_PORT", 8080),
+       "pretix": ("pretix-web", "/control/login", "PRETIX_PORT", 80),
+       "inventree": ("inventree-app", "/web/", "INVENTREE_PORT", 8000),
+       "rrhh": ("erpnext-hr", "/login", "ERPNEXT_PORT", 8080)}
+# La vista lan solo anuncia las aplicaciones y el DNS; ldap y ntp no se publican a la LAN (NXDOMAIN a proposito).
+LAN_SI = ["openvpms", "pretix", "inventree", "rrhh", "dns"]
+LAN_NO = ["ldap", "ntp"]
 
 
 # ------------------------------------------------------------------------------------------------
@@ -135,6 +151,30 @@ def dns_consulta(servidor, nombre, timeout=3.0, puerto=53):
         return r if r["ident"] == 0x1234 else {"error": f"ident distinto {r['ident']:#x}"}
     except socket.timeout:
         return {"error": f"timeout de {timeout}s sin respuesta DNS"}
+    except OSError as e:
+        return {"error": f"errno={e.errno} {e.strerror}"}
+    finally:
+        s.close()
+
+
+def dns_consulta_tcp(servidor, nombre, timeout=5.0, puerto=53):
+    """Consulta DNS por TCP (RFC 1035 4.2.2: prefijo de 2 bytes con la longitud). Mismo resultado que dns_consulta."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect((servidor, puerto))
+        q = dns_paquete(nombre)
+        s.sendall(struct.pack(">H", len(q)) + q)
+        b = b""
+        while len(b) < 2 or len(b) < 2 + struct.unpack(">H", b[:2])[0]:
+            trozo = s.recv(4096)
+            if not trozo:
+                return {"error": f"conexion cerrada tras {len(b)} bytes"}
+            b += trozo
+        r = dns_parse(b[2:])
+        return r if r["ident"] == 0x1234 else {"error": f"ident distinto {r['ident']:#x}"}
+    except socket.timeout:
+        return {"error": f"timeout de {timeout}s sin respuesta DNS (TCP)"}
     except OSError as e:
         return {"error": f"errno={e.errno} {e.strerror}"}
     finally:
@@ -252,10 +292,10 @@ def cuerpo_error(res):
     return res.get("error", "") if isinstance(res, dict) else ""
 
 
-def zona():
-    if not ZONA.exists():
+def zona(fichero=ZONA):
+    if not fichero.exists():
         return None
-    return {m.group(1): m.group(2) for l in ZONA.read_text(encoding="utf8").splitlines()
+    return {m.group(1): m.group(2) for l in fichero.read_text(encoding="utf8").splitlines()
             if (m := re.match(r"^(\S+)\s+IN\s+A\s+(\S+)", l))}
 
 
@@ -389,14 +429,15 @@ def bloque_segmentacion(ctx, m):
 
 
 def bloque_dns(ctx, m, zonas):
-    imprime("\n== 2. DNS: se consulta a dns-interno de verdad (los contenedores normales usan extra_hosts / DNS de Docker)")
+    imprime("\n== 2. DNS, vista interna: se consulta a dns-interno de verdad desde vlan99 (los contenedores normales usan "
+            "extra_hosts / DNS de Docker)")
     dns_ip = ctx["ips"]["dns-interno"][99]
     if zonas is None:
-        reg("zona reservaviva.local generada", "FAIL", f"falta {ZONA}. Generarla con: levantar-sistema.sh preparar.")
+        reg(f"zona {DOMINIO} (vista interna) generada", "FAIL", f"falta {ZONA}. Generarla con: levantar-sistema.sh preparar.")
         return
-    nombres = [(f"{h}.reservaviva.local", ip) for h, ip in zonas.items()]
+    nombres = [(f"{h}.{DOMINIO}", ip) for h, ip in zonas.items()]
     inf = vantage(ctx["pref"] + RED[99], {"dns": [(h, dns_ip, h) for h, _ in nombres] + [
-        ("inexistente", dns_ip, "no-existe-xyz.reservaviva.local"), ("externo", dns_ip, "example.com")]},
+        ("inexistente", dns_ip, f"no-existe-xyz.{DOMINIO}"), ("externo", dns_ip, "example.com")]},
         ctx["img_py"], SCRIPT)
     if "error" in inf:
         reg("contenedor de sondeo en vlan99", "FAIL", cuerpo_error(inf))
@@ -416,7 +457,7 @@ def bloque_dns(ctx, m, zonas):
     # Cada nombre de la zona debe resolver a la IP real (docker inspect) del contenedor que da ese servicio.
     for h, (cont, d_) in ZONA_ESPERADA.items():
         real = ip_real(ctx, cont, d_) or f"(sin IP en vlan{d_})"
-        nombre = f"zona: {h}.reservaviva.local apunta a {cont} (su IP real en vlan{d_})"
+        nombre = f"zona interna: {h}.{DOMINIO} apunta a {cont} (su IP real en vlan{d_})"
         if h not in zonas:
             reg(nombre, "FAIL", f"la zona no tiene el nombre '{h}'; {cont} esta en {real}")
         else:
@@ -475,7 +516,7 @@ def bloque_ntp(ctx, m):
 
 
 def bloque_consolidado(ctx, persistencia):
-    imprime("\n== 4. Consolidacion: se INVOCAN los scripts existentes, sin duplicarlos")
+    imprime("\n== 5. Consolidacion: se INVOCAN los scripts existentes, sin duplicarlos")
     img = ctx["img_py"]
     r = sh(["docker", "run", "--rm", "-i", "--pull=never", "--label", ETIQUETA, "--network", ctx["pref"] + RED[99],
             "--entrypoint", "python3", img, "-"], entrada=(AQUI / "ldapprobe.py").read_text(encoding="utf8"), timeout=120)
@@ -499,6 +540,170 @@ def bloque_consolidado(ctx, persistencia):
         "PASS" if ok else "FAIL", f"rc={r.returncode}\n" + "\n".join(txt.strip().splitlines()[-40:]))
     if not persistencia:
         reg("caso 4 de ldaplogin.py (--persistencia)", "FAIL", "NO EJECUTADO por --sin-persistencia: sigue sin verificar")
+
+
+def valor_env(clave, defecto):
+    """Valor de sistema/test.env sin ejecutarlo (gana la ultima linea), como valor_env() de levantar-sistema.sh."""
+    v = None
+    for l in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        if l.startswith(clave + "="):
+            v = l.split("=", 1)[1].strip()
+    return v or defecto
+
+
+def publicado(contenedor, puerto):
+    """(ip, puerto) en que Docker publica `puerto` (p. ej. '80/tcp') del contenedor, o None. 0.0.0.0 -> 127.0.0.1."""
+    r = sh(["docker", "inspect", contenedor, "--format", "{{json .HostConfig.PortBindings}}"], timeout=30)
+    try:
+        b = (json.loads(r.stdout) or {}).get(puerto) or []
+        ip, p = b[0].get("HostIp") or "0.0.0.0", int(b[0]["HostPort"])
+    except Exception:
+        return None
+    return ("127.0.0.1" if ip in ("0.0.0.0", "") else ip), p
+
+
+def http_get(ip, puerto, host, ruta, timeout=20):
+    """GET sin seguir redirecciones, con el Host indicado (como un navegador que llega por ese nombre)."""
+    c = http.client.HTTPConnection(ip, puerto, timeout=timeout)
+    try:
+        c.request("GET", ruta, headers={"Host": host, "User-Agent": "verificar-arquitectura/1", "Accept": "*/*"})
+        r = c.getresponse()
+        cuerpo = r.read(2_000_000)
+        return {"status": r.status, "ctype": r.getheader("Content-Type", ""), "location": r.getheader("Location", ""),
+                "bytes": len(cuerpo), "cuerpo": cuerpo.decode("utf8", "replace")}
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+    finally:
+        c.close()
+
+
+def websocket_101(ip, puerto, host, ruta, timeout=10):
+    """Primera linea de la respuesta a un handshake WebSocket (se espera 'HTTP/1.1 101 ...')."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect((ip, puerto))
+        s.sendall((f"GET {ruta} HTTP/1.1\r\nHost: {host}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n"
+                   "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").encode())
+        return s.recv(1024).decode("latin1").split("\r\n")[0]
+    except OSError as e:
+        return f"error: {e}"
+    finally:
+        s.close()
+
+
+def estatico_de(html, ruta_html):
+    """Primer CSS o JS referenciado en la pagina (ruta absoluta dentro del mismo sitio), o None."""
+    for m in re.finditer(r'(?:href|src)="([^"]+\.(?:css|js)(?:\?[^"]*)?)"', html):
+        u = m.group(1)
+        if u.startswith(("http://", "https://", "//")):
+            continue
+        return urljoin(ruta_html, u)
+    return None
+
+
+def resumen_http(r):
+    if "error" in r:
+        return r["error"]
+    return f"HTTP {r['status']} {r['ctype'] or '(sin Content-Type)'} {r['bytes']} bytes" + \
+        (f" Location={r['location']}" if r["location"] else "")
+
+
+def comprobar_web(etiqueta, ip, puerto, host, ruta):
+    """Pagina HTML 200 + su primer estatico 200 con el Content-Type que corresponde. Devuelve la respuesta del HTML."""
+    r = http_get(ip, puerto, host, ruta)
+    ok = "error" not in r and r["status"] == 200 and "html" in r["ctype"] and "INVE-E7" not in r["cuerpo"]
+    reg(f"{etiqueta}: GET {ruta} -> 200 text/html", "PASS" if ok else "FAIL",
+        f"{ip}:{puerto} Host: {host} -> {resumen_http(r)}"
+        + ("\nel cuerpo trae INVE-E7 (URL visitada distinta de INVENTREE_SITE_URL, H20)" if "INVE-E7" in r.get("cuerpo", "") else ""))
+    if not ok:
+        return r
+    est = estatico_de(r["cuerpo"], ruta)
+    if not est:
+        reg(f"{etiqueta}: la pagina referencia un CSS/JS", "FAIL", "no se encontro ningun href/src a .css o .js en el HTML")
+        return r
+    e = http_get(ip, puerto, host, est)
+    tipo = "css" if est.split("?")[0].endswith(".css") else "javascript"
+    ok = "error" not in e and e["status"] == 200 and tipo in e["ctype"] and e["bytes"] > 0
+    reg(f"{etiqueta}: estatico {est} -> 200 ({tipo})", "PASS" if ok else "FAIL",
+        f"{ip}:{puerto} Host: {host} -> {resumen_http(e)}")
+    return r
+
+
+def bloque_nombres(ctx):
+    imprime(f"\n== 4. Acceso por nombre: vista lan del DNS y proxy web (*.{DOMINIO})")
+    # Topologia del proxy: solo vlan99_infra. En otra VLAN seria un router entre departamentos.
+    redes = redes_de("proxy-web")
+    if redes is None:
+        reg("contenedor proxy-web existe", "FAIL", "docker inspect proxy-web fallo: falta el servicio 'proxy' (levantar-sistema.sh arrancar)")
+        return
+    solo99 = set(redes) == {ctx["pref"] + RED[99]}
+    reg("proxy-web esta SOLO en vlan99_infra (no es un router entre VLAN)", "PASS" if solo99 else "FAIL", f"redes: {redes}")
+    hr99 = ip_real(ctx, "erpnext-hr", 99)
+    reg("erpnext-hr tiene pata en vlan99_infra (por ahi le llega el proxy)", "PASS" if hr99 else "FAIL",
+        f"erpnext-hr en vlan99: {hr99 or '(ninguna)'}")
+
+    # (b) Vista lan: se pregunta desde FUERA de las VLAN, por el puerto publicado de dns-interno (TCP: el mismo camino que
+    # un equipo de la LAN; al contenedor le llega con el gateway del bridge como origen, que la ACL deja fuera de la vista
+    # interna). IP_ANFITRION esperada = la IP en la que se publica el proxy web.
+    web = publicado("proxy-web", "80/tcp")
+    dnsp = publicado("dns-interno", "53/tcp")
+    if not web or not dnsp:
+        reg("proxy-web y dns-interno publican puerto en el anfitrion", "FAIL", f"proxy-web 80/tcp={web} dns-interno 53/tcp={dnsp}")
+        return
+    anfitrion = web[0]
+    modo = "local" if anfitrion.startswith("127.") else "intranet"
+    reg(f"modo de publicacion: {modo} (proxy en {web[0]}:{web[1]}, DNS en {dnsp[0]}:{dnsp[1]})", "INFO",
+        "local = solo este equipo (127.0.0.1); intranet = levantar-sistema --intranet (IP de la LAN)")
+    zl = zona(ZONA_LAN)
+    if zl is None:
+        reg(f"zona {DOMINIO} (vista lan) generada", "FAIL", f"falta {ZONA_LAN}. Generarla con: levantar-sistema.sh preparar.")
+    else:
+        reg(f"zona de la vista lan generada para la IP del proxy ({anfitrion})",
+            "PASS" if all(zl.get(h) == anfitrion for h in LAN_SI) else "FAIL", f"la zona dice {zl}")
+    for h in LAN_SI:
+        d = dns_consulta_tcp(dnsp[0], f"{h}.{DOMINIO}", puerto=dnsp[1])
+        ok = "error" not in d and d["rcode"] == 0 and d["aa"] and d["respuestas"] == [anfitrion]
+        reg(f"vista lan: {h}.{DOMINIO} -> {anfitrion} (desde el anfitrion por {dnsp[0]}:{dnsp[1]}/tcp)",
+            "PASS" if ok else "FAIL", f"respuesta={d}")
+    for h in LAN_NO:
+        d = dns_consulta_tcp(dnsp[0], f"{h}.{DOMINIO}", puerto=dnsp[1])
+        reg(f"vista lan: {h}.{DOMINIO} -> NXDOMAIN (no se anuncia a la LAN)",
+            "PASS" if "error" not in d and d["rcode"] == 3 and d["aa"] else "FAIL", f"respuesta={d}")
+    d = dns_consulta_tcp(dnsp[0], "example.com", puerto=dnsp[1])
+    reg("vista lan: example.com -> REFUSED (sin recursion tampoco hacia la LAN)",
+        "PASS" if "error" not in d and d["rcode"] == 5 else "FAIL", f"respuesta={d}")
+    imprime("  -- la vista interna (bloque 2) da la IP del contenedor a los mismos nombres: split horizon")
+    zi = zona() or {}
+    for h in ("pretix", "rrhh"):
+        reg(f"{h}.{DOMINIO}: vista interna {zi.get(h)} != vista lan {anfitrion}",
+            "PASS" if zi.get(h) and zi.get(h) != anfitrion else "FAIL",
+            "el mismo nombre lleva al contenedor desde las VLAN y al proxy desde fuera")
+
+    # (c) Proxy: por cada nombre, HTML + estatico, con el Host que manda un navegador que llega por ese nombre.
+    imprime(f"  -- proxy web {web[0]}:{web[1]} con la cabecera Host de cada nombre")
+    suf = "" if web[1] == 80 else f":{web[1]}"
+    r = http_get(web[0], web[1], f"openvpms.{DOMINIO}{suf}", "/")
+    reg(f"openvpms.{DOMINIO}/ redirige a /openvpms/", "PASS" if r.get("status") == 302 and r.get("location", "").endswith("/openvpms/") else "FAIL",
+        resumen_http(r))
+    for h, (cont, ruta, _, _) in WEB.items():
+        comprobar_web(f"proxy {h}.{DOMINIO}", web[0], web[1], f"{h}.{DOMINIO}{suf}", ruta)
+    w = websocket_101(web[0], web[1], f"rrhh.{DOMINIO}{suf}", "/socket.io/?EIO=4&transport=websocket")
+    reg(f"proxy rrhh.{DOMINIO}: WebSocket de socket.io (tiempo real de ERPNext) -> 101", "PASS" if " 101 " in w else "FAIL", w)
+    r = http_get(web[0], web[1], f"desconocido.{DOMINIO}{suf}", "/")
+    reg("nombre desconocido -> 404 del default_server", "PASS" if r.get("status") == 404 and "Reserva Viva" in r.get("cuerpo", "") else "FAIL",
+        resumen_http(r) + "\n" + r.get("cuerpo", "")[:200])
+    r = http_get(web[0], web[1], web[0], "/")
+    reg("por IP (sin nombre) -> 404 del default_server", "PASS" if r.get("status") == 404 else "FAIL", resumen_http(r))
+
+    # (d) El acceso directo de administracion sigue funcionando (localhost:<puerto> de test.env).
+    imprime("  -- acceso directo http://localhost:<puerto> (administracion, docs y verificar)")
+    for h, (cont, ruta, var, defecto) in WEB.items():
+        pub = publicado(cont, f"{defecto}/tcp")
+        if not pub:
+            reg(f"directo {h}: {cont} publica {defecto}/tcp", "FAIL", "sin puerto publicado")
+            continue
+        comprobar_web(f"directo localhost:{pub[1]} ({h})", pub[0], pub[1], f"localhost:{pub[1]}", ruta)
 
 
 LIMITES = """
@@ -529,6 +734,7 @@ def main():
         bloque_segmentacion(ctx, m)
         bloque_dns(ctx, m, zona())
         bloque_ntp(ctx, m)
+        bloque_nombres(ctx)
         bloque_consolidado(ctx, not a.sin_persistencia)
     fin = estado_docker()
     imprime(f"\ndocker.service DESPUES: {fin}")
@@ -597,23 +803,43 @@ def autotest():
             elif modo["v"] is not None:
                 u.sendto(_respuesta_dns(d, *modo["v"]), dire)
     threading.Thread(target=servidor, daemon=True).start()
-    r = dns_consulta("127.0.0.1", "ldap.reservaviva.local", 2, up)
+    r = dns_consulta("127.0.0.1", f"ldap.{DOMINIO}", 2, up)
     chk("dns: respuesta autoritativa con puntero de compresion", r.get("rcode") == 0 and r["aa"] and r["respuestas"] == ["10.10.99.10"], f"{r}")
     modo["v"] = (3, [], True)
-    r = dns_consulta("127.0.0.1", "x.reservaviva.local", 2, up)
+    r = dns_consulta("127.0.0.1", f"x.{DOMINIO}", 2, up)
     chk("dns: NXDOMAIN se lee como rcode 3 (no como error)", r.get("rcode") == 3 and r["aa"] and not r["respuestas"], f"{r}")
     modo["v"] = (5, [], False)
     r = dns_consulta("127.0.0.1", "example.com", 2, up)
     chk("dns: REFUSED se lee como rcode 5", r.get("rcode") == 5 and not r["aa"], f"{r}")
     modo["v"] = None
-    r = dns_consulta("127.0.0.1", "x.reservaviva.local", 0.5, up)
+    r = dns_consulta("127.0.0.1", f"x.{DOMINIO}", 0.5, up)
     chk("dns: sin respuesta -> error 'timeout' (distinto de NXDOMAIN)", "timeout" in r.get("error", ""), f"{r}")
     r = sntp_consulta("127.0.0.1", 2, up)
     chk("sntp: paquete de stratum 10, LI 0, modo 4 se interpreta bien", r.get("stratum") == 10 and r["li"] == 0 and r["modo"] == 4
         and r["refid"] == "127.127.1.1" and abs(r["offset_s"]) < 1, f"{r}")
     u.close()
+    # DNS por TCP: servidor de un solo uso que contesta con prefijo de longitud.
+    t = socket.socket(); t.bind(("127.0.0.1", 0)); t.listen(1); tp = t.getsockname()[1]
+
+    def servidor_tcp():
+        c, _ = t.accept()
+        q = c.recv(2048)[2:]
+        resp = _respuesta_dns(q, 0, ["192.0.2.7"])
+        c.sendall(struct.pack(">H", len(resp)) + resp)
+        c.close()
+    threading.Thread(target=servidor_tcp, daemon=True).start()
+    r = dns_consulta_tcp("127.0.0.1", f"pretix.{DOMINIO}", 2, tp)
+    chk("dns tcp: respuesta con prefijo de longitud se lee igual que por UDP", r.get("rcode") == 0 and r["respuestas"] == ["192.0.2.7"], f"{r}")
+    t.close()
+    chk("estatico_de: ruta relativa se resuelve contra la pagina",
+        estatico_de('<link href="css/a.css">', "/openvpms/login") == "/openvpms/css/a.css")
+    chk("estatico_de: se ignoran recursos de otros sitios",
+        estatico_de('<script src="https://x.org/a.js"></script><script src="/static/b.js?v=1"></script>', "/web/") == "/static/b.js?v=1")
     z = zona()
-    chk("zona: se lee la zona generada (o se avisa de que falta)", z is None or ("ldap" in z), f"{z}")
+    chk("zona: se lee la zona interna generada (o se avisa de que falta)", z is None or ("ldap" in z), f"{z}")
+    z = zona(ZONA_LAN)
+    chk("zona: se lee la zona de la vista lan (o se avisa de que falta); no anuncia ldap ni ntp",
+        z is None or ("pretix" in z and "ldap" not in z and "ntp" not in z), f"{z}")
     imprime(f"\nautotest: {'PASS' if not fallos else 'FAIL ' + str(fallos)}   (mecanica solamente; el arnes NO se ejecuto)")
     return 0 if not fallos else 1
 
