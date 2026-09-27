@@ -16,11 +16,11 @@ Documento vigente con las cifras medidas. Sustituye a las actas históricas (`do
 
 Condición: imágenes ya descargadas y volúmenes de ERPNext existentes (el sitio se adoptó como completo; ver H16). El arranque en frío con todo vacío está en la sección siguiente.
 
-## Arranque en frío desde un clon limpio (27/09/2026)
+## Arranque en frío desde un clon limpio (27/09/2026, primera pasada: falla)
 
 Lo que haría una persona externa: `git clone` + el lanzador, sin nada del proyecto en Docker. Antes se borró todo lo del proyecto en este PC: `levantar-sistema.ps1 borrar -Si` (25 contenedores, 12 volúmenes con nombre, 6 redes), los 92 volúmenes anónimos que quedaban y las 14 imágenes del proyecto (incluidas 2 construcciones viejas de OpenVPMS y la antigua `frappe/erpnext`). Quedó la caché de build de BuildKit (787,6 MB), que no se borró porque es global. Clon de `https://github.com/J4F3ET/UD.RedesCorporativa.ProyectoFinal.git` en el commit `045c81d` (mismo árbol que `master` tras fusionar el PR #37), con `core.autocrlf=true`. Lanzado desde PowerShell: `levantar-sistema.ps1 -TimeoutMin 90`.
 
-**Resultado: FALLA.** El arranque en frío no termina: `pretix-web` queda `unhealthy` para siempre (ver Pendientes, "Pretix no arranca en frío") y `docker compose up -d` aborta. Volver a lanzar no lo arregla.
+**Resultado: FALLA.** El arranque en frío no termina: `pretix-web` queda `unhealthy` para siempre y `docker compose up -d` aborta. Volver a lanzar no lo arregla. Corregido en `58f39df` y `1b01e0a`; ver la segunda pasada y "Resuelto el 27/09/2026".
 
 | Hito | Hora | Tiempo |
 |---|---|---|
@@ -54,6 +54,39 @@ Estado final: 18 contenedores en marcha y sanos, `pretix-web` en marcha pero `un
 **OpenVPMS sin caché.** Como la construcción del arranque salió entera de la caché, después se construyó aparte `docker build --no-cache servicios/openvpms` con una etiqueta desechable, borrada al terminar: RC=0 en 133 s. El `curl` del zip de OpenVPMS 2.4.0.1 se ejecutó de verdad (73,5 s, junto con el `unzip`) y el conector de MySQL también. La imagen base `tomcat:9.0-jdk11-temurin` salió de la caché también con `--no-cache`.
 
 **Limitaciones de la prueba.** Este PC tiene un `%UserProfile%\.wslconfig` que no es el de por defecto (`memory=8GB`, `swap=4GB`, `vmIdleTimeout=2h`, el de [`operacion.md`](operacion.md#wslconfig-recomendado)). Una persona externa tendría los valores por defecto. La caché de build de BuildKit no se borró. Las cifras son de un solo intento.
+
+## Arranque en frío con el arreglo (27/09/2026, segunda pasada)
+
+Mismo clon, en la rama `docs/arranque-en-frio` con `58f39df` (healthchecks de las bases y `depends_on` con `service_healthy`) y `1b01e0a` (`arrancar` reinicia los contenedores `unhealthy`). Se borraron los contenedores, las redes y **todos los volúmenes** del proyecto (`borrar -Si` y los 2 anónimos que quedaban). Se **conservaron las imágenes**: la descarga ya se midió en la primera pasada (27 min 22 s). Lanzado desde PowerShell con `levantar-sistema.ps1 -Forzar -TimeoutMin 90`; hubo que usar `-Forzar` porque solo había 3,56 GB libres en Windows.
+
+**Resultado: RC=0, 25/25 sanos (22 en marcha + 3 `Exited (0)`), sin intervención manual.**
+
+| Hito | Hora | Tiempo |
+|---|---|---|
+| Lanzamiento → `up -d` | 09:11:51 → 09:13:06 | 1 min 15 s (requisitos, `preparar`, imagen de OpenVPMS desde caché) |
+| `pretix-db` e `inventree-db` healthy (`pg_isready`) | 09:15:17 | 1 min 31 s tras arrancar Postgres (`initdb`) |
+| `pretix-web` arranca | 09:15:23 | **después** de `pretix-db` healthy: 0 `Connection refused` en su log |
+| Migraciones de Pretix | 09:18:39 → 09:31:43 | 13 min 4 s; `pretix-web` healthy a las 09:32:55 |
+| `openvpms-db` en marcha → healthy | 09:13:53 → 09:21:13 | **440 s** (`start_period` 600 s) |
+| OpenVPMS: esquema / datos base / Tomcat arriba | 09:21:49 → 09:28:28 / → 09:31:47 / 09:36:59 | 6 min 39 s / 3 min 19 s / 5 min 12 s |
+| `inventree-app` healthy | 09:31:56 | 16 min 38 s desde su arranque |
+| `erpnext-create-site` | 09:18:44 → 09:46:59 | **28 min 15 s**, Exited (0) |
+| `esperar_sano` | 09:47:29 → 09:47:55 | `[00:26] sanos 25/25` |
+| Administrador de Pretix y fin | 09:48:07 | **36 min 16 s en total, RC=0** |
+
+Con la descarga de imágenes de la primera pasada, un primer arranque real desde cero ronda **1 h 4 min** en este equipo (27 min 22 s + 36 min 16 s).
+
+| Comprobación | Resultado |
+|---|---|
+| `http://localhost:18080/openvpms/login` | 200 |
+| `http://localhost:18081/login` (ERPNext) | 200 |
+| `http://localhost:18082/control/login` (Pretix) | 200 |
+| `http://localhost:18083/web/login` (InvenTree) | 200; `/static/web/assets/index-C2rs8w4F.js` 200 `text/javascript` |
+| `verificar` completo | **99 PASS, 0 FAIL, 13 INFO, RC=0** en 14 min 15 s (`sistema/resultados/verificacion-20260927-094944.txt`); `ExecMainStartTimestamp` 09:12:15 antes y después |
+| Disco | 12 imágenes con 10,13 GB (incluye la base de Tomcat que quedó del `--no-cache`), 819 MB de volúmenes y 552 MB de contenedores |
+| Memoria | `docker stats` de los 22 en marcha: 5.200 MiB; `MemAvailable` en WSL 2,7 GB |
+
+**Reanudar tras el fallo de la primera pasada (misma mañana, antes de esta pasada).** Con los arreglos aplicados sobre el sistema que dejó la primera pasada (`pretix-web` `unhealthy`), `arrancar` reinició `pretix-web` (`reiniciar_unhealthy`), Pretix migró su base (295 migraciones) y el lanzador terminó con RC=0 y 25/25 en 13 min 58 s. Es la prueba de que el arranque vuelve a retomarse.
 
 ## Memoria por contenedor (`docker stats`, sistema completo, 26/09/2026)
 
@@ -95,6 +128,7 @@ Ajustes que llevaron a esta cifra, sin quitar ninguna función:
 | 26/09 22:46, completa, con H22 corregido | **99 PASS, 0 FAIL, 13 INFO, RC=0** (`sistema/resultados/verificacion-20260926-224652.txt`). Tras el `down`/`up` del caso 4, `/static` de InvenTree sigue respondiendo 200 |
 
 | 27/09 07:03, completa, tras reinicializar el directorio LDAP con los LDIF generados desde `test.env` (ver "Primer arranque de LDAP") | **99 PASS, 0 FAIL, 13 INFO, RC=0** (`sistema/resultados/verificacion-20260927-070340.txt`). Login LDAP de `rrhh.prueba` en ERPNext y de `logistica.prueba` en InvenTree en PASS, también tras el `down`/`up` del caso 4 |
+| 27/09 09:49, completa, tras el segundo arranque en frío con los volúmenes vacíos (Pretix corregido) | **99 PASS, 0 FAIL, 13 INFO, RC=0** (`sistema/resultados/verificacion-20260927-094944.txt`). `ExecMainStartTimestamp` 09:12:15 antes y después |
 
 Desde el 26/09 21:59 hay 99 PASS y no 92: la comprobación "los nombres dns/ntp/ldap apuntan al contenedor que los sirve", que era 1 INFO, pasó a ser una comprobación por cada uno de los 7 nombres de la zona (7 PASS). De ahí también 13 INFO en vez de 14.
 
@@ -132,10 +166,7 @@ Prueba de que el directorio nace bien solo con `sistema/test.env`, sin claves en
 | ID | Qué | Tipo |
 |---|---|---|
 | H12 | La cita de OpenLDAP 2.6 en la bibliografía de la Entrega 1 está pendiente de corregir (opción conservadora: corregir la cita, no cambiar la imagen) | documentación |
-| — | **Pretix no arranca en frío (bloqueante).** `pretix-web` depende de `pretix-db` sin `condition`, y `pretix-db` no tiene healthcheck. En el primer arranque Postgres ejecuta `initdb` y se reinicia, y `pretix-web` lanza su `migrate` antes de que acepte conexiones: `Connection refused` a las 13:11:44 UTC, y Postgres no terminó su inicialización hasta las 13:13:26 UTC. El script de la imagen no se detiene: sigue sin migrar y arranca la web contra una base vacía (`relation "pretixbase_globalsettingsobject_settingsstore" does not exist`). La web queda `unhealthy` y no se reinicia, porque el proceso no termina. `pretix-worker` y `pretix-cron` esperan a que `pretix-web` esté healthy, y `up -d` aborta. Con los volúmenes ya inicializados no pasa, y por eso no se había visto. Evidencia: sección "Arranque en frío desde un clon limpio" | robustez (bloqueante) |
-| — | **El arranque no se puede reanudar tras ese fallo.** El segundo `levantar-sistema.ps1` falló en 59 s con el mismo error: `up -d` no recrea `pretix-web` (su configuración no cambió) y lo encuentra `unhealthy`. Contradice lo que dicen el README y `operacion.md`: "si un arranque se corta, retoma donde quedó" | robustez |
-| — | En un arranque en frío toda la espera ocurre dentro de `docker compose up -d`, que respeta los `depends_on: service_healthy` y estuvo bloqueado 60 min. Por eso no aparece el progreso `[mm:ss] sanos N/25`, `-TimeoutMin` no interviene, y un fallo de salud se ve como "docker compose up fallo" | robustez |
-| — | Tiempos reales en frío frente a lo documentado: 27 min de descarga de imágenes, 25 min para el sitio de ERPNext (el script dice "~15") y 60 min hasta el fallo. `operacion.md` y el script hablan de "un cuarto de hora" y "~30 min" | documentación |
+| — | En un arranque en frío casi toda la espera ocurre dentro de `docker compose up -d`, que respeta los `depends_on: service_healthy` (35 min en la segunda pasada). Por eso no aparece el progreso `[mm:ss] sanos N/25`, `-TimeoutMin` no interviene, y un fallo de salud se ve como "docker compose up fallo". Documentado en [`operacion.md`](operacion.md#3-qué-pasa-en-un-arranque); falta decidir si el lanzador debe mostrar progreso durante esa espera | robustez |
 | — | La comprobación de memoria del `.ps1` se negó en este PC con 0 contenedores del proyecto (5,56 GB libres, umbral 6,9 GB). Con `-Forzar`, Windows bajó a 0,30 GB libres y `wsl.exe` agotó el tiempo de espera (`Wsl/Service/0x8007274c`) | validación |
 | — | Los volúmenes anónimos del proyecto no llevan la etiqueta `com.docker.compose.project`, solo `com.docker.volume.anonymous`, así que no se pueden filtrar por proyecto (el 27/09 se borraron 92, identificados por fecha y contenido) | mantenimiento |
 | — | `docker build --no-cache` de OpenVPMS reutiliza la imagen base `tomcat` de la caché de BuildKit. La descarga de la imagen base no se ha comprobado desde cero | validación |
@@ -157,7 +188,10 @@ Prueba de que el directorio nace bien solo con `sistema/test.env`, sin claves en
 
 Resuelto el 27/09/2026:
 
-- **H17:** en el arranque en frío desde un clon limpio, `openvpms-db` quedó healthy **527 s** después de arrancar, dentro de su `start_period` de 600 s. Después OpenVPMS creó su esquema y `openvpms-app` quedó healthy.
+- **H17:** en el arranque en frío desde un clon limpio, `openvpms-db` quedó healthy **527 s** después de arrancar en la primera pasada y **440 s** en la segunda, dentro de su `start_period` de 600 s. Después OpenVPMS creó su esquema y `openvpms-app` quedó healthy.
+- **Pretix no arrancaba en frío** (`58f39df`). `pretix-web` dependía de `pretix-db` sin `condition`, y `pretix-db` no tenía healthcheck. En el primer arranque, Postgres ejecuta `initdb` y se reinicia, y `pretix-web` lanzaba su `migrate` antes de que aceptara conexiones ("Connection refused"). El script de la imagen no se detiene: arrancaba la web contra una base vacía (`relation "pretixbase_globalsettingsobject_settingsstore" does not exist`), la web quedaba `unhealthy` para siempre y `up -d` abortaba a los 60 min. Arreglo: healthcheck `pg_isready -h 127.0.0.1` en `pretix-db` e `inventree-db` (con `-h`, el servidor temporal de `initdb`, que solo escucha en el socket local, no cuenta como listo), `redis-cli ping` en los tres redis, y `condition: service_healthy` en `pretix-web`, `inventree-app` y `erpnext-create-site`. En `docker compose config` solo cambian los healthchecks y las condiciones.
+- **El arranque no se podía reanudar tras ese fallo** (`1b01e0a`). `up -d` no recrea un contenedor cuya configuración no cambió, así que cada relanzamiento abortaba en segundos. Ahora `arrancar` reinicia antes los contenedores `unhealthy`. Probado sobre el sistema fallido: RC=0 y 25/25.
+- **Tiempos documentados:** el script y [`operacion.md`](operacion.md) decían ~15 min para el sitio de ERPNext y "un cuarto de hora" para el primer arranque. Ahora dicen ~25-30 min y "más de media hora con las imágenes descargadas, más la descarga", como se midió (28 min 15 s y 36 min 16 s).
 
 Resuelto el 26/09/2026:
 

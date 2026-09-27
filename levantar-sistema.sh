@@ -324,7 +324,7 @@ diagnostico() {
 
 esperar_sano() {
   paso "Esperando a que los servicios queden sanos (maximo ${TIMEOUT_MIN} min)"
-  info "El primer arranque tarda: la base de OpenVPMS ~8 min y despues la aplicacion ~5; el sitio de ERPNext ~15."
+  info "El primer arranque tarda: la base de OpenVPMS ~8 min y despues la aplicacion ~15; el sitio de ERPNext ~25-30."
   local inicio limite servicios n
   inicio="$(date +%s)"; limite=$(( inicio + TIMEOUT_MIN * 60 ))
   servicios="$(dc config --services)"
@@ -493,7 +493,7 @@ accion_borrar() {
   cd "${RAIZ}"
   if ! ${SI}; then
     printf '\nEsto BORRA los contenedores y TODOS los datos (bases de datos, sitio de ERPNext, directorio LDAP).\n'
-    printf 'El siguiente arranque volvera a inicializarlo todo (~30 min). Escribe "borrar" para confirmar: '
+    printf 'El siguiente arranque volvera a inicializarlo todo (~40 min). Escribe "borrar" para confirmar: '
     local r; read -r r
     [ "${r}" = "borrar" ] || { echo "Cancelado."; exit 0; }
   fi
