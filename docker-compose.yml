@@ -166,6 +166,16 @@ services:
       POSTGRES_DB: pretix
       POSTGRES_USER: pretix
       POSTGRES_PASSWORD: ${PRETIX_DB_PASSWORD}
+    # Sana solo cuando Postgres acepta conexiones TCP. Durante el primer initdb la imagen levanta un servidor temporal que
+    # escucha solo en el socket local y luego lo reinicia: con -h 127.0.0.1 esa fase no cuenta como lista. Sin esto, la
+    # app migraba contra "Connection refused" en el primer arranque (arranque en frio del 27/09/2026, Pretix).
+    # initdb tardo ~2 min en frio: start_period holgado; el primer exito lo cierra.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 300s
     volumes:
       - pretix_db_data:/var/lib/postgresql/data
     networks:
@@ -176,6 +186,12 @@ services:
     image: redis:7.4.11@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
     container_name: pretix-redis
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -h 127.0.0.1 ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
     networks:
       vlan20_taquilla:
         ipv4_address: ${NET_TAQUILLA:-10.10.20}.12
@@ -191,8 +207,10 @@ services:
     # (con prefijo se ignoraria en silencio). Por defecto seria 2 x nproc.
     command: ["web"]
     depends_on:
-      - pretix-db
-      - pretix-redis
+      pretix-db:
+        condition: service_healthy
+      pretix-redis:
+        condition: service_healthy
     environment:
       NUM_WORKERS: "2"
       PRETIX_DATABASE_BACKEND: postgresql
@@ -313,6 +331,16 @@ services:
       POSTGRES_DB: inventree
       POSTGRES_USER: inventree
       POSTGRES_PASSWORD: ${INVENTREE_DB_PASSWORD}
+    # Sana solo cuando Postgres acepta conexiones TCP. Durante el primer initdb la imagen levanta un servidor temporal que
+    # escucha solo en el socket local y luego lo reinicia: con -h 127.0.0.1 esa fase no cuenta como lista. Sin esto, la
+    # app migraba contra "Connection refused" en el primer arranque (arranque en frio del 27/09/2026, Pretix).
+    # initdb tardo ~2 min en frio: start_period holgado; el primer exito lo cierra.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 300s
     volumes:
       - inventree_db_data:/var/lib/postgresql/data
     networks:
@@ -324,7 +352,8 @@ services:
     container_name: inventree-app
     restart: unless-stopped
     depends_on:
-      - inventree-db
+      inventree-db:
+        condition: service_healthy
     # H22: whitenoise sirve /static desde STATIC_ROOT (volumen inventree_data) y solo lo indexa al arrancar, pero
     # INVENTREE_AUTO_UPDATE solo migra: sin collectstatic el directorio queda vacio y /web falla con "INVE-E1".
     # Se recogen los estaticos (invoke static, idempotente: --clear por defecto) y luego se ejecuta EXACTAMENTE el CMD
@@ -448,6 +477,12 @@ services:
     image: redis:7.4.11@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
     container_name: erpnext-redis-cache
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -h 127.0.0.1 ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
     networks:
       - erpnext_internal
 
@@ -455,6 +490,12 @@ services:
     image: redis:7.4.11@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
     container_name: erpnext-redis-queue
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -h 127.0.0.1 ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
     volumes:
       - erpnext_redis_queue_data:/data
     networks:
@@ -500,9 +541,9 @@ services:
       erpnext-configurator:
         condition: service_completed_successfully
       erpnext-redis-cache:
-        condition: service_started
+        condition: service_healthy
       erpnext-redis-queue:
-        condition: service_started
+        condition: service_healthy
     entrypoint: ["bash", "-c"]
     # "bench new-site" deja el scheduler APAGADO (System Settings.enable_scheduler = 0, imprime "*** Scheduler is disabled ***"):
     # comprueba si esta activo antes de que exista el sitio (frappe/installer.py:83), falla, y al terminar hace
