@@ -186,9 +186,12 @@ el propio equipo**, no desde la red local. La lista de puertos está en
 [`arquitectura.md`, "Puertos publicados"](arquitectura.md#7-puertos-publicados); OpenLDAP publica también el puerto sin
 cifrar.
 
-Si `PUBLISH_IP` o `DNS_BIND_IP` faltaran en `test.env`, el compose publica en `0.0.0.0`, es decir, en todas las
-interfaces: todos los `ports:` del `docker-compose.yml` único usan `${PUBLISH_IP:-0.0.0.0}` o `${DNS_BIND_IP:-0.0.0.0}`.
-Por eso no hay que quitar esas variables.
+Si `PUBLISH_IP` o `DNS_BIND_IP` faltaran en `test.env`, el compose publica igualmente en `127.0.0.1`: todos los `ports:`
+del `docker-compose.yml` único usan `${PUBLISH_IP:-127.0.0.1}` o `${DNS_BIND_IP:-127.0.0.1}` (hasta el 27/09/2026 el valor
+por defecto era `0.0.0.0`, todas las interfaces). Para abrir el acceso a otros equipos, publicar en la IP de la interfaz
+de intranet/VPN, nunca en `0.0.0.0`: ver
+[`operacion.md`, "Acceso desde otros equipos de la intranet"](operacion.md#acceso-desde-otros-equipos-de-la-intranet)
+(no probado).
 
 ### Qué aísla el sistema
 

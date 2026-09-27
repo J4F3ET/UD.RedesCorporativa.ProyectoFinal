@@ -153,7 +153,7 @@ services:
         ipv4_address: ${NET_INFRA:-10.10.99}.24
     # Desde el host: http://localhost:<OPENVPMS_PORT>/openvpms (PUBLISH_IP=127.0.0.1 en sistema/test.env).
     ports:
-      - "${PUBLISH_IP:-0.0.0.0}:${OPENVPMS_PORT:-8080}:8080"
+      - "${PUBLISH_IP:-127.0.0.1}:${OPENVPMS_PORT:-8080}:8080"
 
   # =====================================================================================================================
   # Taquilla y Boletería (VLAN 20): Pretix. Ficheros en servicios/pretix/.
@@ -228,7 +228,7 @@ services:
         ipv4_address: ${NET_INFRA:-10.10.99}.21
     # Desde el host: http://localhost:<PRETIX_PORT> (PUBLISH_IP=127.0.0.1 en sistema/test.env).
     ports:
-      - "${PUBLISH_IP:-0.0.0.0}:${PRETIX_PORT:-80}:80"
+      - "${PUBLISH_IP:-127.0.0.1}:${PRETIX_PORT:-80}:80"
 
   # Worker de celery (pagos, correos, generacion de PDF). Misma imagen y digest que pretix-web. Sin healthcheck: celery no
   # habla HTTP. AUTOMIGRATE=skip: solo pretix-web migra la base; por eso espera a que este healthy (ya migro).
@@ -388,7 +388,7 @@ services:
         ipv4_address: ${NET_INFRA:-10.10.99}.22
     # Desde el host: http://localhost:<INVENTREE_PORT> (PUBLISH_IP=127.0.0.1 en sistema/test.env).
     ports:
-      - "${PUBLISH_IP:-0.0.0.0}:${INVENTREE_PORT:-8000}:8000"
+      - "${PUBLISH_IP:-127.0.0.1}:${INVENTREE_PORT:-8000}:8000"
 
   # Worker de tareas en segundo plano de InvenTree (correo, importaciones, informes).
   # Espera a que la app este sana para no competir por la clave secreta ni las migraciones.
@@ -738,7 +738,7 @@ services:
       vlan40_rrhh:
         ipv4_address: ${NET_RRHH:-10.10.40}.10
     ports:
-      - "${PUBLISH_IP:-0.0.0.0}:${ERPNEXT_PORT:-8080}:8080"
+      - "${PUBLISH_IP:-127.0.0.1}:${ERPNEXT_PORT:-8080}:8080"
 
   # =====================================================================================================================
   # Infraestructura transversal (VLAN 99): OpenLDAP con LDAPS y CA interna, DNS (bind9) y NTP.
@@ -780,8 +780,8 @@ services:
         ipv4_address: ${NET_INFRA:-10.10.99}.10
     # Publicados en PUBLISH_IP para las herramientas del host (ldapsearch...). Las apps llegan por vlan99_infra (extra_hosts).
     ports:
-      - "${PUBLISH_IP:-0.0.0.0}:${LDAP_PORT:-389}:389"
-      - "${PUBLISH_IP:-0.0.0.0}:${LDAPS_PORT:-636}:636"
+      - "${PUBLISH_IP:-127.0.0.1}:${LDAP_PORT:-389}:389"
+      - "${PUBLISH_IP:-127.0.0.1}:${LDAPS_PORT:-636}:636"
 
   dns:
     image: internetsystemsconsortium/bind9:9.18@sha256:1ffb29c718ee2540c5643c1e8166629a07bbd505f99107baae535e9f86eb7eef
@@ -796,8 +796,8 @@ services:
         ipv4_address: ${NET_INFRA:-10.10.99}.11
     # 53 suele estar ocupado en Windows: se publica en DNS_BIND_IP (127.0.0.1) y en DNS_PORT (1053), de sistema/test.env.
     ports:
-      - "${DNS_BIND_IP:-0.0.0.0}:${DNS_PORT:-53}:53/udp"
-      - "${DNS_BIND_IP:-0.0.0.0}:${DNS_PORT:-53}:53/tcp"
+      - "${DNS_BIND_IP:-127.0.0.1}:${DNS_PORT:-53}:53/udp"
+      - "${DNS_BIND_IP:-127.0.0.1}:${DNS_PORT:-53}:53/tcp"
 
   ntp:
     image: cturra/ntp:latest@sha256:7224d4e7c7833aabbcb7dd70c46c8a8dcccda365314c6db047b9b10403ace3bc
@@ -818,7 +818,7 @@ services:
         ipv4_address: ${NET_INFRA:-10.10.99}.12
     # 123/udp suele estar ocupado por el servicio de hora de Windows (w32time): por eso NTP_PORT es 1123 en sistema/test.env.
     ports:
-      - "${PUBLISH_IP:-0.0.0.0}:${NTP_PORT:-123}:123/udp"
+      - "${PUBLISH_IP:-127.0.0.1}:${NTP_PORT:-123}:123/udp"
 
 volumes:
   # OpenVPMS

@@ -103,7 +103,6 @@ Prueba de que el directorio nace bien solo con `sistema/test.env`, sin claves en
 | — | Diseño con switch L2/L3 sin probar contra hardware real | limitación conocida |
 | — | Rotar las contraseñas de laboratorio de `sistema/test.env` si el repositorio se hace público | seguridad |
 | — | InvenTree no sirve `/media` sin `DEBUG`: las imágenes de artículos y los adjuntos que se suban no se verán. Hoy solo existe `media/report`, así que no se pierde nada. Arreglarlo exige un proxy (contenedor nuevo y descarga de su imagen), que seguiría necesitando el arreglo de H22 | decisión del usuario |
-| — | Los `ports:` del compose publican por defecto en `0.0.0.0` (`${PUBLISH_IP:-0.0.0.0}`, `${DNS_BIND_IP:-0.0.0.0}`); `test.env` fija `127.0.0.1`. Propuesta: que el valor por defecto sea `127.0.0.1`, más seguro si falta `test.env` | decisión del usuario |
 | — | `verificar` no comprueba la interfaz web de las aplicaciones: H22 pasó 7 pasadas en verde porque solo se probaban API y LDAP. Falta una sonda que pida un asset referenciado por el HTML de cada app y exija un `content-type` que no sea HTML | validación |
 | — | `arrancar` lanzado desde Git Bash devolvió RC=2 aunque el log decía "los 25 servicios estan sanos"; el siguiente, desde PowerShell, dio RC=0. Causa sin identificar (el envoltorio o el script) | robustez |
 | — | Ninguna aplicación es cliente de `ntp-interno`: solo lo consulta `verificar` (ver [`arquitectura.md`](arquitectura.md#ntp)). Falta decidir si se documenta como limitación o se configura un cliente en las apps | decisión del usuario |

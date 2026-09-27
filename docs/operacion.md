@@ -69,6 +69,20 @@ Sin acción se ejecuta `arrancar`. Si PowerShell bloquea el script, usa el `.cmd
 
 Las cifras medidas están en [`resultados-un-host.md`](resultados-un-host.md). Al terminar, `arrancar` y `estado` muestran las direcciones de acceso. Las contraseñas de laboratorio están en [`sistema/test.env`](../sistema/test.env).
 
+### Acceso desde otros equipos de la intranet
+
+**No probado en este laboratorio.** Por defecto todo se publica en `127.0.0.1` y solo se entra desde el propio equipo
+([`arquitectura.md`](arquitectura.md#7-puertos-publicados)). Lo que hay que saber antes de abrirlo:
+
+- Docker corre **dentro de la VM de WSL**, no en Windows.
+- `%UserProfile%\.wslconfig` usa la red por defecto de WSL (NAT: no hay `networkingMode`, y `localhostForwarding=true`).
+  Con ella Windows solo reenvía `localhost` hacia la VM, así que otros equipos **no** llegan a los puertos aunque se
+  publiquen en `0.0.0.0` dentro de WSL.
+- La forma correcta de dar acceso a la intranet o a la VPN es publicar en la IP de la interfaz de intranet/VPN del host
+  (`PUBLISH_IP=<esa IP>` en `sistema/test.env`), **nunca en `0.0.0.0`**, y exponerla desde Windows con
+  `networkingMode=mirrored` en `.wslconfig` o con `netsh interface portproxy`, más una regla del Firewall de Windows
+  limitada a esa red.
+
 ## 3. Qué pasa en un arranque
 
 `arrancar` ejecuta, en este orden:
