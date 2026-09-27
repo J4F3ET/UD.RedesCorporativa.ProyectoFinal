@@ -3,12 +3,12 @@
 Probada en el arnés `sistema/` (un solo host, redes `bridge`) el 2026-09-19. No valida macvlan ni el switch.
 
 ## Diseño
-- Directorio: `dc=reservaviva,dc=local`, con una OU por departamento (`ou=medica`, `ou=operaciones`, `ou=rrhh`), `ou=servicios` con la cuenta de solo lectura `cn=svc-lectura` y usuarios de prueba. Definición en `docker/pc3-administracion-infra/ldap/` (ver su README para usuarios y claves).
-- Conexión: `ldaps://ldap.reservaviva.local:636` con verificación de cadena y nombre contra la CA de `scripts/generar-certificados.sh`, montada como `/certs/ca.crt` (solo lectura). El nombre se fija con `extra_hosts` a `10.10.99.10` para coincidir con el certificado sin depender del DNS.
+- Directorio: `dc=reservaviva,dc=local`, con una OU por departamento (`ou=medica`, `ou=operaciones`, `ou=rrhh`), `ou=servicios` con la cuenta de solo lectura `cn=svc-lectura` y usuarios de prueba. Definición en [`servicios/openldap/`](../servicios/openldap/README.md) (ver su README para usuarios y claves).
+- Conexión: `ldaps://ldap.reservaviva.local:636` con verificación de cadena y nombre contra la CA de `servicios/ca/generar-certificados.sh` (`servicios/ca/certs/ca.crt`), montada como `/certs/ca.crt` (solo lectura). El nombre se fija con `extra_hosts` a `10.10.99.10` para coincidir con el certificado sin depender del DNS.
 - Flujo: la app hace bind con `svc-lectura`, busca `uid=<usuario>` **solo en la OU de su departamento** y hace bind con el DN encontrado y la clave del usuario. Un usuario de otro departamento recibe "clave inválida".
-- **InvenTree** (PC-2): `django-auth-ldap` con variables `INVENTREE_LDAP_*` en `inventree-app`; búsqueda en `ou=operaciones`. El filtro por defecto de la imagen es `(uid= %(user)s)` (con espacio) y no encuentra a nadie, por lo que se fija `(uid=%(user)s)`.
-- **ERPNext** (PC-3): "LDAP Settings" de Frappe (`ldap3`), configurado por el job idempotente `erpnext-ldap-config`; búsqueda en `ou=rrhh`. El que habla LDAPS es `erpnext-backend`.
-- Nuevas variables: `INVENTREE_LDAP_BIND_PASSWORD` (PC-2) y `ERPNEXT_LDAP_BIND_PASSWORD` (PC-3), ambas la clave de `svc-lectura`.
+- **InvenTree** (Logística, VLAN 30): `django-auth-ldap` con variables `INVENTREE_LDAP_*` en `inventree-app`; búsqueda en `ou=operaciones`. El filtro por defecto de la imagen es `(uid= %(user)s)` (con espacio) y no encuentra a nadie, por lo que se fija `(uid=%(user)s)`.
+- **ERPNext** (RRHH, VLAN 40): "LDAP Settings" de Frappe (`ldap3`), configurado por el job idempotente `erpnext-ldap-config`; búsqueda en `ou=rrhh`. El que habla LDAPS es `erpnext-backend`.
+- Nuevas variables: `INVENTREE_LDAP_BIND_PASSWORD` y `ERPNEXT_LDAP_BIND_PASSWORD` (en `sistema/test.env`), ambas la clave de `svc-lectura`.
 
 ## Resultados
 | Prueba | ERPNext (`/api/method/frappe.integrations.doctype.ldap_settings.ldap_settings.login`) | InvenTree (`/api/user/token/`) |

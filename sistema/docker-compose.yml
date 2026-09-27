@@ -1,8 +1,0 @@
-name: reservaviva-smoke
-include:
-  - path: [../docker/pc1-medica/docker-compose.yml, override-pc1.yml]
-    env_file: test.env
-  - path: [../docker/pc2-operaciones/docker-compose.yml, override-pc2.yml]
-    env_file: test.env
-  - path: [../docker/pc3-administracion-infra/docker-compose.yml, override-pc3.yml]
-    env_file: test.env

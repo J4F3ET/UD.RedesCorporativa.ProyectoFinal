@@ -1,7 +1,17 @@
-# Bootstrap de OpenLDAP
+# OpenLDAP (Infraestructura, VLAN 99)
+
+Directorio central del zoológico, con LDAPS (636) firmado por la CA interna de [`../ca/`](../ca/README.md).
+
+- **Servicio de compose:** `openldap` (imagen `osixia/openldap`).
+- **Ficheros:** `05-acl-servicio.ldif` (permisos de la cuenta de servicio), `10-estructura.ldif` (una OU por departamento)
+  y `20-usuarios-prueba.ldif` (usuarios de prueba), más este README.
+- Lo usan ERPNext e InvenTree: [`../../docs/integracion-ldap-erpnext-inventree.md`](../../docs/integracion-ldap-erpnext-inventree.md).
+  Direcciones IP y puertos: [`../../docs/arquitectura.md`](../../docs/arquitectura.md).
+
+## Bootstrap
 
 Los `*.ldif` de esta carpeta se montan en `/container/service/slapd/assets/config/bootstrap/ldif/custom`
-(ver `docker-compose.yml`) y la imagen `osixia/openldap` los carga en orden alfabético **solo en el primer
+(ver el `docker-compose.yml` de la raíz) y la imagen `osixia/openldap` los carga en orden alfabético **solo en el primer
 arranque, con el volumen `ldap_data` vacío**. Si el directorio ya existe, no se vuelven a aplicar: para
 recargarlos, `docker compose down -v` (borra los datos) o `ldapadd` a mano.
 

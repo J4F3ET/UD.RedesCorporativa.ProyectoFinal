@@ -1,0 +1,832 @@
+# Reserva Viva: el sistema completo (25 servicios) en UN solo host.
+#
+# Es el único compose del proyecto. Se usa desde la raíz del repositorio, con las variables del laboratorio:
+#   docker compose --env-file sistema/test.env <orden>
+# Lo normal es no llamarlo a mano: levantar-sistema.sh (o levantar-sistema.ps1 / .cmd en Windows) genera la CA y el
+# certificado LDAPS, la zona DNS y la imagen de OpenVPMS, levanta todo y espera a que esté sano.
+#
+# Cada VLAN del diseño es una red bridge de Docker con su misma subred. Cada aplicación está en la VLAN de su departamento
+# y además en vlan99_infra, para llegar a OpenLDAP, DNS y NTP. Los servicios van agrupados por departamento; los ficheros
+# de cada uno (configuración, imagen propia, pruebas) están en servicios/<servicio>/. El diseño con 3 equipos, VLAN 802.1Q
+# y switch es un anexo que no se despliega (diseno-red/).
+#
+# NO cambiar el nombre del proyecto ni las claves de red, de servicio o de volumen: Compose crearía volúmenes nuevos y
+# habría que reinicializarlo todo (~30 min). "smoke" es histórico: viene de cuando esto era una prueba de humo.
+name: reservaviva-smoke
+
+networks:
+  # Una red bridge por VLAN. NET_* solo cambia si la subred choca con otra red del host (no se define en sistema/test.env).
+  vlan10_medica:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${NET_MEDICA:-10.10.10}.0/24
+          gateway: ${NET_MEDICA:-10.10.10}.1
+
+  vlan20_taquilla:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${NET_TAQUILLA:-10.10.20}.0/24
+          gateway: ${NET_TAQUILLA:-10.10.20}.1
+
+  vlan30_logistica:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${NET_LOGISTICA:-10.10.30}.0/24
+          gateway: ${NET_LOGISTICA:-10.10.30}.1
+
+  vlan40_rrhh:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${NET_RRHH:-10.10.40}.0/24
+          gateway: ${NET_RRHH:-10.10.40}.1
+
+  # Infraestructura transversal: openldap .10, dns-interno .11, ntp-interno .12 y la segunda pata de cada aplicación
+  # (pretix-web .21, inventree-app .22, erpnext-backend .23, openvpms-app .24).
+  vlan99_infra:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${NET_INFRA:-10.10.99}.0/24
+          gateway: ${NET_INFRA:-10.10.99}.1
+
+  # Red privada de ERPNext (MariaDB, Redis, workers). No sale a ninguna VLAN.
+  erpnext_internal:
+    driver: bridge
+
+services:
+  # =====================================================================================================================
+  # Unidad Médica Veterinaria (VLAN 10): OpenVPMS. Ficheros en servicios/openvpms/.
+  # =====================================================================================================================
+  # OpenVPMS no tiene imagen Docker oficial: se construye servicios/openvpms/Dockerfile (Tomcat 9 + Java 11 + release
+  # oficial 2.4.0.1). El build descarga ~300 MB y necesita Internet UNA vez; en un laboratorio sin salida, construir antes
+  # en otro equipo y llevar la imagen (`docker save` / `docker load`). El primer arranque crea el esquema y carga los datos
+  # base solo.
+  openvpms-db:
+    image: mysql:8.0.46@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+    container_name: openvpms-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${OPENVPMS_DB_ROOT_PASSWORD}
+      # No se define MYSQL_DATABASE: `toolbox database --create` de OpenVPMS crea la base y su usuario.
+    # innodb_buffer_pool_size=128M (el valor por defecto de MySQL 8; antes 512M, fijado a mano sin motivo documentado en
+    # el repo ni en el historial). Es una CACHÉ de páginas de datos, no una funcionalidad: no desaparece ninguna función de
+    # OpenVPMS ni cambia ningún comportamiento observable, solo cuántas páginas caben en memoria antes de ir a disco. La
+    # base de este laboratorio son pocos registros de prueba y un puñado de usuarios: medio giga de caché no se justifica.
+    # Es dimensionar a la carga real (como pretix), no recortar el entregable. Consumo medido: docs/resultados-un-host.md.
+    # PENDIENTE DE MEDIR (H17): el efecto sobre el primer arranque con el volumen vacío (484 s con 512M, ver healthcheck).
+    # InnoDB reserva el buffer pool al arrancar, así que con 128M debería tardar menos, pero eso es razonamiento, no
+    # medida; por eso el start_period NO se ha tocado. Si arranca antes, el margen sobra, y sobrar no cuesta nada.
+    command: ["--character-set-server=utf8mb4", "--max_allowed_packet=16M", "--innodb_file_per_table=1", "--innodb_buffer_pool_size=128M"]
+    # Antes openvpms-db no tenía healthcheck, y por eso un bucle de reinicios de openvpms-app pasó por "Up".
+    # Se sonda por TCP (127.0.0.1), no por el socket: durante el primer arranque MySQL 8 levanta un servidor temporal sin
+    # red para inicializar el directorio de datos, y solo cuando escucha el definitivo responde el ping.
+    # Medido en la validación en frío del sistema completo (datadir sobre /mnt/d, HDD de 5400 rpm; UTC): el entrypoint
+    # arranca a las 00:37:04, "init process done" a las 00:44:56 y "ready for connections" (el servidor definitivo, el
+    # que responde al ping) a las 00:45:08 = 484 s. Con start_period 180 s + 30 reintentos x 5 s el margen eran 330 s
+    # y compose abortaba el `up` con "container openvpms-db is unhealthy", y en cascada quedaron en "Created" openvpms-app y
+    # los servicios que compose aún no había creado. 600 s son ~24 % de margen sobre lo medido (no un "por si acaso"): en un
+    # HDD el mismo arranque varía según lo que compita por disco. Con 40 reintentos el margen total es 600 + 200 = 800 s.
+    # Los fallos dentro del start_period no cuentan y el primer éxito lo cierra, así que un valor holgado no retrasa el
+    # arranque: solo evita que compose se rinda antes de tiempo.
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 600s
+    volumes:
+      - openvpms_db_data:/var/lib/mysql
+    networks:
+      vlan10_medica:
+        ipv4_address: ${NET_MEDICA:-10.10.10}.11
+
+  openvpms-app:
+    build: ./servicios/openvpms
+    container_name: openvpms-app
+    restart: unless-stopped
+    # El entrypoint ya espera a MySQL hasta 180 s; `service_healthy` hace explícita la dependencia y evita arrancar la app
+    # (y sus reintentos) antes de que la base acepte conexiones.
+    depends_on:
+      openvpms-db:
+        condition: service_healthy
+    # Tomcat solo arranca cuando TODA la inicialización terminó, así que "healthy" significa que /openvpms/login responde.
+    # `curl -f` falla con cualquier HTTP >= 400. start_period 900 s: el primer arranque (esquema, datos base, clave de admin,
+    # plantillas, generar el WAR y desplegarlo) se midió en ~5 min en las rondas 3 y 4 del smoke test, aisladas; se triplica
+    # el margen porque con el sistema completo y memoria justa otros servicios del mismo host tardaron 1,5-2x más de lo
+    # esperado (erpnext-create-site ~9 min, MariaDB ~5 min). Los fallos dentro del periodo no cuentan y el primer éxito lo
+    # cierra. Un contenedor en bucle de reinicios nunca llega a healthy: pasado el periodo queda unhealthy, ya no pasa por "Up".
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/openvpms/login"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 900s
+    environment:
+      OPENVPMS_DB_HOST: ${NET_MEDICA:-10.10.10}.11
+      OPENVPMS_DB_ROOT_PASSWORD: ${OPENVPMS_DB_ROOT_PASSWORD}
+      OPENVPMS_DB_PASSWORD: ${OPENVPMS_DB_PASSWORD}
+      OPENVPMS_ADMIN_PASSWORD: ${OPENVPMS_ADMIN_PASSWORD}
+      # Heap de Tomcat. El Dockerfile fija por defecto "-Xms512m -Xmx1024m" (ENV de la imagen); el `environment` del compose
+      # lo sobrescribe sin reconstruir la imagen (entrypoint.sh e init-lib.sh no tocan CATALINA_OPTS y acaban en `exec "$@"`
+      # con el entorno intacto). -Xms512m reservaba medio giga de heap desde el arranque sin carga que lo justificara;
+      # -Xms128m deja crecer a la JVM solo lo que necesite. El techo baja de 1024m a 768m porque el laboratorio (pocos
+      # registros de prueba, un puñado de usuarios) no se acerca a eso; no se baja más: un heap corto no ahorra memoria,
+      # da OutOfMemoryError a mitad de la inicialización de OpenVPMS, que es la fase más pesada. No es una función del
+      # sistema: no cambia ningún comportamiento observable. Con este heap, el arranque del 26/09/2026 creó el esquema de
+      # OpenVPMS desde cero y terminó sano; el consumo medido está en docs/resultados-un-host.md.
+      CATALINA_OPTS: "-Xms128m -Xmx768m"
+      # Variables informativas: OpenVPMS 2.4.0.1 no tiene soporte LDAP y nada en el repo las lee. Son las IP de
+      # openldap, dns-interno y ntp-interno en vlan99_infra, a la que openvpms-app tambien esta conectada.
+      LDAP_HOST: ${NET_INFRA:-10.10.99}.10
+      DNS_HOST: ${NET_INFRA:-10.10.99}.11
+      NTP_HOST: ${NET_INFRA:-10.10.99}.12
+    volumes:
+      - openvpms_state:/var/lib/openvpms-state   # openvpms.properties (incluye la clave de cifrado)
+    networks:
+      vlan10_medica:
+        ipv4_address: ${NET_MEDICA:-10.10.10}.10
+      vlan99_infra:
+        ipv4_address: ${NET_INFRA:-10.10.99}.24
+    # Desde el host: http://localhost:<OPENVPMS_PORT>/openvpms (PUBLISH_IP=127.0.0.1 en sistema/test.env).
+    ports:
+      - "${PUBLISH_IP:-0.0.0.0}:${OPENVPMS_PORT:-8080}:8080"
+
+  # =====================================================================================================================
+  # Taquilla y Boletería (VLAN 20): Pretix. Ficheros en servicios/pretix/.
+  # =====================================================================================================================
+  pretix-db:
+    image: postgres:15.19@sha256:dfbbb0ad8cab91d41e99123664e37a9b25d0413426d4fb3154e4d668e5d35246
+    container_name: pretix-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pretix
+      POSTGRES_USER: pretix
+      POSTGRES_PASSWORD: ${PRETIX_DB_PASSWORD}
+    volumes:
+      - pretix_db_data:/var/lib/postgresql/data
+    networks:
+      vlan20_taquilla:
+        ipv4_address: ${NET_TAQUILLA:-10.10.20}.11
+
+  pretix-redis:
+    image: redis:7.4.11@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
+    container_name: pretix-redis
+    restart: unless-stopped
+    networks:
+      vlan20_taquilla:
+        ipv4_address: ${NET_TAQUILLA:-10.10.20}.12
+
+  pretix-web:
+    # Digest = el que tenia el tag "stable" (pretix 2026.7.0) cuando se probo. Ningun tag de version apunta a el:
+    # "2026.7.0" resuelve a otra compilacion (sha256:5df3b7aa...), asi que el digest es lo que fija la imagen.
+    image: pretix/standalone:stable@sha256:7f8c1b51f0b3e28f7c7a4245e85bcdfcd1e1bef76454dfc8314eda8f4ed596b3
+    container_name: pretix-web
+    restart: unless-stopped
+    # Topologia separada de la documentacion oficial (docker_smallscale): este contenedor solo sirve la web (nginx + gunicorn);
+    # celery vive en pretix-worker. NUM_WORKERS va SIN prefijo PRETIX_: la lee el script de arranque de la imagen, no la app
+    # (con prefijo se ignoraria en silencio). Por defecto seria 2 x nproc.
+    command: ["web"]
+    depends_on:
+      - pretix-db
+      - pretix-redis
+    environment:
+      NUM_WORKERS: "2"
+      PRETIX_DATABASE_BACKEND: postgresql
+      PRETIX_DATABASE_HOST: ${NET_TAQUILLA:-10.10.20}.11
+      PRETIX_DATABASE_NAME: pretix
+      PRETIX_DATABASE_USER: pretix
+      PRETIX_DATABASE_PASSWORD: ${PRETIX_DB_PASSWORD}
+      PRETIX_REDIS_LOCATION: redis://${NET_TAQUILLA:-10.10.20}.12/0
+      PRETIX_REDIS_SESSIONS: "true"
+      PRETIX_CELERY_BACKEND: redis://${NET_TAQUILLA:-10.10.20}.12/1
+      PRETIX_CELERY_BROKER: redis://${NET_TAQUILLA:-10.10.20}.12/2
+      # URL con la que se llega a Pretix: la que abre el navegador del host (puerto publicado en localhost). Pretix la usa
+      # para los enlaces absolutos y para CSRF_TRUSTED_ORIGINS. Su ALLOWED_HOSTS es '*', pero el middleware multidominio
+      # responde 400 a cualquier Host cuyo dominio no sea el de esta URL (salvo 'localhost').
+      PRETIX_PRETIX_URL: http://localhost:${PRETIX_PORT:-80}
+      PRETIX_MAIL_FROM: taquilla@reservaviva.local
+    # El primer arranque migra la base (~10 min): start_period largo para no marcarlo unhealthy sin motivo.
+    # La sonda lleva el mismo Host que el navegador (localhost:PRETIX_PORT): con el Host por defecto (127.0.0.1) Pretix
+    # responde 400 Bad Request, porque PRETIX_PRETIX_URL declara otro dominio, y el contenedor quedaba unhealthy para siempre.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1/control/login/', headers={'Host': 'localhost:${PRETIX_PORT:-80}'}), timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 900s
+    # /data guarda subidas, entradas/facturas generadas, logs y el fichero "secret"; se comparte con pretix-worker.
+    volumes:
+      - pretix_data:/data
+    networks:
+      vlan20_taquilla:
+        ipv4_address: ${NET_TAQUILLA:-10.10.20}.10
+      vlan99_infra:
+        ipv4_address: ${NET_INFRA:-10.10.99}.21
+    # Desde el host: http://localhost:<PRETIX_PORT> (PUBLISH_IP=127.0.0.1 en sistema/test.env).
+    ports:
+      - "${PUBLISH_IP:-0.0.0.0}:${PRETIX_PORT:-80}:80"
+
+  # Worker de celery (pagos, correos, generacion de PDF). Misma imagen y digest que pretix-web. Sin healthcheck: celery no
+  # habla HTTP. AUTOMIGRATE=skip: solo pretix-web migra la base; por eso espera a que este healthy (ya migro).
+  pretix-worker:
+    image: pretix/standalone:stable@sha256:7f8c1b51f0b3e28f7c7a4245e85bcdfcd1e1bef76454dfc8314eda8f4ed596b3
+    container_name: pretix-worker
+    restart: unless-stopped
+    command: ["taskworker", "--concurrency", "2"]
+    depends_on:
+      pretix-web:
+        condition: service_healthy
+    environment:
+      AUTOMIGRATE: "skip"
+      PRETIX_DATABASE_BACKEND: postgresql
+      PRETIX_DATABASE_HOST: ${NET_TAQUILLA:-10.10.20}.11
+      PRETIX_DATABASE_NAME: pretix
+      PRETIX_DATABASE_USER: pretix
+      PRETIX_DATABASE_PASSWORD: ${PRETIX_DB_PASSWORD}
+      PRETIX_REDIS_LOCATION: redis://${NET_TAQUILLA:-10.10.20}.12/0
+      PRETIX_REDIS_SESSIONS: "true"
+      PRETIX_CELERY_BACKEND: redis://${NET_TAQUILLA:-10.10.20}.12/1
+      PRETIX_CELERY_BROKER: redis://${NET_TAQUILLA:-10.10.20}.12/2
+      PRETIX_PRETIX_URL: http://localhost:${PRETIX_PORT:-80}
+      PRETIX_MAIL_FROM: taquilla@reservaviva.local
+    volumes:
+      - pretix_data:/data
+    networks:
+      vlan20_taquilla:
+        ipv4_address: ${NET_TAQUILLA:-10.10.20}.13
+
+  # Tareas periodicas de Pretix (expiracion de reservas, envios programados, mantenimiento). La documentacion oficial lo exige
+  # ("You need to set up a cronjob that runs the management command runperiodic", docker_smallscale) y en este despliegue NO
+  # existia: la imagen no trae cron en su supervisord (ni en "all" ni en "web") y ningun servicio lo lanzaba.
+  # "pretix cron" ejecuta runperiodic y TERMINA, asi que se repite en bucle. Se pasa por el lanzador de la imagen
+  # (/usr/local/bin/pretix), no por "python3 -m pretix runperiodic" a mano: el lanzador prepara DATA_DIR, HOME y
+  # DJANGO_SETTINGS_MODULE y crea /data/logs y /data/media, y su rama "cron" va ANTES del bloque de migracion (no migra).
+  # Intervalo 900 s (15 min): la documentacion admite de 1 min a 1 h; 15 min basta para que las reservas caduquen y los
+  # envios salgan con retraso pequeno, sin ejecutar a menudo. Coste: cada ejecucion levanta un Python de ~250 MB (cifra
+  # estimada por el RSS de los workers de celery/gunicorn, NO medida) durante unos segundos, ~96 veces al dia; en la espera el
+  # contenedor solo mantiene un bash y un sleep (pocos MB). Un fallo de una pasada no mata el bucle.
+  pretix-cron:
+    image: pretix/standalone:stable@sha256:7f8c1b51f0b3e28f7c7a4245e85bcdfcd1e1bef76454dfc8314eda8f4ed596b3
+    container_name: pretix-cron
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        while true; do
+          /usr/local/bin/pretix cron || echo "pretix cron termino con error $$?"
+          sleep 900
+        done
+    depends_on:
+      pretix-web:
+        condition: service_healthy
+    environment:
+      AUTOMIGRATE: "skip"
+      PRETIX_DATABASE_BACKEND: postgresql
+      PRETIX_DATABASE_HOST: ${NET_TAQUILLA:-10.10.20}.11
+      PRETIX_DATABASE_NAME: pretix
+      PRETIX_DATABASE_USER: pretix
+      PRETIX_DATABASE_PASSWORD: ${PRETIX_DB_PASSWORD}
+      PRETIX_REDIS_LOCATION: redis://${NET_TAQUILLA:-10.10.20}.12/0
+      PRETIX_REDIS_SESSIONS: "true"
+      PRETIX_CELERY_BACKEND: redis://${NET_TAQUILLA:-10.10.20}.12/1
+      PRETIX_CELERY_BROKER: redis://${NET_TAQUILLA:-10.10.20}.12/2
+      PRETIX_PRETIX_URL: http://localhost:${PRETIX_PORT:-80}
+      PRETIX_MAIL_FROM: taquilla@reservaviva.local
+    volumes:
+      - pretix_data:/data
+    networks:
+      vlan20_taquilla:
+        ipv4_address: ${NET_TAQUILLA:-10.10.20}.14
+
+  # =====================================================================================================================
+  # Logística y Almacén (VLAN 30): InvenTree. Ficheros en servicios/inventree/.
+  # =====================================================================================================================
+  inventree-db:
+    image: postgres:15.19@sha256:dfbbb0ad8cab91d41e99123664e37a9b25d0413426d4fb3154e4d668e5d35246
+    container_name: inventree-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: inventree
+      POSTGRES_USER: inventree
+      POSTGRES_PASSWORD: ${INVENTREE_DB_PASSWORD}
+    volumes:
+      - inventree_db_data:/var/lib/postgresql/data
+    networks:
+      vlan30_logistica:
+        ipv4_address: ${NET_LOGISTICA:-10.10.30}.11
+
+  inventree-app:
+    image: inventree/inventree:1.5.5@sha256:5dc64d7ceee39db7bd98bd4a8a2c6f95dcc7a3e0fc39c4c1ea1efe8ba1c83ea3
+    container_name: inventree-app
+    restart: unless-stopped
+    depends_on:
+      - inventree-db
+    environment:
+      INVENTREE_DB_ENGINE: postgresql
+      INVENTREE_DB_HOST: ${NET_LOGISTICA:-10.10.30}.11
+      INVENTREE_DB_PORT: "5432"
+      INVENTREE_DB_NAME: inventree
+      INVENTREE_DB_USER: inventree
+      INVENTREE_DB_PASSWORD: ${INVENTREE_DB_PASSWORD}
+      # La URL que abre el navegador del host. InvenTree la añade a ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS y
+      # CORS_ALLOWED_ORIGINS, y su interfaz web (/web) responde 500 ("INVE-E7") si la URL visitada no coincide con ella.
+      INVENTREE_SITE_URL: http://localhost:${INVENTREE_PORT:-8000}
+      INVENTREE_AUTO_UPDATE: "True"
+      # Procesos de gunicorn: dimensionado a la carga real del laboratorio (unos pocos usuarios de prueba). La imagen trae
+      # INVENTREE_GUNICORN_WORKERS=4 como valor por defecto (docker image inspect) y gunicorn.conf.py lo LEE del entorno
+      # (el arranque no pasa --workers), asi que se puede sobrescribir aqui. Con 2 procesos y los 4 hilos por proceso que fija
+      # gunicorn.conf.py (threads = 4) quedan 8 peticiones simultaneas: sobra para el laboratorio, no se quita ninguna funcion.
+      # Consumo medido con 2 procesos y el sistema completo: docs/resultados-un-host.md.
+      INVENTREE_GUNICORN_WORKERS: "2"
+      # InvenTree crea este superusuario solo al arrancar si no existe (idempotente).
+      INVENTREE_ADMIN_USER: ${INVENTREE_ADMIN_USER:-admin}
+      INVENTREE_ADMIN_PASSWORD: ${INVENTREE_ADMIN_PASSWORD:?definir INVENTREE_ADMIN_PASSWORD en sistema/test.env}
+      INVENTREE_ADMIN_EMAIL: ${INVENTREE_ADMIN_EMAIL:-admin@reservaviva.local}
+      # Autenticación LDAPS (django-auth-ldap): busca al usuario con la cuenta svc-lectura solo dentro de
+      # ou=operaciones (RRHH y Médica no entran aquí) y luego hace bind con su propia clave. La cadena TLS se
+      # verifica con la CA interna (servicios/ca/certs/ca.crt, montada en /certs/ca.crt).
+      # Los usuarios LDAP se crean en InvenTree en el primer login, sin permisos: asignárselos como admin.
+      INVENTREE_LDAP_ENABLED: "True"
+      INVENTREE_LDAP_SERVER_URI: ldaps://ldap.reservaviva.local:636
+      INVENTREE_LDAP_GLOBAL_OPTIONS: '{"OPT_X_TLS_CACERTFILE": "/certs/ca.crt", "OPT_X_TLS_REQUIRE_CERT": "OPT_X_TLS_DEMAND"}'
+      INVENTREE_LDAP_BIND_DN: cn=svc-lectura,ou=servicios,dc=reservaviva,dc=local
+      INVENTREE_LDAP_BIND_PASSWORD: ${INVENTREE_LDAP_BIND_PASSWORD:?definir INVENTREE_LDAP_BIND_PASSWORD en sistema/test.env}
+      INVENTREE_LDAP_SEARCH_BASE_DN: ou=operaciones,dc=reservaviva,dc=local
+      # El valor por defecto de la imagen es "(uid= %(user)s)" (con espacio) y no encuentra a nadie.
+      INVENTREE_LDAP_SEARCH_FILTER_STR: (uid=%(user)s)
+    # ldap.reservaviva.local lo resuelve ESTA línea, no bind9 (los contenedores usan el DNS de Docker). Apunta a openldap
+    # en vlan99_infra, a la que inventree-app tambien esta conectada; el nombre coincide con el certificado de OpenLDAP (SAN).
+    extra_hosts:
+      - "ldap.reservaviva.local:${NET_INFRA:-10.10.99}.10"
+    # Host = localhost:INVENTREE_PORT, como INVENTREE_SITE_URL (lo que manda el navegador): hoy InvenTree acepta cualquier
+    # Host (allowed_hosts '*' en su config.yaml), pero depender de esa tolerancia es el mismo defecto latente que tuvo Pretix.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:8000/api/', headers={'Host': 'localhost:${INVENTREE_PORT:-8000}'}), timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 900s
+    volumes:
+      - inventree_data:/home/inventree/data
+      # CA interna para verificar LDAPS. Si falta el fichero, Docker crearía un directorio vacío en su lugar y LDAPS
+      # fallaría sin un error claro: `levantar-sistema.sh preparar` la genera y comprueba que existe.
+      - ./servicios/ca/certs/ca.crt:/certs/ca.crt:ro
+    networks:
+      vlan30_logistica:
+        ipv4_address: ${NET_LOGISTICA:-10.10.30}.10
+      vlan99_infra:
+        ipv4_address: ${NET_INFRA:-10.10.99}.22
+    # Desde el host: http://localhost:<INVENTREE_PORT> (PUBLISH_IP=127.0.0.1 en sistema/test.env).
+    ports:
+      - "${PUBLISH_IP:-0.0.0.0}:${INVENTREE_PORT:-8000}:8000"
+
+  # Worker de tareas en segundo plano de InvenTree (correo, importaciones, informes).
+  # Espera a que la app este sana para no competir por la clave secreta ni las migraciones.
+  inventree-worker:
+    image: inventree/inventree:1.5.5@sha256:5dc64d7ceee39db7bd98bd4a8a2c6f95dcc7a3e0fc39c4c1ea1efe8ba1c83ea3
+    container_name: inventree-worker
+    restart: unless-stopped
+    depends_on:
+      inventree-app:
+        condition: service_healthy
+    command: ["invoke", "worker"]
+    environment:
+      INVENTREE_DB_ENGINE: postgresql
+      INVENTREE_DB_HOST: ${NET_LOGISTICA:-10.10.30}.11
+      INVENTREE_DB_PORT: "5432"
+      INVENTREE_DB_NAME: inventree
+      INVENTREE_DB_USER: inventree
+      INVENTREE_DB_PASSWORD: ${INVENTREE_DB_PASSWORD}
+      INVENTREE_SITE_URL: http://localhost:${INVENTREE_PORT:-8000}
+    volumes:
+      - inventree_data:/home/inventree/data
+    networks:
+      vlan30_logistica:
+        ipv4_address: ${NET_LOGISTICA:-10.10.30}.12
+
+  # =====================================================================================================================
+  # Recursos Humanos (VLAN 40): ERPNext HR (stack de frappe_docker). Ficheros en servicios/erpnext/.
+  # =====================================================================================================================
+  # El sitio "rrhh.reservaviva.local" lo crea solo "erpnext-create-site" (idempotente, sin pasos manuales). Solo el
+  # frontend (erpnext-hr, nginx) y el backend viven en VLAN 40; el backend llega a LDAP por vlan99_infra. El acceso se
+  # restringe con roles y permisos dentro de ERPNext: solo se exponen los perfiles y páginas del módulo HR.
+  erpnext-db:
+    image: mariadb:10.6.28@sha256:40153feb479c0da88b5cfe3f50f44c91f7baf05a1b7bcc5beb7eb37a890a8f16
+    container_name: erpnext-db
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+    environment:
+      MARIADB_ROOT_PASSWORD: ${ERPNEXT_DB_ROOT_PASSWORD:?definir ERPNEXT_DB_ROOT_PASSWORD en sistema/test.env}
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MARIADB_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      # La primera inicializacion de la base tarda ~5 min con el datadir sobre /mnt/d (medido); sin start_period
+      # el margen eran 200 s y compose abortaba el `up` con "erpnext-db is unhealthy". Los fallos dentro del
+      # periodo no cuentan y el primer exito lo cierra, asi que un valor holgado no retrasa el arranque.
+      start_period: 420s
+    volumes:
+      - erpnext_db_data:/var/lib/mysql
+    networks:
+      - erpnext_internal
+
+  erpnext-redis-cache:
+    image: redis:7.4.11@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
+    container_name: erpnext-redis-cache
+    restart: unless-stopped
+    networks:
+      - erpnext_internal
+
+  erpnext-redis-queue:
+    image: redis:7.4.11@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
+    container_name: erpnext-redis-queue
+    restart: unless-stopped
+    volumes:
+      - erpnext_redis_queue_data:/data
+    networks:
+      - erpnext_internal
+
+  # Job único: escribe la configuración común (BD, Redis, socketio).
+  # Imagen oficial de Frappe (la publica el workflow del repo frappe/hrms), no de un tercero. Sustituye a
+  # frappe/erpnext:v15.121.3: trae las MISMAS versiones (frappe 15.121.0, erpnext 15.121.3) y añade hrms 15.64.1.
+  # Hace falta porque desde la v14 la gestión de turnos NO está en ERPNext sino en la app hrms, y el entregable
+  # promete "programación de turnos 24/7": sin ella no existen shift_type, shift_assignment ni shift_schedule.
+  # Viene de ghcr.io, no de Docker Hub; para el laboratorio sin red hay que transportarla igual que las demás.
+  # Las anclas las reutilizan los demás servicios de ERPNext: *erpnext_image (la imagen) y *erpnext_volumes (sites y logs).
+  erpnext-configurator:
+    image: &erpnext_image ghcr.io/frappe/hrms:v15.64.1@sha256:b7ba52bc9aeb288f47d0aea9dc94635843ea1a7a83c45df724449f613b2f6395
+    container_name: erpnext-configurator
+    restart: "no"
+    depends_on:
+      erpnext-db:
+        condition: service_healthy
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        ls -1 apps > sites/apps.txt
+        bench set-config -g db_host erpnext-db
+        bench set-config -gp db_port 3306
+        bench set-config -g redis_cache "redis://erpnext-redis-cache:6379"
+        bench set-config -g redis_queue "redis://erpnext-redis-queue:6379"
+        bench set-config -g redis_socketio "redis://erpnext-redis-queue:6379"
+        bench set-config -gp socketio_port 9000
+    volumes: &erpnext_volumes
+      - erpnext_sites:/home/frappe/frappe-bench/sites
+      - erpnext_logs:/home/frappe/frappe-bench/logs
+    networks:
+      - erpnext_internal
+
+  # Job único e idempotente: crea el sitio solo si todavía no existe.
+  # servicios/erpnext/test-create-site.sh extrae de este fichero el script de abajo y lo prueba sin Docker.
+  erpnext-create-site:
+    image: *erpnext_image
+    container_name: erpnext-create-site
+    restart: "no"
+    depends_on:
+      erpnext-configurator:
+        condition: service_completed_successfully
+      erpnext-redis-cache:
+        condition: service_started
+      erpnext-redis-queue:
+        condition: service_started
+    entrypoint: ["bash", "-c"]
+    # "bench new-site" deja el scheduler APAGADO (System Settings.enable_scheduler = 0, imprime "*** Scheduler is disabled ***"):
+    # comprueba si esta activo antes de que exista el sitio (frappe/installer.py:83), falla, y al terminar hace
+    # toggle_scheduler(False) (installer.py:119). Sin scheduler, erpnext-scheduler queda "Up" pero no encola nada (ni correos
+    # ni recordatorios). Por eso se activa explicitamente. "enable-scheduler" va FUERA del if de la guarda, y no dentro de la
+    # rama de creacion, para que tambien se ejecute cuando el sitio ya existia (volumen anterior con el scheduler a 0);
+    # es idempotente, asi que ejecutarlo siempre es seguro. Si new-site falla se sale con error antes de llegar a el.
+    #
+    # IDEMPOTENCIA REAL (H16). "site_config.json" NO significa "sitio terminado": bench new-site lo escribe pronto
+    # (frappe/installer.py: install_db -> make_conf, ANTES de setup_database, bootstrap_database y de instalar frappe,
+    # erpnext y hrms; ~15 min de tramo). Una interrupcion en ese tramo dejaba un site_config.json sobre un sitio a medias y
+    # la ejecucion siguiente decia "ya existe" y activaba el scheduler sobre un sitio incompleto. Ahora hay una marca
+    # propia, escrita SOLO cuando new-site (con --set-default incluido) devolvio 0: sites/<sitio>/.reservaviva-sitio-completo.
+    # Tres casos:
+    #   1. sin site_config.json  -> se crea el sitio y, si termina bien, se escribe la marca.
+    #   2. con marca             -> sitio completo; se salta la creacion.
+    #   3. site_config.json sin marca -> ambiguo: o un sitio a medias, o un sitio COMPLETO de un volumen anterior a esta
+    #      marca. Se decide preguntando al propio sistema (`bench list-apps`: estan erpnext y hrms) SOLO en este caso, no
+    #      en cada arranque: la marca es la via rapida y no depende de que bench y la base respondan. Si estan las dos apps
+    #      se adopta el sitio (marca + `bench use`, idempotente, por si se perdio el --set-default). Si NO estan, o si la
+    #      comprobacion falla (base no disponible...), se ABORTA sin tocar nada, con mensajes distintos para cada causa: un
+    #      fallo de la comprobacion nunca se toma por "faltan apps" ni por "sitio bueno".
+    # NO se ejecuta `bench drop-site` ni se ofrece una variable que lo haga: destruye la base y el sitio (15 min de
+    # instalacion mas los datos), y un sitio a medias lo recupera una persona en segundos con los comandos del mensaje. A
+    # diferencia de OpenVPMS (OPENVPMS_REINICIALIZAR_BASE, base de laboratorio con marcas por etapa), aqui no hay marcas por
+    # etapa que permitan probar que no hay datos, asi que ante la duda se rechaza borrar.
+    # El caso 3 con un sitio completo (adopcion) se ejercito en el arranque real del 26/09/2026 (docs/resultados-un-host.md).
+    # Sin comprobar en un arranque real: que un tramo interrumpido se comporte como se lee en installer.py (la logica si la
+    # prueba test-create-site.sh con un `bench` simulado).
+    command:
+      - |
+        SITE_DIR="sites/$$SITE"
+        MARCA="$$SITE_DIR/.reservaviva-sitio-completo"
+        if [ ! -f "$$SITE_DIR/site_config.json" ]; then
+          bench new-site "$$SITE" \
+            --mariadb-user-host-login-scope='%' \
+            --db-root-password "$$DB_ROOT_PASSWORD" \
+            --admin-password "$$ADMIN_PASSWORD" \
+            --install-app erpnext \
+            --install-app hrms \
+            --set-default || exit 1
+          touch "$$MARCA" || exit 1
+        elif [ -f "$$MARCA" ]; then
+          echo "El sitio $$SITE ya existe y esta completo; solo se asegura el scheduler."
+        else
+          echo "El sitio $$SITE tiene site_config.json pero no la marca de sitio completo; se comprueba que apps tiene instaladas."
+          APPS=$$(bench --site "$$SITE" list-apps 2>&1); RC=$$?
+          if [ "$$RC" -ne 0 ]; then
+            echo "ERROR: no se pudo comprobar el estado del sitio $$SITE (bench list-apps salio con $$RC). No se toca nada." >&2
+            echo "Causa mas probable: la base de datos no esta disponible. Reintentar cuando erpnext-db este healthy." >&2
+            echo "$$APPS" >&2
+            exit 1
+          fi
+          if echo "$$APPS" | grep -qw erpnext && echo "$$APPS" | grep -qw hrms; then
+            echo "El sitio $$SITE tiene erpnext y hrms instalados: se adopta como completo."
+            bench use "$$SITE" || exit 1
+            touch "$$MARCA" || exit 1
+          else
+            echo "ERROR: el sitio $$SITE esta A MEDIAS: tiene site_config.json pero le faltan erpnext y/o hrms." >&2
+            echo "Una creacion anterior (bench new-site) se interrumpio. No se continua ni se borra nada automaticamente." >&2
+            echo "Apps instaladas segun bench list-apps:" >&2
+            echo "$$APPS" >&2
+            echo "Para rehacerlo (DESTRUYE el sitio y su base; si ya hay datos, hacer copia antes), desde una sesion con este volumen:" >&2
+            echo "  bench drop-site $$SITE --force   (con la clave root de la base; ver bench drop-site --help para el nombre exacto de la opcion)" >&2
+            echo "y volver a lanzar erpnext-create-site. Si el sitio es de laboratorio y no importa, se pueden borrar SOLO los" >&2
+            echo "volumenes erpnext_sites y erpnext_db_data (no los demas: LDAP y el resto tienen datos propios) y volver a arrancar." >&2
+            exit 1
+          fi
+        fi
+        bench --site "$$SITE" enable-scheduler
+    environment:
+      SITE: ${ERPNEXT_SITE:-rrhh.reservaviva.local}
+      DB_ROOT_PASSWORD: ${ERPNEXT_DB_ROOT_PASSWORD}
+      ADMIN_PASSWORD: ${ERPNEXT_ADMIN_PASSWORD:?definir ERPNEXT_ADMIN_PASSWORD en sistema/test.env}
+    volumes: *erpnext_volumes
+    networks:
+      - erpnext_internal
+
+  # Job único e idempotente: deja configurado "LDAP Settings" de Frappe (autenticación contra OpenLDAP por
+  # LDAPS, verificando la cadena con /certs/ca.crt). Solo escribe en la base de datos: no valida contra
+  # LDAP (ignore_mandatory), así no necesita alcanzar VLAN 99. Los usuarios se buscan solo en ou=rrhh.
+  erpnext-ldap-config:
+    image: *erpnext_image
+    container_name: erpnext-ldap-config
+    restart: "no"
+    depends_on:
+      erpnext-create-site:
+        condition: service_completed_successfully
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        cd sites && ../env/bin/python - <<'PY'
+        import os, frappe
+        frappe.init(site=os.environ["SITE"], sites_path=".")
+        frappe.connect()
+        d = frappe.get_doc("LDAP Settings")
+        d.update({
+            "enabled": 1,
+            "ldap_server_url": "ldaps://ldap.reservaviva.local:636",
+            "base_dn": "cn=svc-lectura,ou=servicios,dc=reservaviva,dc=local",
+            "password": os.environ["LDAP_BIND_PASSWORD"],
+            "ldap_directory_server": "OpenLDAP",
+            "ldap_search_path_user": "ou=rrhh,dc=reservaviva,dc=local",
+            "ldap_search_path_group": "ou=rrhh,dc=reservaviva,dc=local",
+            "ldap_search_string": "(uid={0})",
+            "ldap_email_field": "mail",
+            "ldap_username_field": "uid",
+            "ldap_first_name_field": "givenName",
+            "ldap_last_name_field": "sn",
+            "ssl_tls_mode": "Off",
+            "require_trusted_certificate": "Yes",
+            "local_ca_certs_file": "/certs/ca.crt",
+            "default_user_type": "System User",
+            "default_role": "Employee",
+        })
+        d.flags.ignore_mandatory = True
+        d.save(ignore_permissions=True)
+        frappe.db.commit()
+        print("LDAP Settings configurado para", os.environ["SITE"])
+        PY
+    environment:
+      SITE: ${ERPNEXT_SITE:-rrhh.reservaviva.local}
+      LDAP_BIND_PASSWORD: ${ERPNEXT_LDAP_BIND_PASSWORD:?definir ERPNEXT_LDAP_BIND_PASSWORD en sistema/test.env}
+    volumes: *erpnext_volumes
+    networks:
+      - erpnext_internal
+
+  erpnext-backend:
+    image: *erpnext_image
+    container_name: erpnext-backend
+    restart: unless-stopped
+    depends_on:
+      erpnext-create-site:
+        condition: service_completed_successfully
+    environment:
+      LDAP_HOST: ${NET_INFRA:-10.10.99}.10
+    # El backend es quien habla LDAPS con OpenLDAP. Se fija el nombre (no lo resuelve bind9) para que coincida con el
+    # certificado. Va directo a openldap por vlan99_infra, a la que el backend también está conectado.
+    extra_hosts:
+      - "ldap.reservaviva.local:${NET_INFRA:-10.10.99}.10"
+    volumes:
+      - erpnext_sites:/home/frappe/frappe-bench/sites
+      - erpnext_logs:/home/frappe/frappe-bench/logs
+      # CA interna para verificar LDAPS (servicios/ca/certs/ca.crt, la genera servicios/ca/generar-certificados.sh).
+      - ./servicios/ca/certs/ca.crt:/certs/ca.crt:ro
+    networks:
+      erpnext_internal:
+      vlan40_rrhh:
+        ipv4_address: ${NET_RRHH:-10.10.40}.11
+      # Sin gateway entre VLAN, el backend se conecta también a la red de OpenLDAP para poder hacer LDAPS.
+      vlan99_infra:
+        ipv4_address: ${NET_INFRA:-10.10.99}.23
+
+  erpnext-websocket:
+    image: *erpnext_image
+    container_name: erpnext-websocket
+    restart: unless-stopped
+    depends_on:
+      erpnext-create-site:
+        condition: service_completed_successfully
+    command: ["node", "/home/frappe/frappe-bench/apps/frappe/socketio.js"]
+    volumes: *erpnext_volumes
+    networks:
+      - erpnext_internal
+
+  erpnext-scheduler:
+    image: *erpnext_image
+    container_name: erpnext-scheduler
+    restart: unless-stopped
+    depends_on:
+      erpnext-create-site:
+        condition: service_completed_successfully
+    command: ["bench", "schedule"]
+    volumes: *erpnext_volumes
+    networks:
+      - erpnext_internal
+
+  erpnext-queue-short:
+    image: *erpnext_image
+    container_name: erpnext-queue-short
+    restart: unless-stopped
+    depends_on:
+      erpnext-create-site:
+        condition: service_completed_successfully
+    command: ["bench", "worker", "--queue", "short,default"]
+    volumes: *erpnext_volumes
+    networks:
+      - erpnext_internal
+
+  erpnext-queue-long:
+    image: *erpnext_image
+    container_name: erpnext-queue-long
+    restart: unless-stopped
+    depends_on:
+      erpnext-create-site:
+        condition: service_completed_successfully
+    command: ["bench", "worker", "--queue", "long,default,short"]
+    volumes: *erpnext_volumes
+    networks:
+      - erpnext_internal
+
+  # Punto de entrada HTTP de RRHH: el nginx de ERPNext (puerto 8080; 10.10.40.10 en vlan40). Es el contenedor al que
+  # apunta rrhh.reservaviva.local en la zona DNS. Desde el host: http://localhost:<ERPNEXT_PORT>.
+  erpnext-hr:
+    image: *erpnext_image
+    container_name: erpnext-hr
+    restart: unless-stopped
+    depends_on:
+      erpnext-backend:
+        condition: service_started
+      erpnext-websocket:
+        condition: service_started
+    command: ["nginx-entrypoint.sh"]
+    environment:
+      BACKEND: erpnext-backend:8000
+      SOCKETIO: erpnext-websocket:9000
+      FRAPPE_SITE_NAME_HEADER: ${ERPNEXT_SITE:-rrhh.reservaviva.local}
+      UPSTREAM_REAL_IP_ADDRESS: 127.0.0.1
+      UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
+      UPSTREAM_REAL_IP_RECURSIVE: "off"
+      PROXY_READ_TIMEOUT: "120"
+      CLIENT_MAX_BODY_SIZE: 50m
+    # /api/method/ping devuelve 404 hasta que erpnext-create-site termina (~9 min la primera vez).
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/api/method/ping', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 900s
+    volumes: *erpnext_volumes
+    networks:
+      erpnext_internal:
+      vlan40_rrhh:
+        ipv4_address: ${NET_RRHH:-10.10.40}.10
+    ports:
+      - "${PUBLISH_IP:-0.0.0.0}:${ERPNEXT_PORT:-8080}:8080"
+
+  # =====================================================================================================================
+  # Infraestructura transversal (VLAN 99): OpenLDAP con LDAPS y CA interna, DNS (bind9) y NTP.
+  # Ficheros en servicios/openldap/, servicios/ca/, servicios/bind9/ y servicios/ntp/.
+  # =====================================================================================================================
+  openldap:
+    image: osixia/openldap:1.5.0@sha256:18742e9c449c9c1afe129d3f2f3ee15fb34cc43e5f940a20f3399728f41d7c28
+    container_name: openldap
+    restart: unless-stopped
+    # --copy-service: la imagen edita los LDIF al cargarlos; así no modifica el montaje.
+    command: ["--copy-service"]
+    environment:
+      LDAP_ORGANISATION: "Zoologico Reserva Viva"
+      LDAP_DOMAIN: reservaviva.local
+      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD}
+      # LDAPS (636) con certificados propios generados por servicios/ca/generar-certificados.sh (lo ejecuta
+      # levantar-sistema.sh). Los generados por la imagen usan una CA caducada. Además, LDAP_TLS_VERIFY_CLIENT
+      # por defecto es "demand" (exige certificado al CLIENTE) y hace que slapd corte la conexión de
+      # cualquier cliente sin certificado propio ("TLS negotiation failure").
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: ldap.crt
+      LDAP_TLS_KEY_FILENAME: ldap.key
+      LDAP_TLS_CA_CRT_FILENAME: ca.crt
+      LDAP_TLS_VERIFY_CLIENT: never
+    volumes:
+      - ldap_data:/var/lib/ldap
+      - ldap_config:/etc/ldap/slapd.d
+      # Si faltan, Docker crearía directorios vacíos: los genera servicios/ca/generar-certificados.sh (levantar-sistema.sh
+      # preparar lo ejecuta y comprueba que ca.crt existe).
+      - ./servicios/ca/certs/ca.crt:/container/service/slapd/assets/certs/ca.crt
+      - ./servicios/ca/certs/ldap.crt:/container/service/slapd/assets/certs/ldap.crt
+      - ./servicios/ca/certs/ldap.key:/container/service/slapd/assets/certs/ldap.key
+      # Estructura por departamento y usuarios de prueba (se cargan solo con ldap_data vacío).
+      - ./servicios/openldap:/container/service/slapd/assets/config/bootstrap/ldif/custom
+    networks:
+      vlan99_infra:
+        ipv4_address: ${NET_INFRA:-10.10.99}.10
+    # Publicados en PUBLISH_IP para las herramientas del host (ldapsearch...). Las apps llegan por vlan99_infra (extra_hosts).
+    ports:
+      - "${PUBLISH_IP:-0.0.0.0}:${LDAP_PORT:-389}:389"
+      - "${PUBLISH_IP:-0.0.0.0}:${LDAPS_PORT:-636}:636"
+
+  dns:
+    image: internetsystemsconsortium/bind9:9.18@sha256:1ffb29c718ee2540c5643c1e8166629a07bbd505f99107baae535e9f86eb7eef
+    container_name: dns-interno
+    restart: unless-stopped
+    # zones/db.reservaviva.local no está en git: levantar-sistema.sh lo genera desde la plantilla .tpl de la misma carpeta.
+    volumes:
+      - ./servicios/bind9/named.conf:/etc/bind/named.conf:ro
+      - ./servicios/bind9/zones:/etc/bind/zones:ro
+    networks:
+      vlan99_infra:
+        ipv4_address: ${NET_INFRA:-10.10.99}.11
+    # 53 suele estar ocupado en Windows: se publica en DNS_BIND_IP (127.0.0.1) y en DNS_PORT (1053), de sistema/test.env.
+    ports:
+      - "${DNS_BIND_IP:-0.0.0.0}:${DNS_PORT:-53}:53/udp"
+      - "${DNS_BIND_IP:-0.0.0.0}:${DNS_PORT:-53}:53/tcp"
+
+  ntp:
+    image: cturra/ntp:latest@sha256:7224d4e7c7833aabbcb7dd70c46c8a8dcccda365314c6db047b9b10403ace3bc
+    container_name: ntp-interno
+    restart: unless-stopped
+    environment:
+      # NTP_SERVERS son los servidores DE LOS QUE chrony toma la hora. El laboratorio no tiene salida a Internet, asi que no
+      # sirve el valor por defecto de la imagen (time.cloudflare.com). Antes apuntaba a la IP del propio contenedor (.12),
+      # una referencia circular que no obtenia la hora de ninguna parte.
+      # 127.127.1.1 es el ejemplo "local (offline)" del README de cturra/docker-ntp. OJO con el mecanismo real, que no es
+      # el que parece: /opt/startup.sh detecta cualquier direccion 127.0.0.0/8 y, ademas de la linea "server", anade
+      # "local stratum 10" a chrony.conf. ESA es la directiva que hace que este contenedor sirva su propio reloj como
+      # referencia; la linea "server 127.127.1.1" es notacion de refclock de ntpd y chrony la trata como un servidor
+      # normal inalcanzable. Por eso el servidor publica stratum 10. Verificado leyendo /opt/startup.sh de la imagen.
+      NTP_SERVERS: "127.127.1.1"
+    networks:
+      vlan99_infra:
+        ipv4_address: ${NET_INFRA:-10.10.99}.12
+    # 123/udp suele estar ocupado por el servicio de hora de Windows (w32time): por eso NTP_PORT es 1123 en sistema/test.env.
+    ports:
+      - "${PUBLISH_IP:-0.0.0.0}:${NTP_PORT:-123}:123/udp"
+
+volumes:
+  # OpenVPMS
+  openvpms_db_data:
+  openvpms_state:
+  # Pretix
+  pretix_data:
+  pretix_db_data:
+  # InvenTree
+  inventree_db_data:
+  inventree_data:
+  # ERPNext
+  erpnext_db_data:
+  erpnext_redis_queue_data:
+  erpnext_sites:
+  erpnext_logs:
+  # OpenLDAP
+  ldap_data:
+  ldap_config:

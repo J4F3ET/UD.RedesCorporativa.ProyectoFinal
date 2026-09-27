@@ -3,13 +3,13 @@
 # archivo donde docker compose lo monta. Es idempotente: si los certificados ya existen, son válidos y
 # cubren las direcciones necesarias, no toca nada. Usar --forzar para regenerarlos.
 #
-# Resultado en docker/pc3-administracion-infra/certs/:
+# Resultado en servicios/ca/certs/ (junto a este script):
 #   ca.crt   CA pública. Es la que deben confiar los clientes de LDAPS (InvenTree y ERPNext la montan en /certs/ca.crt).
 #   ca.key   clave privada de la CA. NUNCA se monta en un contenedor ni se comparte.
 #   ldap.crt / ldap.key   certificado y clave de OpenLDAP (los monta el servicio openldap).
 #
-# Uso:  scripts/generar-certificados.sh [--forzar] [--sin-instalar-ca]
-# Variables opcionales: LDAP_DOMAIN (reservaviva.local), LDAP_IP (10.10.99.10), CERTS_DIR.
+# Uso:  servicios/ca/generar-certificados.sh [--forzar] [--sin-instalar-ca]
+# Variables opcionales: LDAP_DOMAIN (reservaviva.local), LDAP_IP (10.10.99.10), CERTS_DIR (servicios/ca/certs).
 # Como root, además instala ca.crt en el almacén de confianza del host (para que ldapsearch, curl, etc.
 # confíen en ella); --sin-instalar-ca lo omite.
 #
@@ -19,10 +19,10 @@ set -euo pipefail
 # En Git Bash (Windows) los argumentos que empiezan con "/" (como -subj "/O=...") se convertirían en rutas.
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+AQUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # servicios/ca
 DOMAIN="${LDAP_DOMAIN:-reservaviva.local}"
 LDAP_IP="${LDAP_IP:-10.10.99.10}"
-OUT="${CERTS_DIR:-${REPO_ROOT}/docker/pc3-administracion-infra/certs}"
+OUT="${CERTS_DIR:-${AQUI}/certs}"
 FORZAR=false
 INSTALAR_CA=true
 GENERADA_CA=false
@@ -95,18 +95,9 @@ fi
 if ${GENERADA_CA}; then chmod 600 ca.key; chmod 644 ca.crt; fi
 if ${GENERADO_LDAP}; then chmod 600 ldap.key; chmod 644 ldap.crt; fi
 
-# --- 3. Copiar la CA pública a donde la necesitarán los clientes de LDAPS ---------------------------
-for pc in pc1-medica pc2-operaciones; do
-  mkdir -p "${REPO_ROOT}/docker/${pc}/certs"
-  destino="${REPO_ROOT}/docker/${pc}/certs/ca.crt"
-  # Solo si cambió: misma razón que los chmod de arriba (un contenedor puede haberse apropiado de la copia).
-  if ! cmp -s ca.crt "${destino}"; then
-    cp ca.crt "${destino}"
-    chmod 644 "${destino}"
-  fi
-done
+# Los clientes de LDAPS (inventree-app, erpnext-backend) montan esta misma ca.crt desde servicios/ca/certs/: no hay copias.
 
-# --- 4. Confianza a nivel del host (solo root) ------------------------------------------------------
+# --- 3. Confianza a nivel del host (solo root) ------------------------------------------------------
 if ${INSTALAR_CA}; then
   if [ "$(id -u)" -eq 0 ] && command -v update-ca-certificates >/dev/null; then
     install -m 644 ca.crt /usr/local/share/ca-certificates/reserva-viva-ca.crt
@@ -118,4 +109,3 @@ if ${INSTALAR_CA}; then
 fi
 
 echo "[certs] Listo. Vence: CA $(openssl x509 -in ca.crt -noout -enddate | cut -d= -f2), LDAP $(openssl x509 -in ldap.crt -noout -enddate | cut -d= -f2)."
-echo "[certs] Para que PC-1 y PC-2 (equipos distintos) confíen en la CA, copia ${OUT}/ca.crt a docker/pc1-medica/certs/ y docker/pc2-operaciones/certs/ de cada uno (p. ej. con scp)."

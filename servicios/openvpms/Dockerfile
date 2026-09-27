@@ -3,7 +3,7 @@
 # tiempo de build (necesita Internet UNA vez, en una máquina con acceso; el laboratorio no tiene salida).
 # Construir en un equipo con Internet y llevar la imagen: `docker save` / `docker load`.
 #
-# La base de datos (MySQL 8) va en otro contenedor del mismo PC (ver ../docker-compose.yml).
+# La base de datos (MySQL 8) va en otro contenedor del mismo host (servicio openvpms-db de ../../docker-compose.yml).
 FROM tomcat:9.0-jdk11-temurin
 
 ARG OPENVPMS_VERSION=2.4.0.1

@@ -22,17 +22,18 @@
 # Es idempotente: se puede ejecutar las veces que haga falta. Si un arranque se interrumpe, volver a ejecutarlo
 # retoma donde quedo (la inicializacion de OpenVPMS y la creacion del sitio de ERPNext son reanudables).
 #
-# Usa sistema/docker-compose.yml, que reune los compose de docker/ (agrupados por departamento), con cada VLAN
-# como un bridge de Docker con su misma subred. Contrasenas de laboratorio (desechables) en sistema/test.env.
+# Usa el docker-compose.yml de la raiz (unico; servicios agrupados por departamento, con cada VLAN como un bridge de
+# Docker con su misma subred) y los ficheros de cada servicio en servicios/. Todo "docker compose" se ejecuta desde la
+# raiz con --env-file sistema/test.env (contrasenas de laboratorio, desechables).
 #
 # Solo ASCII a proposito: la salida se ve igual en cualquier consola de Windows.
 
 set -euo pipefail
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ARNES="${RAIZ}/sistema"
-ENV_FILE="test.env"
-PROYECTO="reservaviva-smoke"          # "name:" de sistema/docker-compose.yml
+ARNES="${RAIZ}/sistema"               # test.env, verificar_arquitectura.py y sus informes
+ENV_FILE="sistema/test.env"           # relativo a RAIZ: dc() se ejecuta siempre desde la raiz
+PROYECTO="reservaviva-smoke"          # "name:" de docker-compose.yml
 MARCA_SESION="reservaviva-keepalive"  # proceso que levantar-sistema.ps1 deja vivo en WSL
 
 # Coste medido: 15 de los 25 contenedores = 3.627 MiB en docker stats; el conjunto completo se estima en ~4,7-5,1 GiB.
@@ -66,12 +67,13 @@ info()  { printf '    %s\n' "$*"; }
 aviso() { printf '    AVISO: %s\n' "$*" >&2; }
 fallo() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 
-dc() { docker compose --env-file "${ENV_FILE}" "$@"; }
+# Siempre desde la raiz del repositorio (donde esta docker-compose.yml), sea cual sea el directorio actual.
+dc() { (cd "${RAIZ}" && docker compose --env-file "${ENV_FILE}" "$@"); }
 
 # Lee una clave de test.env sin ejecutarlo (tiene contrasenas con caracteres arbitrarios).
 valor_env() {
   local v
-  v="$(grep -E "^$1=" "${ARNES}/${ENV_FILE}" | tail -n 1 | cut -d= -f2- | tr -d '\r')"
+  v="$(grep -E "^$1=" "${RAIZ}/${ENV_FILE}" | tail -n 1 | cut -d= -f2- | tr -d '\r')"
   printf '%s' "${v:-$2}"
 }
 
@@ -89,13 +91,14 @@ comprobar_requisitos() {
   docker info >/dev/null 2>&1 || fallo "Docker no responde. Arranca Docker Desktop, o en Linux/WSL: sudo systemctl start docker"
   docker compose version >/dev/null 2>&1 || fallo "Falta el plugin 'docker compose' (v2)."
 
-  # Los overrides de sistema/ usan la etiqueta YAML "!override", que existe desde Compose 2.24.4.
+  # Minimo heredado: los antiguos overrides usaban "!override" (Compose 2.24.4). El compose unico ya no lo usa, pero no
+  # se ha probado con versiones anteriores, asi que se sigue exigiendo.
   local ver may min par
   ver="$(docker compose version --short 2>/dev/null | sed 's/^v//')"
   IFS=. read -r may min par <<<"${ver}"
   may="${may:-0}"; min="${min:-0}"; par="${par%%[!0-9]*}"; par="${par:-0}"
   if [ "${may}" -lt 2 ] || { [ "${may}" -eq 2 ] && { [ "${min}" -lt 24 ] || { [ "${min}" -eq 24 ] && [ "${par}" -lt 4 ]; }; }; }; then
-    fallo "Docker Compose ${ver} es demasiado antiguo: hace falta 2.24.4 o superior (por '!override'). Actualiza Docker."
+    fallo "Docker Compose ${ver} es demasiado antiguo: hace falta 2.24.4 o superior. Actualiza Docker."
   fi
   command -v openssl >/dev/null || fallo "Falta openssl (genera la CA y el certificado LDAPS). En Ubuntu/WSL: sudo apt install openssl"
   info "Docker $(docker version --format '{{.Server.Version}}' 2>/dev/null) ($(sistema_docker)), Compose ${ver}"
@@ -131,12 +134,19 @@ comprobar_memoria() {
 preparar_certificados() {
   paso "Certificados LDAPS (CA interna + OpenLDAP)"
   # Idempotente: si existen, son validos y cubren las direcciones, no toca nada. No instala la CA en el host.
-  bash "${RAIZ}/scripts/generar-certificados.sh" --sin-instalar-ca | sed 's/^/    /'
+  bash "${RAIZ}/servicios/ca/generar-certificados.sh" --sin-instalar-ca | sed 's/^/    /'
+  # Si falta un fichero de un bind mount, Docker crea un DIRECTORIO vacio en su lugar y LDAPS falla sin avisar.
+  local f
+  for f in ca.crt ldap.crt ldap.key; do
+    if [ ! -f "${RAIZ}/servicios/ca/certs/${f}" ] || [ ! -s "${RAIZ}/servicios/ca/certs/${f}" ]; then
+      fallo "Falta servicios/ca/certs/${f} (o esta vacio): openldap, inventree-app y erpnext-backend lo montan. Revisa la salida de servicios/ca/generar-certificados.sh."
+    fi
+  done
 }
 
 generar_zona() {
   paso "Zona DNS reservaviva.local"
-  local dir="${RAIZ}/docker/pc3-administracion-infra/bind/zones"
+  local dir="${RAIZ}/servicios/bind9/zones"
   local tpl="${dir}/db.reservaviva.local.tpl" out="${dir}/db.reservaviva.local"
   [ -f "${tpl}" ] || fallo "Falta la plantilla ${tpl}"
   # Cada nombre apunta al contenedor que da ese servicio, con la misma IP fija que le da el compose (mismas subredes
@@ -170,7 +180,7 @@ generar_zona() {
 # bind9 lee la zona al arrancar y no vigila el fichero. Si la zona es mas nueva que el arranque de dns-interno (p. ej.
 # tras cambiar la plantilla), se reinicia solo ese contenedor: unos segundos, sin tocar datos.
 reiniciar_dns_si_zona_nueva() {
-  local zona="${RAIZ}/docker/pc3-administracion-infra/bind/zones/db.reservaviva.local" inicio t_zona t_dns
+  local zona="${RAIZ}/servicios/bind9/zones/db.reservaviva.local" inicio t_zona t_dns
   inicio="$(docker inspect --format '{{.State.StartedAt}}' dns-interno 2>/dev/null)" || return 0
   t_dns="$(date -d "${inicio}" +%s 2>/dev/null)" || return 0
   t_zona="$(stat -c %Y "${zona}" 2>/dev/null)" || return 0
@@ -204,7 +214,7 @@ preparar_imagen_openvpms() {
   cid="$(docker create "${img}")"
   for f in entrypoint.sh init-lib.sh; do
     if ! MSYS2_ARG_CONV_EXCL='*' docker cp "${cid}:/${f}" - 2>/dev/null | tar -xO 2>/dev/null \
-         | cmp -s - "${RAIZ}/docker/pc1-medica/openvpms/${f}"; then
+         | cmp -s - "${RAIZ}/servicios/openvpms/${f}"; then
       distinto=true
     fi
   done
@@ -214,7 +224,7 @@ preparar_imagen_openvpms() {
 }
 
 preparar() {
-  cd "${ARNES}"
+  cd "${RAIZ}"
   preparar_certificados
   generar_zona
   validar_compose
@@ -376,7 +386,7 @@ accion_preparar() {
 }
 
 accion_estado() {
-  cd "${ARNES}"
+  cd "${RAIZ}"
   docker info >/dev/null 2>&1 || fallo "Docker no responde."
   paso "Estado de los servicios"
   dc ps -a --format 'table {{.Service}}\t{{.State}}\t{{.Status}}'
@@ -402,14 +412,14 @@ accion_verificar() {
 }
 
 accion_detener() {
-  cd "${ARNES}"
+  cd "${RAIZ}"
   paso "Deteniendo los contenedores (no se borra nada)"
   dc stop
   info "Detenidos. Para volver a levantarlos: $0 arrancar"
 }
 
 accion_borrar() {
-  cd "${ARNES}"
+  cd "${RAIZ}"
   if ! ${SI}; then
     printf '\nEsto BORRA los contenedores y TODOS los datos (bases de datos, sitio de ERPNext, directorio LDAP).\n'
     printf 'El siguiente arranque volvera a inicializarlo todo (~30 min). Escribe "borrar" para confirmar: '

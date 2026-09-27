@@ -74,25 +74,30 @@ Además, la VLAN 99 es un único dominio L2 compartido por las 4 aplicaciones. `
 
 ```
 levantar-sistema.sh / .ps1 / .cmd   # arranque plug and play (la lógica está en el .sh)
-sistema/                            # el sistema en un host: incluye los 3 compose, test.env y la verificación
-docker/
-  pc1-medica/                       # OpenVPMS (VLAN 10): compose + imagen propia (openvpms/)
-  pc2-operaciones/                  # Pretix + InvenTree (VLAN 20/30)
-  pc3-administracion-infra/         # ERPNext HR + OpenLDAP/DNS/NTP (VLAN 40/99): ldap/, bind/
-scripts/generar-certificados.sh     # CA interna + certificado LDAPS (lo ejecuta levantar-sistema.sh)
+docker-compose.yml                  # el ÚNICO compose: los 25 servicios, agrupados por departamento
+servicios/                          # una carpeta por servicio, con su README
+  openvpms/                         # Médica (VLAN 10): Dockerfile, inicialización reanudable y su prueba
+  pretix/                           # Taquilla (VLAN 20)
+  inventree/                        # Logística (VLAN 30)
+  erpnext/                          # RRHH (VLAN 40): prueba de erpnext-create-site
+  openldap/                         # Infraestructura (VLAN 99): LDIF de estructura, ACL y usuarios de prueba
+  bind9/                            # Infraestructura: named.conf y plantilla de la zona DNS
+  ntp/                              # Infraestructura: servidor de hora
+  ca/                               # CA interna + certificado LDAPS (lo ejecuta levantar-sistema.sh)
+sistema/                            # test.env (variables y claves de laboratorio) y la verificación
 docs/                               # resultados vigentes e integración LDAP de cada aplicación
 diseno-red/                         # ANEXO: diseño con switch L2/L3, VLANs 802.1Q, matriz y diagramas (no se despliega)
 plans/handoffs/                     # último traspaso de trabajo y su plan
 ```
 
-Los servicios se agrupan en `docker/pc1…pc3` por departamento, igual que en el diseño de la Entrega 1 (3 equipos). `sistema/docker-compose.yml` los incluye a los tres y convierte cada VLAN en una red bridge.
+Todo `docker compose` se ejecuta desde la raíz con `--env-file sistema/test.env`. En `docker-compose.yml` los servicios se agrupan por departamento, igual que en el diseño de la Entrega 1 (3 equipos), y cada VLAN es una red bridge.
 
 ## Diseño de red (anexo)
 
 El diseño propuesto reparte los servicios en 3 equipos conectados a un switch con VLANs 802.1Q. La carpeta [`diseno-red/`](diseno-red/README.md) lo conserva:
 
 - La matriz de segmentación: [`arquitectura-3-equipos-departamentos.md`](diseno-red/arquitectura-3-equipos-departamentos.md).
-- Las recetas para un switch L3 (SVIs + ACL) o L2 (PC-3 como router con nftables).
+- Las recetas para un switch L3 (SVIs + ACL) o L2 (el equipo de infraestructura como router con nftables).
 - Los simuladores que reproducen la matriz sobre el kernel de Linux (necesitan la imagen `nicolaka/netshoot`).
 - Los diagramas de topología y de flujo: [`topologia-red.html`](diseno-red/diagramas/topologia-red.html) y [`flujo-datos-segmentacion.html`](diseno-red/diagramas/flujo-datos-segmentacion.html).
 

@@ -4,7 +4,8 @@
 Verificado el 2026-09-26 con `levantar-sistema.sh verificar` (casos 1-4 en PASS). Endpoints, credenciales y codigos
 de respuesta salieron de docs/prueba-smoke-test-resultados.md §9.3 (retirado; `git show 95e0da4:docs/prueba-smoke-test-resultados.md`).
 
-Requisito: el arnes ya levantado (`docker compose up -d` en esta carpeta) y con las apps sanas.
+Requisito: el sistema ya levantado (`levantar-sistema.sh arrancar`, o `docker compose --env-file sistema/test.env up -d`
+desde la raiz del repositorio) y con las apps sanas.
 Uso (desde esta carpeta):
     python ldaplogin.py                      # casos 1-3 sobre el stack en marcha
     python ldaplogin.py --persistencia       # ademas, caso 4: down (sin -v) + up -d y repite 1-3
@@ -25,10 +26,13 @@ import argparse, json, subprocess, sys, time
 from pathlib import Path
 
 AQUI = Path(__file__).resolve().parent
+RAIZ = AQUI.parent   # donde esta docker-compose.yml
+# El caso 4 llama a compose desde la raiz y con el fichero de variables: sin --env-file fallarian las variables ":?".
+COMPOSE = ["docker", "compose", "--env-file", "sistema/test.env"]
 SITE = "rrhh.reservaviva.local"
 BASE = "dc=reservaviva,dc=local"
 CA_EN_OPENLDAP = "/container/service/slapd/assets/certs/ca.crt"
-# Claves de laboratorio: docker/pc3-administracion-infra/ldap/README.md
+# Claves de laboratorio: servicios/openldap/README.md
 ERP_USER, ERP_PASS, ERP_OU = "rrhh.prueba", "Rrhh-Prueba1", "rrhh"
 INV_USER, INV_PASS, INV_OU = "logistica.prueba", "Oper-Prueba1", "operaciones"
 MALA = "clave-incorrecta-xyz"
@@ -68,8 +72,8 @@ except Exception as e:
 """
 
 
-def sh(cmd, entrada=None, timeout=1500):
-    return subprocess.run(cmd, input=entrada, capture_output=True, text=True, timeout=timeout, cwd=AQUI)
+def sh(cmd, entrada=None, timeout=1500, cwd=AQUI):
+    return subprocess.run(cmd, input=entrada, capture_output=True, text=True, timeout=timeout, cwd=cwd)
 
 
 def http(contenedor, script, *args):
@@ -184,8 +188,8 @@ def main():
           ejecutar("Caso 3: ldapsearch LDAPS con CA", caso3)]
     if a.persistencia:
         print("\n== Caso 4: docker compose down (SIN -v) + up -d")
-        for cmd in (["docker", "compose", "down"], ["docker", "compose", "up", "-d"]):
-            r = sh(cmd)
+        for cmd in (COMPOSE + ["down"], COMPOSE + ["up", "-d"]):
+            r = sh(cmd, cwd=RAIZ)
             print(f"  {' '.join(cmd)} -> rc={r.returncode}")
             if r.returncode != 0:
                 print(r.stderr[-400:]); ok.append(False); break

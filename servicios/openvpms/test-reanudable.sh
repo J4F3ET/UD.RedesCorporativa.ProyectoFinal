@@ -4,7 +4,7 @@
 # pueden fallar o morir a voluntad: una "muerte" es `kill -KILL` al proceso que ejecuta la inicialización, que es lo que
 # hace docker.service al reiniciarse (no hay trap ni limpieza que valga).
 #
-# Uso:  bash docker/pc1-medica/openvpms/test-reanudable.sh        (sale con 0 si todo pasa)
+# Uso:  bash servicios/openvpms/test-reanudable.sh        (sale con 0 si todo pasa)
 #
 # LÍMITE: esto prueba la lógica de decisión, no OpenVPMS. Que `toolbox database --create` tras borrar la base y los
 # usuarios vuelva a funcionar, y que `dataload.sh setup` sea repetible, NO se ha verificado aquí.

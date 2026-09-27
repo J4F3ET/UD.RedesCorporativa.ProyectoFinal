@@ -5,7 +5,7 @@ Ejecutado contra el sistema completo el 2026-09-26 (levantar-sistema.sh verifica
 prueba la mecanica (clasificador de conexiones, cliente DNS, cliente SNTP, lector de zona) contra sockets locales,
 sin tocar Docker. Ver verificar_arquitectura.md para el alcance y sus limites.
 
-Requisito: el arnes levantado (`docker compose up -d` en esta carpeta) y sano. Ejecutar donde `docker` sea el cliente
+Requisito: el sistema levantado (`levantar-sistema.sh arrancar`) y sano. Ejecutar donde `docker` sea el cliente
 nativo (p. ej. dentro de WSL), igual que ldaplogin.py. Sin dependencias fuera de la libreria estandar.
 
 Uso (desde esta carpeta):
@@ -29,7 +29,7 @@ from pathlib import Path
 
 AQUI = Path(__file__).resolve().parent
 RAIZ = AQUI.parent
-ZONA = RAIZ / "docker/pc3-administracion-infra/bind/zones/db.reservaviva.local"
+ZONA = RAIZ / "servicios/bind9/zones/db.reservaviva.local"
 ETIQUETA = "verificacion-arquitectura=1"   # solo se borran contenedores efimeros con esta etiqueta
 # depto -> (contenedor de la app dual-homed, puerto TCP donde escucha). Cada app esta ademas en vlan99_infra.
 APPS = {10: ("openvpms-app", 8080), 20: ("pretix-web", 80), 30: ("inventree-app", 8000), 40: ("erpnext-backend", 8000)}
@@ -381,7 +381,7 @@ def bloque_segmentacion(ctx, m):
                 reg(f"{app} -> {t['et']} (otra app, por la VLAN de infraestructura)", "INFO",
                     linea_tcp(t) + "\nHALLAZGO a leer: vlan99_infra es un unico dominio L2 compartido por las 4 apps; si sale ABIERTO, "
                     "un bridge NO impide que dos apps de departamentos distintos hablen entre si por infraestructura. "
-                    "En el laboratorio real lo limita la matriz de firewall de PC-3, que un host no reproduce.")
+                    "En el diseno de 3 equipos (anexo diseno-red/) lo limita su matriz de firewall, que un host no reproduce.")
             else:
                 v, why = juzga_negativo(t["estado"], ctl_dual, ctl_ok.get(e, False))
                 reg(f"{app} -> {t['et']} debe FALLAR (departamentos aislados aunque la app sea dual-homed)", v,
@@ -503,7 +503,7 @@ def bloque_consolidado(ctx, persistencia):
 
 LIMITES = """
 LO QUE UN SOLO HOST NO PUEDE DEMOSTRAR (ver verificar_arquitectura.md): etiquetado 802.1Q y puertos troncales,
-el switch fisico, y la matriz de firewall de PC-3 sobre interfaces reales. Aqui cada VLAN es un bridge de Docker con
+el switch fisico, y la matriz de firewall del diseno de 3 equipos sobre interfaces reales. Aqui cada VLAN es un bridge de Docker con
 la misma subred: 'pasa en un host' NO es 'pasa en el laboratorio'."""
 
 
