@@ -11,7 +11,7 @@ Qué hay aquí:
 | `ldaplogin.py`, `ldapprobe.py`, `probe.py` | Pruebas que invoca la verificación (login LDAP, bind LDAP crudo, sondeo HTTP) |
 | `resultados/` | Informes de `verificar` (fuera de git) |
 
-El compose es el `docker-compose.yml` de la raíz (25 servicios) y se usa **desde la raíz** con este fichero de variables:
+El compose es el `docker-compose.yml` de la raíz (26 servicios) y se usa **desde la raíz** con este fichero de variables:
 
 ```bash
 ./levantar-sistema.sh preparar                                  # CA, certificado LDAPS y zona DNS (no están en git)
@@ -22,7 +22,7 @@ docker compose --env-file sistema/test.env down -v              # BORRA todo, da
 
 Los tiempos medidos del arranque están en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md).
 
-`preparar` genera la zona DNS (bind9 monta `servicios/bind9/zones/db.reservaviva.local`): sustituye en la plantilla cada `IP_<NOMBRE>` por la IP fija del contenedor que da ese servicio.
+`preparar` genera las dos zonas DNS de `reservaviva.lan` y la ACL de la vista interna (bind9 monta `servicios/bind9/zones/`): en la vista interna sustituye cada `IP_<NOMBRE>` por la IP fija del contenedor que da ese servicio, y en la vista lan pone la IP del anfitrión (`INTRANET_IP`).
 
 Verificación de la arquitectura: `./levantar-sistema.sh verificar` (qué comprueba, en [`verificar_arquitectura.md`](verificar_arquitectura.md)).
 

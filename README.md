@@ -10,7 +10,7 @@ Proyecto final de Redes Corporativas (UD, grupo 678-302). Es la intranet del Zoo
 | Recursos Humanos | ERPNext (módulo HR) | 40 | 10.10.40.0/24 |
 | Infraestructura (transversal) | OpenLDAP + CA interna, bind9, NTP | 99 | 10.10.99.0/24 |
 
-Todo el sistema (25 servicios) corre **en un solo equipo**. Cada VLAN es una red bridge de Docker con su misma subred. Cada aplicación está en la VLAN de su departamento y además en la VLAN 99, para llegar a la infraestructura.
+Todo el sistema (26 servicios) corre **en un solo equipo**. Cada VLAN es una red bridge de Docker con su misma subred. Cada aplicación está en la VLAN de su departamento y además en la VLAN 99, para llegar a la infraestructura.
 
 ## Arranque rápido
 
@@ -32,16 +32,25 @@ El script hace todo lo necesario y se puede volver a ejecutar sin riesgo: si un 
 
 1. Genera lo que no va en git: la CA interna, el certificado LDAPS y la zona DNS.
 2. Construye la imagen de OpenVPMS.
-3. Levanta los 25 servicios y **espera a que todos estén sanos**.
+3. Levanta los 26 servicios y **espera a que todos estén sanos**.
 4. Crea el administrador de Pretix.
 5. Muestra las direcciones de acceso.
 
-| Aplicación | Dirección |
-|---|---|
-| OpenVPMS | http://localhost:18080/openvpms |
-| ERPNext | http://localhost:18081 |
-| Pretix | http://localhost:18082 |
-| InvenTree | http://localhost:18083 |
+| Aplicación | Acceso directo (este equipo) | Por nombre (otros equipos, modo intranet) |
+|---|---|---|
+| OpenVPMS | http://localhost:18080/openvpms | http://openvpms.reservaviva.lan |
+| ERPNext | http://localhost:18081 | http://rrhh.reservaviva.lan |
+| Pretix | http://localhost:18082 | http://pretix.reservaviva.lan |
+| InvenTree | http://localhost:18083 | http://inventree.reservaviva.lan |
+
+**Modo local (por defecto).** Todo se publica en `127.0.0.1`: solo se entra desde el propio equipo, por el acceso directo.
+
+**Modo intranet (opcional).** `.\levantar-sistema.ps1 -Intranet` (o `./levantar-sistema.sh --intranet`) publica el proxy
+web (80) y el DNS del laboratorio (53) en la IP de la LAN, para que cualquier equipo entre por nombre usando ese DNS. En
+Windows hay que preparar antes el equipo **una vez**, como administrador, con
+[`sistema/habilitar-intranet-windows.ps1`](sistema/habilitar-intranet-windows.ps1) (WSL en modo `mirrored` y reglas de
+cortafuegos). Las contraseñas de laboratorio son públicas: úsalo solo en una red de laboratorio. Pasos, configuración de
+los clientes y pruebas: [`docs/operacion.md`](docs/operacion.md#acceso-desde-la-lan).
 
 Los usuarios aparecen al terminar el arranque. Las contraseñas de laboratorio, que son desechables, están en [`sistema/test.env`](sistema/test.env).
 
@@ -49,7 +58,7 @@ Los usuarios aparecen al terminar el arranque. Las contraseñas de laboratorio, 
 |---|---|
 | `arrancar` (por defecto) | Prepara todo, levanta el sistema y espera a que esté sano |
 | `verificar` | Comprueba la arquitectura contra el sistema en marcha (ver abajo). Con `--rapido` omite la prueba de persistencia |
-| `estado` | Estado de cada servicio y direcciones de acceso |
+| `estado` | Estado de cada servicio, modo de publicación (local o intranet) y direcciones de acceso |
 | `detener` | Para los contenedores sin borrar datos |
 | `borrar` | Borra contenedores **y datos**. Pide confirmación |
 
@@ -58,7 +67,8 @@ Los usuarios aparecen al terminar el arranque. Las contraseñas de laboratorio, 
 [`sistema/verificar_arquitectura.py`](sistema/verificar_arquitectura.py) se ejecuta contra el sistema levantado. Lo que comprueba y cómo leer el resultado está en [`sistema/verificar_arquitectura.md`](sistema/verificar_arquitectura.md).
 
 - **Segmentación:** cada departamento alcanza su propio servicio y no alcanza a los demás. Cada negativo se valida con controles positivos para que un timeout no pase por aislamiento.
-- **DNS:** respuestas autoritativas de `reservaviva.local`, NXDOMAIN, rechazo de recursión, y alcance solo desde la VLAN 99.
+- **DNS:** respuestas autoritativas de `reservaviva.lan` en sus dos vistas (IP de contenedor para las VLAN, IP del anfitrión para el resto), NXDOMAIN, rechazo de recursión, y alcance solo desde la VLAN 99.
+- **Acceso por nombre:** el proxy web solo está en la VLAN 99; por cada nombre sirve la página de login **y** un CSS o JS de la aplicación; un nombre desconocido da 404; y el acceso directo por `localhost` sigue funcionando.
 - **NTP:** el servidor responde con un stratum válido, un cliente chrony real lo acepta, y solo es alcanzable desde la VLAN 99.
 - **LDAP/LDAPS:** login LDAP real en ERPNext e InvenTree; clave errónea rechazada; `ldapsearch` por LDAPS que valida con la CA interna y falla con una CA ajena. También comprueba que todo sobrevive a un `down` + `up -d`.
 
@@ -74,8 +84,8 @@ Además, la VLAN 99 es un único dominio L2 compartido por las 4 aplicaciones. `
 
 ## Documentación
 
-- [`docs/arquitectura.md`](docs/arquitectura.md): los 25 servicios por departamento, las redes y sus IP, y los flujos de LDAP, DNS y NTP.
-- [`docs/operacion.md`](docs/operacion.md): cómo arrancar, vigilar, detener y validar el sistema, y las trampas de Windows/WSL.
+- [`docs/arquitectura.md`](docs/arquitectura.md): los 26 servicios por departamento, las redes y sus IP, y los flujos de LDAP, DNS (con sus dos vistas), NTP y el proxy web por nombre.
+- [`docs/operacion.md`](docs/operacion.md): cómo arrancar, vigilar, detener y validar el sistema, cómo abrirlo a la LAN (modo intranet), y las trampas de Windows/WSL.
 - [`docs/seguridad.md`](docs/seguridad.md): la CA interna, LDAPS, las ACL y cuentas de servicio, los secretos de laboratorio y lo que un host no aísla.
 - [`docs/aplicaciones.md`](docs/aplicaciones.md): cada aplicación con su departamento, URL, usuario inicial y particularidades.
 - [`docs/ldap.md`](docs/ldap.md): qué aplicaciones autentican por LDAPS, cómo, qué se comprueba, y por qué Pretix y OpenVPMS no.
@@ -85,17 +95,18 @@ Además, la VLAN 99 es un único dominio L2 compartido por las 4 aplicaciones. `
 
 ```
 levantar-sistema.sh / .ps1 / .cmd   # arranque plug and play (la lógica está en el .sh)
-docker-compose.yml                  # el ÚNICO compose: los 25 servicios, agrupados por departamento
+docker-compose.yml                  # el ÚNICO compose: los 26 servicios, agrupados por departamento
 servicios/                          # una carpeta por servicio, con su README
   openvpms/                         # Médica (VLAN 10): Dockerfile, inicialización reanudable y su prueba
   pretix/                           # Taquilla (VLAN 20)
   inventree/                        # Logística (VLAN 30)
   erpnext/                          # RRHH (VLAN 40): prueba de erpnext-create-site
   openldap/                         # Infraestructura (VLAN 99): LDIF de estructura, ACL y usuarios de prueba
-  bind9/                            # Infraestructura: named.conf y plantilla de la zona DNS
+  bind9/                            # Infraestructura: named.conf (dos vistas) y plantillas de la zona reservaviva.lan
   ntp/                              # Infraestructura: servidor de hora
+  proxy/                            # Infraestructura: proxy web por nombre (nginx)
   ca/                               # CA interna + certificado LDAPS (lo ejecuta levantar-sistema.sh)
-sistema/                            # test.env (variables y claves de laboratorio) y la verificación
+sistema/                            # test.env (variables y claves de laboratorio), la verificación y el script de Windows para el modo intranet
 docs/                               # arquitectura, operación, seguridad, aplicaciones, LDAP y resultados vigentes
 diseno-red/                         # ANEXO: diseño con switch L2/L3, VLANs 802.1Q, matriz y diagramas (no se despliega)
 ```

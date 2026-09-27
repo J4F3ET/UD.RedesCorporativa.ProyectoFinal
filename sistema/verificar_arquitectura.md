@@ -15,7 +15,8 @@ cuatro apps se conectan además a `vlan99_infra` con IP fija:
 | inventree-app | vlan30 | 8000 |
 | erpnext-backend | vlan40 | 8000 |
 
-`openldap`, `dns-interno` y `ntp-interno` están en `vlan99_infra`. Las IP de cada contenedor están en
+`openldap`, `dns-interno`, `ntp-interno` y `proxy-web` están en `vlan99_infra` (y `erpnext-hr` tiene ahí su pata para el
+proxy). Las IP de cada contenedor están en
 [`../docs/arquitectura.md`](../docs/arquitectura.md#4-servicios). Dos bridges de Docker no se enrutan entre sí: esa es la
 segmentación que se pone a prueba.
 
@@ -41,9 +42,10 @@ ya local, referencia con digest) con `--pull=never`, y la de `ntp-interno`; llev
 1. **Segmentación (prueba negativa).** Un cliente efímero *solo* en una VLAN de departamento no alcanza otro departamento
    ni `vlan99_infra`; un cliente con la pila de red de la app (`--network container:<app>`, dual-homed) **sí** alcanza
    `openldap:389/636` y **no** otros departamentos.
-2. **DNS.** Se consulta a `10.10.99.11` de verdad: cada registro de `servicios/bind9/zones/db.reservaviva.local` (autoritativo, igual que la
-   zona), un nombre inexistente (NXDOMAIN) y `example.com` (REFUSED: sin recursión). Además, cada uno de los 7 nombres de la
-   zona debe apuntar a la IP real (`docker inspect`) del contenedor que da ese servicio; si no, es **FAIL**:
+2. **DNS, vista interna.** Se consulta a `10.10.99.11` de verdad desde `vlan99_infra`: cada registro de
+   `servicios/bind9/zones/db.reservaviva.lan` (autoritativo, igual que la zona), un nombre inexistente (NXDOMAIN) y
+   `example.com` (REFUSED: sin recursión). Además, cada uno de los 7 nombres de la zona debe apuntar a la IP real
+   (`docker inspect`) del contenedor que da ese servicio; si no, es **FAIL**:
 
    | Nombre | Contenedor | Red en la que se toma su IP |
    |---|---|---|
@@ -60,8 +62,25 @@ ya local, referencia con digest) con `--pull=never`, y la de `ntp-interno`; llev
    puerto 8000) no publica nada y solo se llega a él a través de ese nginx. Comprobado con `docker inspect` el 26/09/2026.
 3. **NTP.** `chronyc tracking` dentro de `ntp-interno`, un cliente SNTP que valida modo/stratum/LI/offset, y un cliente chrony
    real (`chronyd -Q`, no toca el reloj) que debe aceptar al servidor.
-4. **Consolidación.** Invoca `ldapprobe.py`, `probe.py` y `ldaplogin.py --persistencia` (caso 4, ya ejecutado: ver la tabla de estado);
-   no los duplica.
+4. **Acceso por nombre** (proxy web y vista lan del DNS):
+   - **Topología:** `proxy-web` está **solo** en `vlan99_infra` (en otra VLAN sería un router entre departamentos) y
+     `erpnext-hr` tiene su pata en `vlan99_infra`.
+   - **Vista lan:** se pregunta a `dns-interno` desde **fuera** de las VLAN, desde el anfitrión por el puerto publicado y por
+     **TCP** (el mismo camino que un equipo de la LAN; a bind9 le llega con el gateway del bridge como origen, que la ACL
+     deja fuera de la vista interna). `openvpms`, `pretix`, `inventree`, `rrhh` y `dns` deben dar la IP en la que se publica
+     el proxy (127.0.0.1 en modo local, la IP de la LAN en modo intranet); `ldap` y `ntp`, NXDOMAIN; `example.com`, REFUSED.
+     Se contrasta con la vista interna: el mismo nombre da la IP del contenedor desde las VLAN y la del proxy desde fuera.
+     TCP y no UDP porque es lo más fiable a través de la publicación de Docker; el cliente UDP ya lo ejercita el bloque 2.
+   - **Proxy:** por cada nombre, con la cabecera `Host` de un navegador que llega por él: la página de login responde 200
+     `text/html` (y sin `INVE-E7`), y **el primer CSS o JS que referencia** responde 200 con su `Content-Type` (H22: un 200 del
+     HTML no prueba que la web funcione). Además: `openvpms.reservaviva.lan/` redirige a `/openvpms/`, el WebSocket de
+     socket.io de ERPNext responde 101, y un nombre desconocido o la IP a secas reciben el 404 del `default_server`.
+   - **Acceso directo:** lo mismo (HTML + estático) por `http://localhost:<puerto>` de cada aplicación, que sigue siendo el
+     de administración.
+   Se hace desde el anfitrión, donde corre el guion, contra lo que Docker publica (`docker inspect`): no hace falta que el
+   anfitrión use este DNS.
+5. **Consolidación.** Invoca `ldapprobe.py`, `probe.py` y `ldaplogin.py --persistencia` (caso 4, ya ejecutado: ver la tabla de estado);
+   no los duplica. La verificación conserva el modo de publicación (local o intranet) en el `up -d` del caso 4.
 
 ## Cómo se lee un resultado (esto decide si la prueba vale algo)
 
@@ -99,14 +118,17 @@ Un destino inalcanzable y un nombre que no resuelve dan resultados parecidos y s
 - El **switch físico** (comportamiento L2/L3 real, tablas MAC, aislamiento de puertos).
 - La **matriz de firewall** del diseño de 3 equipos sobre interfaces reales (`firewall-pc3-matriz.sh` es anexo de diseño): aquí no hay
   interfaces `vlanXX` ni reglas sobre ellas; el aislamiento lo da Docker, con otro mecanismo.
-- El acceso desde otros equipos por la IP LAN y los puertos publicados (aquí `PUBLISH_IP=127.0.0.1`).
+- El acceso **desde otro equipo** de la LAN. El bloque 4 prueba el proxy y la vista lan desde el propio anfitrión, por el
+  puerto que publica Docker; que un equipo distinto llegue depende además de WSL en modo `mirrored`, del cortafuegos de
+  Windows y de Hyper-V y de Portmaster. Esa prueba la hace el usuario ([`../docs/operacion.md`](../docs/operacion.md#acceso-desde-la-lan)).
 
 ## Estado de verificación
 
 | Qué | Estado |
 |---|---|
-| Clasificador de conexiones, cliente DNS (compresión, NXDOMAIN, REFUSED, timeout), cliente SNTP, lector de zona | **Verificado** con `--autotest` en WSL contra sockets locales (PASS). En Windows el caso "puerto cerrado" falla por un artefacto de loopback (sin RST inmediato); en Linux/WSL pasa. |
+| Clasificador de conexiones, cliente DNS por UDP (compresión, NXDOMAIN, REFUSED, timeout) y por TCP, cliente SNTP, lector de las dos zonas, extracción del estático del HTML | **Verificado** con `--autotest` en WSL contra sockets locales (PASS). En Windows el caso "puerto cerrado" falla por un artefacto de loopback (sin RST inmediato); en Linux/WSL pasa. |
 | Modo `--sonda` por stdin (el que corre dentro del contenedor, sin `__file__`) | **Verificado** en WSL sin Docker |
 | Fallo limpio con el sistema apagado (7 FAIL en prerrequisitos, exit 1, sin excepción) | **Verificado** |
 | Todo lo que toca contenedores: segmentación, DNS, NTP, ldapprobe/probe/ldaplogin | **Verificado** el 26/09/2026 contra los 25 servicios, incluida la persistencia (cifras en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md)) |
+| Acceso por nombre (bloque 4) | **Verificado** el 27/09/2026 contra los 26 servicios, en modo local y en modo intranet con la IP de la distro de WSL (cifras en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md)) |
 | Supuestos: puertos 8080/80/8000/8000 de las apps, `chronyd -Q` con la imagen de cturra, `--network container:<app>` | **Verificado** en esa misma ejecución (los bloques que dependen de ellos dan PASS) |

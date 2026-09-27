@@ -47,58 +47,147 @@ hostAddressLoopback=true
 
 Los cambios en `.wslconfig` se aplican con `wsl --shutdown`, que **apaga todos los contenedores**. Hazlo con el sistema detenido.
 
+Esta configuración usa la red NAT de WSL, que basta para el modo local. El modo intranet necesita además
+`networkingMode=mirrored`, que añade el script de la sección "Acceso desde la LAN".
+
 ## 2. Arranque rápido y acciones
 
 | Desde | Comando |
 |---|---|
 | Explorador de Windows | Doble clic en `levantar-sistema.cmd` (al terminar espera una tecla) |
-| PowerShell | `.\levantar-sistema.ps1 [acción] [-Forzar] [-Rapido] [-Si] [-TimeoutMin <min>] [-Distro <distro>]` |
+| PowerShell | `.\levantar-sistema.ps1 [acción] [-Forzar] [-Rapido] [-Si] [-TimeoutMin <min>] [-Distro <distro>] [-Intranet [-IP <X.X.X.X>]]` |
 | `cmd.exe` | `levantar-sistema.cmd [acción] [opciones del .ps1]` |
-| bash (WSL, Linux) | `./levantar-sistema.sh [acción] [--forzar] [--rapido] [--si] [--timeout <min>]` |
+| bash (WSL, Linux) | `./levantar-sistema.sh [acción] [--forzar] [--rapido] [--si] [--timeout <min>] [--intranet [--ip <X.X.X.X>]]` |
 
 Sin acción se ejecuta `arrancar`. Si PowerShell bloquea el script, usa el `.cmd` o `powershell -ExecutionPolicy Bypass -File .\levantar-sistema.ps1`. La ayuda sale con `.\levantar-sistema.ps1 ayuda` o `./levantar-sistema.sh --help`.
 
 | Acción | Qué hace | Cuánto tarda (orientativo) | ¿Borra datos? |
 |---|---|---|---|
 | `arrancar` | Requisitos, memoria, `preparar`, `up -d`, espera a que todo esté sano y crea el administrador de Pretix | Primer arranque: más de media hora con las imágenes ya descargadas, y la primera vez hay que sumar su descarga (varios GB). Con el sistema ya arriba, alrededor de un minuto | No |
-| `preparar` | Solo lo previo: certificados, zona DNS, LDIF de LDAP, validación del compose e imagen de OpenVPMS. No arranca nada | Segundos, salvo la primera construcción de la imagen | No |
-| `estado` | Tabla de servicios (servicio, estado, detalle) y direcciones de acceso | De segundos a varios minutos (desde Windows, a través de WSL, es cuando más tarda) | No |
+| `preparar` | Solo lo previo: certificados, zonas DNS, LDIF de LDAP, validación del compose e imagen de OpenVPMS. No arranca nada | Segundos, salvo la primera construcción de la imagen | No |
+| `estado` | Tabla de servicios (servicio, estado, detalle), **modo de publicación** (local o intranet, con la IP y el puerto del proxy y del DNS) y direcciones de acceso | De segundos a varios minutos (desde Windows, a través de WSL, es cuando más tarda) | No |
 | `verificar` | Ejecuta [`sistema/verificar_arquitectura.py`](../sistema/verificar_arquitectura.py) y guarda un informe. Con `-Rapido` / `--rapido` omite la prueba de persistencia | Completo: un cuarto de hora aproximadamente (incluye `down` + `up -d`). Rápido: bastante menos | No (el completo para y levanta los contenedores sin `-v`) |
 | `detener` | `docker compose stop`: para los contenedores y conserva todo | Segundos | No |
 | `borrar` | `docker compose down -v --remove-orphans`: contenedores, redes **y volúmenes**. Pide escribir `borrar` (o `-Si` / `--si`) | Segundos, pero el siguiente arranque reinicializa todo (el script avisa de unos 30 min) | **Sí, todos** |
 
 Las cifras medidas están en [`resultados-un-host.md`](resultados-un-host.md). Al terminar, `arrancar` y `estado` muestran las direcciones de acceso. Las contraseñas de laboratorio están en [`sistema/test.env`](../sistema/test.env).
 
-### Acceso desde otros equipos de la intranet
+**Modo local y modo intranet.** Por defecto (`arrancar` sin opciones) el sistema está en **modo local**: todo se publica
+en `127.0.0.1` y solo se entra desde el propio equipo. Con `-Intranet` / `--intranet` pasa a **modo intranet**: el proxy
+web (80) y el DNS (53) se publican en la IP de la LAN y otros equipos entran por nombre (siguiente apartado). El modo no
+se guarda en ningún fichero: un `arrancar` sin la opción vuelve al modo local, y `estado`, `preparar` y `verificar`
+detectan el modo en que está el sistema y lo conservan.
 
-**No probado en este laboratorio.** Por defecto todo se publica en `127.0.0.1` y solo se entra desde el propio equipo
-([`arquitectura.md`](arquitectura.md#7-puertos-publicados)). Lo que hay que saber antes de abrirlo:
+### Acceso desde la LAN
 
-- Docker corre **dentro de la VM de WSL**, no en Windows.
-- `%UserProfile%\.wslconfig` usa la red por defecto de WSL (NAT: no hay `networkingMode`, y `localhostForwarding=true`).
-  Con ella Windows solo reenvía `localhost` hacia la VM, así que otros equipos **no** llegan a los puertos aunque se
-  publiquen en `0.0.0.0` dentro de WSL.
-- La forma correcta de dar acceso a la intranet o a la VPN es publicar en la IP de la interfaz de intranet/VPN del host
-  (`PUBLISH_IP=<esa IP>` en `sistema/test.env`), **nunca en `0.0.0.0`**, y exponerla desde Windows con
-  `networkingMode=mirrored` en `.wslconfig` o con `netsh interface portproxy`, más una regla del Firewall de Windows
-  limitada a esa red.
+Sirve para que cualquier equipo de la LAN abra las cuatro aplicaciones por su nombre, resuelto por el DNS del
+laboratorio:
+
+| Aplicación | Dirección desde otro equipo |
+|---|---|
+| OpenVPMS | http://openvpms.reservaviva.lan (lleva a `/openvpms/`) |
+| Pretix | http://pretix.reservaviva.lan |
+| InvenTree | http://inventree.reservaviva.lan |
+| ERPNext (RRHH) | http://rrhh.reservaviva.lan |
+
+**Antes de nada: el riesgo.** Las contraseñas de laboratorio están **públicas en git** ([`sistema/test.env`](../sistema/test.env)).
+En modo intranet cualquiera en la misma red puede entrar como administrador en las cuatro aplicaciones. Úsalo solo en una
+red de laboratorio y vuelve al modo local al terminar ([`seguridad.md`](seguridad.md#modo-intranet-qué-se-expone-y-por-qué-es-opcional)).
+
+**Qué hace falta en Windows (una vez).** Docker corre dentro de la VM de WSL. Con la red NAT de WSL (la de por defecto)
+la distro tiene una IP `172.x` que los demás equipos no alcanzan, y Docker ni siquiera puede publicar en la IP de la LAN.
+Hacen falta tres cosas, que prepara [`sistema/habilitar-intranet-windows.ps1`](../sistema/habilitar-intranet-windows.ps1):
+
+1. `networkingMode=mirrored` en `%UserProfile%\.wslconfig`: la distro comparte las interfaces de Windows. El script hace
+   copia de seguridad y solo añade o cambia esa clave, con un comentario, sin tocar el resto. Requiere Windows 11 22H2 o
+   posterior.
+2. Reglas de entrada del **Firewall de Windows** para 80/tcp y 53/udp+tcp, solo desde la subred local y en todos los
+   perfiles (una Wi-Fi en perfil "Pública" también cuenta).
+3. Las mismas reglas en el **firewall de Hyper-V** para la VM de WSL (`New-NetFirewallHyperVRule`, con el `VMCreatorId`
+   de WSL), que en modo mirrored es el que filtra lo que entra a la distro.
+
+El script también informa de quién tiene el puerto 53 en Windows. En el equipo de medida lo tienen el servicio
+**SharedAccess** (Conexión compartida a Internet, ICS, en `0.0.0.0:53/udp`) y **Portmaster** (`portmaster-core`, en
+`[::]:53`, un cortafuegos de aplicaciones que además filtra conexiones entrantes). El script no detiene ni reconfigura
+ninguno: muestra los comandos para ICS y los pasos para Portmaster.
+
+**Pasos del usuario:**
+
+1. En PowerShell **como administrador**, desde la raíz del repositorio:
+   `powershell -ExecutionPolicy Bypass -File .\sistema\habilitar-intranet-windows.ps1`
+   (con `-Comprobar` solo informa, sin cambiar nada y sin ser administrador).
+2. Si el script cambió `.wslconfig`: `wsl --shutdown`. Para la VM de WSL y todos los contenedores (los datos se
+   conservan). Después, comprueba dentro de WSL que la distro sigue resolviendo nombres (`apt update`): con Tailscale en
+   Windows, el DNS de WSL ya dio problemas en este equipo (ver los comentarios de `.wslconfig`).
+3. Si el script avisó de ICS o de Portmaster en el 53, sigue sus indicaciones.
+4. `.\levantar-sistema.ps1 -Intranet -Forzar`. Detecta la IP de la LAN (la de la ruta por defecto de Windows); otra se
+   indica con `-IP X.X.X.X`. Antes de tocar nada comprueba que WSL está en mirrored, que la IP está en la distro y que 80
+   y 53 están libres en ella; si algo falla lo dice y no cambia nada. Si Docker no puede publicar (por ejemplo, el 53
+   ocupado en Windows), explica la causa y vuelve a dejar el proxy y el DNS en `127.0.0.1`.
+5. Al terminar, el lanzador muestra las cuatro URL, la IP del DNS y cómo configurarla en los clientes.
+
+**Configurar el DNS de los clientes.** Los nombres `*.reservaviva.lan` solo los conoce el DNS del laboratorio, que
+escucha en la IP de la LAN del equipo anfitrión, puerto 53. Dos formas:
+
+- **En cada cliente**, a mano: DNS preferido = la IP del anfitrión (Windows: Configuración > Red e Internet > propiedades
+  del adaptador > Asignación de servidor DNS > Manual). Ese DNS **no hace recursión**: con él como único DNS, el cliente
+  solo resuelve `reservaviva.lan`. Pon un segundo DNS (el del router o uno público) para Internet; ten en cuenta que
+  algunos sistemas preguntan al segundo sin esperar al primero, y entonces `reservaviva.lan` puede fallar de forma
+  intermitente.
+- **Para toda la LAN**, en el DHCP del router: DNS primario = la IP del anfitrión. Misma advertencia sobre la recursión.
+  Conviene además reservar esa IP para el anfitrión en el router, porque si cambia hay que volver a arrancar con
+  `-Intranet`.
+
+**Pruebas desde otro equipo de la LAN** (sustituye `192.168.1.13` por la IP del anfitrión):
+
+1. `ping 192.168.1.13` (puede fallar sin que sea un problema: las reglas solo abren 80 y 53, no ICMP).
+2. `nslookup pretix.reservaviva.lan 192.168.1.13` → debe responder `192.168.1.13`. Igual con `openvpms`, `inventree`,
+   `rrhh` y `dns`. `nslookup ldap.reservaviva.lan 192.168.1.13` debe dar "Non-existent domain" (a propósito).
+3. `nslookup example.com 192.168.1.13` → "Query refused": el DNS no hace recursión.
+4. Sin tocar el DNS del cliente, `Test-NetConnection 192.168.1.13 -Port 80` (Windows) y `curl.exe -H "Host:
+   pretix.reservaviva.lan" http://192.168.1.13/control/login` → deben responder (el segundo, con el HTML del login).
+   Aísla el proxy del DNS.
+5. Con el DNS del cliente apuntando al anfitrión, abrir en el navegador las cuatro URL de la tabla y llegar a la página
+   de login de cada aplicación, con su aspecto normal (hojas de estilo cargadas).
+6. `http://192.168.1.13` a secas → página 404 del proxy que lista los nombres válidos.
+
+Si falla el paso 2 o el 4, el orden de sospechosos es: WSL no está en mirrored (`wsl.exe --exec wslinfo
+--networking-mode` debe decir `mirrored`), el firewall de Hyper-V, Portmaster y el Firewall de Windows. En el propio
+anfitrión, `.\levantar-sistema.ps1 estado` muestra en qué IP y puerto publica cada uno.
+
+**Probar el DNS desde el propio anfitrión con Portmaster activo da un falso negativo.** Medido el 27/09: con el DNS
+publicado en la IP de WSL, `nslookup pretix.reservaviva.lan <IP>` desde Windows devolvió NXDOMAIN con la marca de
+recursión activa y resolvió `example.com`, cosas que nuestro bind9 nunca hace: Portmaster intercepta las consultas DNS
+salientes del equipo y responde él. La misma consulta hecha desde dentro de WSL dio la respuesta correcta. El DNS se
+prueba desde otro equipo de la LAN (o con Portmaster en pausa); el proxy web no se ve afectado.
+
+**Volver al modo local:** `.\levantar-sistema.ps1 -Forzar` (sin `-Intranet`). Recrea solo el proxy y el DNS en
+`127.0.0.1`. Para deshacer también la preparación de Windows: el script con `-Deshacer` (quita las reglas y restaura
+`networkingMode`) y después `wsl --shutdown`.
+
+**Acceso por nombre desde el propio anfitrión.** En modo local el proxy también funciona, en `127.0.0.1:80`, pero
+Windows no puede usar un DNS en el puerto 1053. Para probar los nombres en el anfitrión basta con una línea por nombre en
+`C:\Windows\System32\drivers\etc\hosts` (`127.0.0.1 pretix.reservaviva.lan`), o `curl -H "Host: pretix.reservaviva.lan"
+http://127.0.0.1/`. El acceso directo `http://localhost:1808x` no cambia en ningún modo.
 
 ## 3. Qué pasa en un arranque
 
 `arrancar` ejecuta, en este orden:
 
 1. **Requisitos** (`comprobar_requisitos`): `docker` responde, Compose ≥ 2.24.4 y `openssl` presente.
-2. **Memoria** (`comprobar_memoria`). En Windows, el `.ps1` ya ha comprobado antes la memoria libre del equipo.
-3. **`preparar`**:
-   1. **Certificados** (`preparar_certificados`): ejecuta [`servicios/ca/generar-certificados.sh`](../servicios/ca/generar-certificados.sh) `--sin-instalar-ca`, que solo genera la CA interna y el certificado LDAPS si faltan o van a caducar. Después comprueba que `ca.crt`, `ldap.crt` y `ldap.key` existan en `servicios/ca/certs/` como **ficheros no vacíos**.
-   2. **Zona DNS** (`generar_zona`): genera `servicios/bind9/zones/db.reservaviva.local` desde la plantilla `.tpl`, con la IP fija de cada contenedor. Si solo cambia el serial, conserva el fichero anterior.
+2. **Modo** (`resolver_modo`): local, o intranet con `--intranet`. En modo intranet, además, las comprobaciones previas (`comprobar_intranet`): WSL en mirrored, la IP presente en la distro y los puertos 80 y 53 libres en ella. Si algo falla, se detiene sin tocar ningún contenedor.
+3. **Memoria** (`comprobar_memoria`). En Windows, el `.ps1` ya ha comprobado antes la memoria libre del equipo.
+4. **`preparar`**:
+   1. **Certificados** (`preparar_certificados`): ejecuta [`servicios/ca/generar-certificados.sh`](../servicios/ca/generar-certificados.sh) `--sin-instalar-ca`, que solo genera la CA interna y el certificado LDAPS si faltan, van a caducar o su SAN no cubre `ldap.reservaviva.lan`. Después comprueba que `ca.crt`, `ldap.crt` y `ldap.key` existan en `servicios/ca/certs/` como **ficheros no vacíos**.
+   2. **Zonas DNS** (`generar_zona`): genera las dos zonas de `reservaviva.lan` (vista interna, con la IP fija de cada contenedor, y vista lan, con la IP del anfitrión del modo elegido) y la ACL de la vista interna, desde las plantillas de `servicios/bind9/zones/`. Si solo cambia el serial, conserva el fichero anterior.
    3. **LDIF de LDAP** (`generar_ldif`): genera en `servicios/openldap/generado/` (fuera de git) los LDIF del primer arranque del directorio, a partir de las plantillas `servicios/openldap/*.ldif.tpl` y de las claves de `sistema/test.env` (`LDAP_SVC_LECTURA_PASSWORD` y `LDAP_PRUEBA_<UID>_PASSWORD`), que guarda como hash `{SSHA}`. Si falta una de esas variables se detiene con `definir <VARIABLE> en sistema/test.env`. Se regenera en cada `preparar`, pero OpenLDAP solo lo carga con el directorio vacío: en un sistema ya inicializado no cambia nada ([`seguridad.md`](seguridad.md#3-ldap-y-ldaps)).
    4. **Validación** del compose (`docker compose config -q`).
    5. **Imagen de OpenVPMS**: se reconstruye siempre (con caché tarda segundos). Sin red, solo acepta la imagen existente si su `entrypoint.sh` e `init-lib.sh` son idénticos a los del repositorio.
-4. **`up -d`** de los 25 servicios. Antes reinicia los contenedores que un arranque anterior dejó `unhealthy` (`reiniciar_unhealthy`), porque `up -d` no los recrearía y abortaría enseguida. `up -d` respeta los `depends_on` con `service_healthy`: en un primer arranque casi toda la espera ocurre aquí, sin el progreso del paso 5 ni su límite de tiempo. Si la zona es más nueva que el contenedor `dns-interno`, lo reinicia para que bind9 la lea (`reiniciar_dns_si_zona_nueva`).
-5. **Espera a que todo esté sano** (`esperar_sano`). Cada 20 s imprime `[mm:ss] sanos N/25 - esperando: …`. Los tres trabajos de un solo disparo (`erpnext-configurator`, `erpnext-create-site` y `erpnext-ldap-config`) cuentan como sanos cuando terminan con código 0. El límite es de 45 min (`-TimeoutMin` / `--timeout`).
-6. **Administrador de Pretix** (`crear_admin_pretix`): crea el de `PRETIX_ADMIN_EMAIL` y borra el `admin@localhost` que trae la imagen.
-7. **Accesos**: imprime las URL y los usuarios.
+5. **Publicación en la LAN** (solo en modo intranet, `publicar_intranet`): `up -d` solo de `proxy` y `dns`. Si Docker no puede publicar en la IP de la LAN, explica la causa (puerto 53 ocupado por ICS o Portmaster, IP ausente…), vuelve a publicarlos en `127.0.0.1` y termina con error.
+6. **`up -d`** de los 26 servicios. Antes reinicia los contenedores que un arranque anterior dejó `unhealthy` (`reiniciar_unhealthy`), porque `up -d` no los recrearía y abortaría enseguida. `up -d` respeta los `depends_on` con `service_healthy`: en un primer arranque casi toda la espera ocurre aquí, sin el progreso del paso 7 ni su límite de tiempo. Si `named.conf`, una zona o la ACL son más nuevos que el contenedor `dns-interno`, lo reinicia para que bind9 los lea (`reiniciar_dns_si_zona_nueva`); si el certificado de OpenLDAP es más nuevo que el contenedor `openldap`, lo recrea con los mismos volúmenes y reinicia sus dos clientes LDAPS, `inventree-app` y `erpnext-backend`, y después `erpnext-hr`, cuyo nginx resuelve la IP del backend solo al arrancar (`recrear_ldap_si_cert_nuevo`): la imagen solo copia sus certificados en el primer arranque de cada contenedor, así que reiniciarlo no bastaría, y los procesos de InvenTree siguieron fallando hasta reiniciarlos ([`seguridad.md`](seguridad.md#cuándo-se-regenera-y-cuándo-no)).
+7. **Espera a que todo esté sano** (`esperar_sano`). Cada 20 s imprime `[mm:ss] sanos N/26 - esperando: …`. Los tres trabajos de un solo disparo (`erpnext-configurator`, `erpnext-create-site` y `erpnext-ldap-config`) cuentan como sanos cuando terminan con código 0. El límite es de 45 min (`-TimeoutMin` / `--timeout`).
+8. **Administrador de Pretix** (`crear_admin_pretix`): crea el de `PRETIX_ADMIN_EMAIL` y borra el `admin@localhost` que trae la imagen.
+9. **Accesos**: imprime el modo, las URL y los usuarios; en modo intranet, también la IP del DNS para los clientes y el aviso de las claves públicas.
 
 **Primer arranque y siguientes.** El primero descarga imágenes e inicializa los volúmenes: OpenVPMS crea su esquema y carga los datos base, ERPNext crea su sitio, OpenLDAP carga los LDIF de `generado/`, y Pretix e InvenTree migran. Es el lento. Con los volúmenes ya inicializados, los siguientes solo arrancan los contenedores y tardan unos minutos.
 
@@ -116,7 +205,7 @@ Por qué hay que hacerlo desde Windows con Docker Engine en WSL: si no queda nin
 
 ## 5. Diagnóstico
 
-**Leer `estado`.** Lo normal con el sistema sano son 22 servicios `running` (`Up …`, con `(healthy)` los que tienen sonda de salud) y los tres trabajos de ERPNext en `exited` con `Exited (0)`. Un `Exited` con código distinto de 0, `(unhealthy)` o un contador de reinicios que sube indican un problema.
+**Leer `estado`.** Lo normal con el sistema sano son 23 servicios `running` (`Up …`, con `(healthy)` los que tienen sonda de salud) y los tres trabajos de ERPNext en `exited` con `Exited (0)`. Debajo, el modo de publicación y dónde publican `proxy-web` y `dns-interno`. Un `Exited` con código distinto de 0, `(unhealthy)` o un contador de reinicios que sube indican un problema.
 
 **Diagnóstico automático.** Si durante la espera un servicio falla (unhealthy, terminado, más de 3 reinicios o un trabajo con código ≠ 0) o se agota el tiempo, `arrancar` muestra `docker compose ps -a` y las **últimas 40 líneas de log** de cada servicio implicado, y termina con error. No hay una acción `diagnostico` aparte: es parte de `arrancar`.
 
@@ -127,7 +216,7 @@ docker compose --env-file sistema/test.env ps -a
 docker compose --env-file sistema/test.env logs --tail 100 <servicio>
 ```
 
-`<servicio>` es el nombre del compose, que no siempre coincide con el del contenedor: `dns` (contenedor `dns-interno`) y `ntp` (`ntp-interno`).
+`<servicio>` es el nombre del compose, que no siempre coincide con el del contenedor: `dns` (contenedor `dns-interno`), `ntp` (`ntp-interno`) y `proxy` (`proxy-web`).
 
 **Un servicio lleva mucho en `starting`.** En el primer arranque es normal: la base de OpenVPMS tiene un `start_period` de 10 min, y el sitio de ERPNext tarda. Mira sus logs. Si avanzan, espera, o relanza con más margen (`.\levantar-sistema.ps1 -TimeoutMin 90` / `./levantar-sistema.sh --timeout 90`). Relanzar no pierde lo hecho.
 
@@ -157,14 +246,18 @@ docker compose --env-file sistema/test.env logs --tail 100 <servicio>
 | `generar-certificados.sh` fallaba con "Operation not permitted" en la segunda ejecución | OpenLDAP (osixia) se apropia de los certificados montados (uid 911) | Ya resuelto: el script solo cambia permisos de lo que genera. Para regenerarlos, `--forzar` |
 | Un `.sh` falla con `$'\r': command not found` | La copia de trabajo de Windows es CRLF (`core.autocrlf=true`) | `.gitattributes` fuerza LF en `*.sh`, `Dockerfile` y `*.service`. Al editarlos en Windows, conserva LF |
 | El progreso de `arrancar` o `verificar` parece parado en `[00:07]` | `erpnext-ldap-config` se vuelve a ejecutar en cada `up` y hay que esperarlo | Es normal. Espera; el contador sigue cada 20 s |
-| `estado` no termina y parece colgado | Consultar los 25 servicios a través de `wsl.exe` puede llevar varios minutos | Espera. Si lo lanzas desde otra herramienta con límite de tiempo, dale más margen o ejecútalo en segundo plano |
+| `estado` no termina y parece colgado | Consultar los 26 servicios a través de `wsl.exe` puede llevar varios minutos | Espera. Si lo lanzas desde otra herramienta con límite de tiempo, dale más margen o ejecútalo en segundo plano |
+| `-Intranet` se detiene con "WSL esta en modo de red 'nat'" | La red NAT de WSL no tiene la IP de la LAN | `sistema\habilitar-intranet-windows.ps1` como administrador y `wsl --shutdown` (sección "Acceso desde la LAN") |
+| Tras volver a arrancar sin `-Intranet`, los otros equipos ya no entran | `arrancar` sin la opción es el modo local: recrea el proxy y el DNS en `127.0.0.1` | Es lo previsto. Para seguir en la LAN, arranca siempre con `-Intranet` |
 
 ### Al comprobar las aplicaciones
 
 | Síntoma | Causa | Qué hacer |
 |---|---|---|
-| Pretix responde **400** en `http://127.0.0.1:18082` | Pretix solo acepta el `Host` de su URL propia (`PRETIX_PRETIX_URL`, que es `localhost`) | Entra siempre por `http://localhost:18082` ([aplicaciones.md](aplicaciones.md#pretix-taquilla-y-boletería)) |
-| `curl` a la página de una aplicación da 200 y aun así la interfaz no carga | En una SPA (como `/web` de InvenTree) el HTML llega aunque sus JS o CSS fallen; así pasó H22 | Abre la página en el navegador y mira su consola, o pide un asset referenciado por el HTML y comprueba que su `content-type` no sea `text/html`. `verificar` no lo comprueba (ver los pendientes de [`resultados-un-host.md`](resultados-un-host.md#pendientes)) |
+| Pretix responde **400** en `http://127.0.0.1:18082` | Pretix solo acepta el `Host` de su URL propia (`PRETIX_PRETIX_URL`, que es `pretix.reservaviva.lan`) o `localhost` | Entra por `http://localhost:18082` o por `http://pretix.reservaviva.lan` ([aplicaciones.md](aplicaciones.md#pretix-taquilla-y-boletería)) |
+| `curl` a la página de una aplicación da 200 y aun así la interfaz no carga | En una SPA (como `/web` de InvenTree) el HTML llega aunque sus JS o CSS fallen; así pasó H22 | Abre la página en el navegador y mira su consola, o pide un asset referenciado por el HTML y comprueba que su `content-type` no sea `text/html`. `verificar` lo hace para las cuatro aplicaciones, por nombre y por `localhost` (bloque 4) |
+| Un nombre `*.reservaviva.lan` responde **502** | La aplicación todavía está arrancando: el proxy no espera a nadie | Espera a que `estado` la muestre sana |
+| Un nombre responde con la página 404 del proxy | El nombre está mal escrito o se entró por la IP | Usa uno de los cuatro nombres de la tabla de "Acceso desde la LAN" |
 
 ## 8. Validación
 
@@ -175,7 +268,7 @@ docker compose --env-file sistema/test.env logs --tail 100 <servicio>
 .\levantar-sistema.ps1 verificar -Rapido    ./levantar-sistema.sh verificar --rapido
 ```
 
-- **Completo** (por defecto): segmentación, DNS, NTP y LDAP/LDAPS, e incluye la prueba de persistencia (caso 4 de `ldaplogin.py`: `down` sin `-v` + `up -d`, y se repiten los logins).
+- **Completo** (por defecto): segmentación, DNS, NTP, acceso por nombre (vista lan del DNS, proxy web con página y estático de cada aplicación, acceso directo por `localhost`) y LDAP/LDAPS, e incluye la prueba de persistencia (caso 4 de `ldaplogin.py`: `down` sin `-v` + `up -d`, y se repiten los logins). Respeta el modo en que esté el sistema: en modo intranet, el `up -d` de la persistencia lo deja en modo intranet.
 - **Rápido**: omite la persistencia y deja **siempre un FAIL deliberado**, "caso 4 … NO EJECUTADO", así que termina con código ≠ 0. Sirve para iterar, no como validación final.
 
 **Resultados.** Cada comprobación imprime `[PASS]`, `[FAIL]` o `[INFO]` con la salida en la que se apoya. `INFO` son hallazgos que hay que leer y no cuentan como fallo, como el tráfico entre apps por la VLAN 99. El resultado es válido solo si `ExecMainStartTimestamp` de Docker es el mismo antes y después; si cambia, repite. El script termina con `Verificacion superada` solo si no hay ningún FAIL. Cómo interpretar cada bloque se explica en [`sistema/verificar_arquitectura.md`](../sistema/verificar_arquitectura.md).
