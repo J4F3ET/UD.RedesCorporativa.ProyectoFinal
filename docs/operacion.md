@@ -62,7 +62,7 @@ Sin acción se ejecuta `arrancar`. Si PowerShell bloquea el script, usa el `.cmd
 |---|---|---|---|
 | `arrancar` | Requisitos, memoria, `preparar`, `up -d`, espera a que todo esté sano y crea el administrador de Pretix | Primer arranque: del orden de un cuarto de hora con las imágenes ya descargadas. Con el sistema ya arriba, alrededor de un minuto | No |
 | `preparar` | Solo lo previo: certificados, zona DNS, validación del compose e imagen de OpenVPMS. No arranca nada | Segundos, salvo la primera construcción de la imagen | No |
-| `estado` | Tabla de servicios (servicio, estado, detalle) y direcciones de acceso | Segundos | No |
+| `estado` | Tabla de servicios (servicio, estado, detalle) y direcciones de acceso | De segundos a varios minutos (desde Windows, a través de WSL, es cuando más tarda) | No |
 | `verificar` | Ejecuta [`sistema/verificar_arquitectura.py`](../sistema/verificar_arquitectura.py) y guarda un informe. Con `-Rapido` / `--rapido` omite la prueba de persistencia | Completo: un cuarto de hora aproximadamente (incluye `down` + `up -d`). Rápido: bastante menos | No (el completo para y levanta los contenedores sin `-v`) |
 | `detener` | `docker compose stop`: para los contenedores y conserva todo | Segundos | No |
 | `borrar` | `docker compose down -v --remove-orphans`: contenedores, redes **y volúmenes**. Pide escribir `borrar` (o `-Si` / `--si`) | Segundos, pero el siguiente arranque reinicializa todo (el script avisa de unos 30 min) | **Sí, todos** |
@@ -142,6 +142,14 @@ docker compose --env-file sistema/test.env logs --tail 100 <servicio>
 | `generar-certificados.sh` fallaba con "Operation not permitted" en la segunda ejecución | OpenLDAP (osixia) se apropia de los certificados montados (uid 911) | Ya resuelto: el script solo cambia permisos de lo que genera. Para regenerarlos, `--forzar` |
 | Un `.sh` falla con `$'\r': command not found` | La copia de trabajo de Windows es CRLF (`core.autocrlf=true`) | `.gitattributes` fuerza LF en `*.sh`, `Dockerfile` y `*.service`. Al editarlos en Windows, conserva LF |
 | El progreso de `arrancar` o `verificar` parece parado en `[00:07]` | `erpnext-ldap-config` se vuelve a ejecutar en cada `up` y hay que esperarlo | Es normal. Espera; el contador sigue cada 20 s |
+| `estado` no termina y parece colgado | Consultar los 25 servicios a través de `wsl.exe` puede llevar varios minutos | Espera. Si lo lanzas desde otra herramienta con límite de tiempo, dale más margen o ejecútalo en segundo plano |
+
+### Al comprobar las aplicaciones
+
+| Síntoma | Causa | Qué hacer |
+|---|---|---|
+| Pretix responde **400** en `http://127.0.0.1:18082` | Pretix solo acepta el `Host` de su URL propia (`PRETIX_PRETIX_URL`, que es `localhost`) | Entra siempre por `http://localhost:18082` ([aplicaciones.md](aplicaciones.md#pretix-taquilla-y-boletería)) |
+| `curl` a la página de una aplicación da 200 y aun así la interfaz no carga | En una SPA (como `/web` de InvenTree) el HTML llega aunque sus JS o CSS fallen; así pasó H22 | Abre la página en el navegador y mira su consola, o pide un asset referenciado por el HTML y comprueba que su `content-type` no sea `text/html`. `verificar` no lo comprueba (ver los pendientes de [`resultados-un-host.md`](resultados-un-host.md#pendientes)) |
 
 ## 8. Validación
 

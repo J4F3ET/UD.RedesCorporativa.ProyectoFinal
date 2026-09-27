@@ -61,7 +61,7 @@ En todas las pasadas válidas, `ExecMainStartTimestamp` de `docker.service` es e
 
 Qué cubre cada bloque (detalle en [`../sistema/verificar_arquitectura.md`](../sistema/verificar_arquitectura.md)):
 
-- **Prerrequisitos:** las 4 apps en su VLAN y en la 99. OpenVPMS 10.10.10.10/.99.24, Pretix .20.10/.99.21, InvenTree .30.10/.99.22, ERPNext .40.11/.99.23. OpenLDAP .99.10, DNS .99.11, NTP .99.12.
+- **Prerrequisitos:** las 4 apps en su VLAN y en la 99, y OpenLDAP, DNS y NTP en la 99, cada uno con la IP fija de [`arquitectura.md`](arquitectura.md#4-servicios).
 - **Segmentación:** controles positivos, negativos entre departamentos, y alcance de LDAP solo desde las apps dual-homed.
   - **12 de los 13 INFO** son el tráfico de una app a otra por la VLAN 99. Es un hallazgo previsto: la VLAN 99 es un único dominio L2.
 - **DNS:** registros autoritativos, NXDOMAIN, `REFUSED` para nombres externos, y solo responde a las apps dual-homed. Cada uno de los 7 nombres de la zona apunta al contenedor que da ese servicio (`rrhh` → `erpnext-hr`, el nginx de ERPNext).
@@ -86,8 +86,15 @@ Qué cubre cada bloque (detalle en [`../sistema/verificar_arquitectura.md`](../s
 | — | Los simuladores de `diseno-red/` no se han vuelto a ejecutar tras moverlos (necesitan `nicolaka/netshoot`) | validación |
 | — | Diseño con switch L2/L3 sin probar contra hardware real | limitación conocida |
 | — | Rotar las contraseñas de laboratorio de `sistema/test.env` si el repositorio se hace público | seguridad |
-| — | InvenTree no sirve `/media` sin `DEBUG`: las imágenes de artículos y los adjuntos que se suban no se verán. Hoy solo existe `media/report`, así que no se pierde nada. Arreglarlo exige un proxy (contenedor nuevo): decisión del usuario | funcionalidad |
-| — | El login real de Pretix con `admin@reservaviva.local` en un navegador no lo ha hecho ningún agente (la clave no se puede leer desde la sesión): lo comprueba el usuario | validación |
+| — | InvenTree no sirve `/media` sin `DEBUG`: las imágenes de artículos y los adjuntos que se suban no se verán. Hoy solo existe `media/report`, así que no se pierde nada. Arreglarlo exige un proxy (contenedor nuevo y descarga de su imagen), que seguiría necesitando el arreglo de H22 | decisión del usuario |
+| — | Los `ports:` del compose publican por defecto en `0.0.0.0` (`${PUBLISH_IP:-0.0.0.0}`, `${DNS_BIND_IP:-0.0.0.0}`); `test.env` fija `127.0.0.1`. Propuesta: que el valor por defecto sea `127.0.0.1`, más seguro si falta `test.env` | decisión del usuario |
+| — | El comentario de `servicios/openldap/10-estructura.ldif` contiene la clave de laboratorio de `svc-lectura`. Recomendación: dejarla, porque ya está en `test.env` y en el README de `servicios/openldap/`; quitarla no afecta a un sistema ya inicializado (el LDIF solo se carga con `ldap_data` vacío) | decisión del usuario |
+| — | `verificar` no comprueba la interfaz web de las aplicaciones: H22 pasó 7 pasadas en verde porque solo se probaban API y LDAP. Falta una sonda que pida un asset referenciado por el HTML de cada app y exija un `content-type` que no sea HTML | validación |
+| — | `arrancar` lanzado desde Git Bash devolvió RC=2 aunque el log decía "los 25 servicios estan sanos"; el siguiente, desde PowerShell, dio RC=0. Causa sin identificar (el envoltorio o el script) | robustez |
+| — | Ninguna aplicación es cliente de `ntp-interno`: solo lo consulta `verificar` (ver [`arquitectura.md`](arquitectura.md#ntp)). Falta decidir si se documenta como limitación o se configura un cliente en las apps | decisión del usuario |
+| — | Los volúmenes anónimos del proyecto se acumulan con las recreaciones y los `down`/`up` de `verificar` (74 el 26/09) y no se han limpiado | mantenimiento |
+| — | `docker.service` se reinició entre dos sesiones de trabajo del 26/09 (`ExecMainStartTimestamp` pasó de 17:01:17 a 21:13:43), fuera de cualquier prueba y por causa desconocida | robustez |
+| — | El login real en un navegador con las claves de laboratorio no lo ha hecho ningún agente (la clave no se puede leer desde la sesión): administrador de Pretix `admin@reservaviva.local`, botón "Login with LDAP" de ERPNext y `taquilla.prueba` en InvenTree. Lo comprueba el usuario | validación |
 
 Resuelto el 26/09/2026:
 

@@ -1,10 +1,8 @@
 # Seguridad y credenciales
 
 Qué protege el sistema de un host, con qué mecanismos y qué deja sin cubrir. Se dirige a quien clona el repositorio.
-Aquí no se repite la integración LDAP de cada aplicación, que está en
-[`integracion-ldap-erpnext-inventree.md`](integracion-ldap-erpnext-inventree.md) y
-[`ldap-pretix-openvpms.md`](ldap-pretix-openvpms.md). Las cifras de las pruebas están en
-[`resultados-un-host.md`](resultados-un-host.md).
+Aquí no se repite la integración LDAP de cada aplicación, que está en [`ldap.md`](ldap.md). Las cifras de las pruebas
+están en [`resultados-un-host.md`](resultados-un-host.md).
 
 ## 1. Alcance y advertencia
 
@@ -79,16 +77,10 @@ creó Docker, volver a ejecutar `preparar` y recrear los contenedores afectados.
 
 ### Qué aplicación usa LDAP
 
-| Aplicación | LDAP | Cómo |
-|---|---|---|
-| ERPNext (RRHH) | Sí, LDAPS con verificación | `ldaps://ldap.reservaviva.local:636`, `require_trusted_certificate: Yes` y `local_ca_certs_file: /certs/ca.crt`. Lo configura el trabajo `erpnext-ldap-config`; el que se conecta es `erpnext-backend` |
-| InvenTree (Logística) | Sí, LDAPS con verificación | `ldaps://ldap.reservaviva.local:636` con `OPT_X_TLS_CACERTFILE=/certs/ca.crt` y `OPT_X_TLS_REQUIRE_CERT=OPT_X_TLS_DEMAND` |
-| OpenVPMS (Médica) | No | La versión 2.4.0.1 no tiene soporte LDAP |
-| Pretix (Taquilla) | No | Solo existe un plugin de terceros que no verifica TLS |
-
-Los motivos de OpenVPMS y Pretix están en [`ldap-pretix-openvpms.md`](ldap-pretix-openvpms.md). El nombre
-`ldap.reservaviva.local` se fija con `extra_hosts` hacia `10.10.99.10` para que coincida con el SAN del certificado sin
-depender del DNS.
+Solo ERPNext e InvenTree, las dos por LDAPS (`ldaps://ldap.reservaviva.local:636`) y verificando el certificado de
+OpenLDAP con la CA interna; OpenVPMS y Pretix no usan LDAP. Cómo lo configura cada aplicación, qué se comprueba y por
+qué las otras dos no se integran: [`ldap.md`](ldap.md). El nombre `ldap.reservaviva.local` se fija con `extra_hosts`
+para que coincida con el SAN del certificado sin depender del DNS.
 
 OpenLDAP tiene `LDAP_TLS_VERIFY_CLIENT: never`: no pide certificado a los clientes. También escucha en **389 sin
 cifrar**, pero las dos aplicaciones integradas usan solo el 636.
@@ -130,17 +122,8 @@ eso un usuario de otro departamento no entra. La búsqueda no filtra por grupos,
 ### Usuarios de prueba
 
 Definidos en [`20-usuarios-prueba.ldif`](../servicios/openldap/20-usuarios-prueba.ldif), con las claves guardadas como hash
-SSHA. Están organizados por OU, no por grupos.
-
-| `uid` | OU | Aplicación en la que puede entrar |
-|---|---|---|
-| `vet.prueba` | `ou=medica` | Ninguna por LDAP (OpenVPMS no usa LDAP) |
-| `taquilla.prueba` | `ou=operaciones` | InvenTree |
-| `logistica.prueba` | `ou=operaciones` | InvenTree |
-| `rrhh.prueba` | `ou=rrhh` | ERPNext |
-
-`taquilla.prueba` entra en InvenTree porque InvenTree busca en toda `ou=operaciones`; así lo deduce la configuración, pero
-**no se ha verificado** con un login. Los usuarios LDAP se crean en la aplicación al primer login y **sin permisos**: se
+SSHA. Están organizados por OU, no por grupos. Qué usuario entra en qué aplicación está en
+[`ldap.md`](ldap.md#2-el-directorio). Los usuarios LDAP se crean en la aplicación al primer login y **sin permisos**: se
 los asigna un administrador.
 
 **Dónde están las claves:**
@@ -182,17 +165,9 @@ intentos, el arranque termina con error.
 ### Qué se publica
 
 Todos los puertos se publican en `127.0.0.1` (`PUBLISH_IP` y `DNS_BIND_IP` en `sistema/test.env`). **Solo se accede desde
-el propio equipo**, no desde la red local.
-
-| Servicio | Puerto en 127.0.0.1 |
-|---|---|
-| OpenVPMS | 18080 (`/openvpms`) |
-| ERPNext | 18081 |
-| Pretix | 18082 |
-| InvenTree | 18083 |
-| OpenLDAP | 1389 (LDAP sin cifrar) y 1636 (LDAPS) |
-| bind9 | 1053 (UDP y TCP) |
-| NTP | 1123/udp |
+el propio equipo**, no desde la red local. La lista de puertos está en
+[`arquitectura.md`, "Puertos publicados"](arquitectura.md#7-puertos-publicados); OpenLDAP publica también el puerto sin
+cifrar.
 
 Si `PUBLISH_IP` o `DNS_BIND_IP` faltaran en `test.env`, el compose publica en `0.0.0.0`, es decir, en todas las
 interfaces: todos los `ports:` del `docker-compose.yml` único usan `${PUBLISH_IP:-0.0.0.0}` o `${DNS_BIND_IP:-0.0.0.0}`.
