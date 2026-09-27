@@ -1,4 +1,4 @@
-# Reserva Viva: el sistema completo (25 servicios) en UN solo host.
+# Reserva Viva: el sistema completo (26 servicios) en UN solo host.
 #
 # Es el único compose del proyecto. Se usa desde la raíz del repositorio, con las variables del laboratorio:
 #   docker compose --env-file sistema/test.env <orden>
@@ -6,7 +6,8 @@
 # certificado LDAPS, la zona DNS y la imagen de OpenVPMS, levanta todo y espera a que esté sano.
 #
 # Cada VLAN del diseño es una red bridge de Docker con su misma subred. Cada aplicación está en la VLAN de su departamento
-# y además en vlan99_infra, para llegar a OpenLDAP, DNS y NTP. Los servicios van agrupados por departamento; los ficheros
+# y además en vlan99_infra, para llegar a OpenLDAP, DNS y NTP, y para que el proxy web (servicio "proxy", solo en
+# vlan99_infra) la sirva por su nombre en reservaviva.lan. Los servicios van agrupados por departamento; los ficheros
 # de cada uno (configuración, imagen propia, pruebas) están en servicios/<servicio>/. El diseño con 3 equipos, VLAN 802.1Q
 # y switch es un anexo que no se despliega (diseno-red/).
 #
@@ -44,8 +45,8 @@ networks:
         - subnet: ${NET_RRHH:-10.10.40}.0/24
           gateway: ${NET_RRHH:-10.10.40}.1
 
-  # Infraestructura transversal: openldap .10, dns-interno .11, ntp-interno .12 y la segunda pata de cada aplicación
-  # (pretix-web .21, inventree-app .22, erpnext-backend .23, openvpms-app .24).
+  # Infraestructura transversal: openldap .10, dns-interno .11, ntp-interno .12, proxy-web .13 y la segunda pata de cada
+  # aplicación (pretix-web .21, inventree-app .22, erpnext-backend .23, openvpms-app .24, erpnext-hr .25).
   vlan99_infra:
     driver: bridge
     ipam:
@@ -222,11 +223,13 @@ services:
       PRETIX_REDIS_SESSIONS: "true"
       PRETIX_CELERY_BACKEND: redis://${NET_TAQUILLA:-10.10.20}.12/1
       PRETIX_CELERY_BROKER: redis://${NET_TAQUILLA:-10.10.20}.12/2
-      # URL con la que se llega a Pretix: la que abre el navegador del host (puerto publicado en localhost). Pretix la usa
+      # URL con la que se llega a Pretix: su nombre en la intranet, a traves del proxy web (servicios/proxy/). Pretix la usa
       # para los enlaces absolutos y para CSRF_TRUSTED_ORIGINS. Su ALLOWED_HOSTS es '*', pero el middleware multidominio
-      # responde 400 a cualquier Host cuyo dominio no sea el de esta URL (salvo 'localhost').
-      PRETIX_PRETIX_URL: http://localhost:${PRETIX_PORT:-80}
-      PRETIX_MAIL_FROM: taquilla@reservaviva.local
+      # (pretix/multidomain/middlewares.py, LOCAL_HOST_NAMES) responde 400 a cualquier Host cuyo dominio no sea el de esta
+      # URL, salvo 'localhost': por eso el acceso directo http://localhost:<PRETIX_PORT> sigue funcionando (con 127.0.0.1 da
+      # 400, H20). El CSRF del login por localhost pasa porque Django acepta el Origin igual al propio Host de la peticion.
+      PRETIX_PRETIX_URL: http://pretix.reservaviva.lan
+      PRETIX_MAIL_FROM: taquilla@reservaviva.lan
     # El primer arranque migra la base (~10 min): start_period largo para no marcarlo unhealthy sin motivo.
     # La sonda lleva el mismo Host que el navegador (localhost:PRETIX_PORT): con el Host por defecto (127.0.0.1) Pretix
     # responde 400 Bad Request, porque PRETIX_PRETIX_URL declara otro dominio, y el contenedor quedaba unhealthy para siempre.
@@ -269,8 +272,8 @@ services:
       PRETIX_REDIS_SESSIONS: "true"
       PRETIX_CELERY_BACKEND: redis://${NET_TAQUILLA:-10.10.20}.12/1
       PRETIX_CELERY_BROKER: redis://${NET_TAQUILLA:-10.10.20}.12/2
-      PRETIX_PRETIX_URL: http://localhost:${PRETIX_PORT:-80}
-      PRETIX_MAIL_FROM: taquilla@reservaviva.local
+      PRETIX_PRETIX_URL: http://pretix.reservaviva.lan
+      PRETIX_MAIL_FROM: taquilla@reservaviva.lan
     volumes:
       - pretix_data:/data
     networks:
@@ -312,8 +315,8 @@ services:
       PRETIX_REDIS_SESSIONS: "true"
       PRETIX_CELERY_BACKEND: redis://${NET_TAQUILLA:-10.10.20}.12/1
       PRETIX_CELERY_BROKER: redis://${NET_TAQUILLA:-10.10.20}.12/2
-      PRETIX_PRETIX_URL: http://localhost:${PRETIX_PORT:-80}
-      PRETIX_MAIL_FROM: taquilla@reservaviva.local
+      PRETIX_PRETIX_URL: http://pretix.reservaviva.lan
+      PRETIX_MAIL_FROM: taquilla@reservaviva.lan
     volumes:
       - pretix_data:/data
     networks:
@@ -366,9 +369,14 @@ services:
       INVENTREE_DB_NAME: inventree
       INVENTREE_DB_USER: inventree
       INVENTREE_DB_PASSWORD: ${INVENTREE_DB_PASSWORD}
-      # La URL que abre el navegador del host. InvenTree la añade a ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS y
-      # CORS_ALLOWED_ORIGINS, y su interfaz web (/web) responde 500 ("INVE-E7") si la URL visitada no coincide con ella.
-      INVENTREE_SITE_URL: http://localhost:${INVENTREE_PORT:-8000}
+      # La URL principal: su nombre en la intranet, a traves del proxy web (servicios/proxy/). InvenTree la añade a
+      # ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS y CORS_ALLOWED_ORIGINS, y su interfaz web (/web) responde 500 ("INVE-E7", H20)
+      # si la URL visitada no coincide con ella... salvo que haya MAS de un origen de confianza y la URL visitada sea uno de
+      # ellos (InvenTree/middleware.py, InvenTreeHostSettingsMiddleware). Por eso INVENTREE_TRUSTED_ORIGINS añade el acceso
+      # directo del host: con los dos, /web funciona por nombre y por http://localhost:<INVENTREE_PORT>. La lista se separa
+      # por comas.
+      INVENTREE_SITE_URL: http://inventree.reservaviva.lan
+      INVENTREE_TRUSTED_ORIGINS: http://localhost:${INVENTREE_PORT:-8000}
       INVENTREE_AUTO_UPDATE: "True"
       # Procesos de gunicorn: dimensionado a la carga real del laboratorio (unos pocos usuarios de prueba). La imagen trae
       # INVENTREE_GUNICORN_WORKERS=4 como valor por defecto (docker image inspect) y gunicorn.conf.py lo LEE del entorno
@@ -379,13 +387,15 @@ services:
       # InvenTree crea este superusuario solo al arrancar si no existe (idempotente).
       INVENTREE_ADMIN_USER: ${INVENTREE_ADMIN_USER:-admin}
       INVENTREE_ADMIN_PASSWORD: ${INVENTREE_ADMIN_PASSWORD:?definir INVENTREE_ADMIN_PASSWORD en sistema/test.env}
+      # Identificador guardado en la base (el superusuario ya existe): conserva el sufijo antiguo a proposito
+      # (docs/arquitectura.md, "Identificadores con el sufijo antiguo").
       INVENTREE_ADMIN_EMAIL: ${INVENTREE_ADMIN_EMAIL:-admin@reservaviva.local}
       # Autenticación LDAPS (django-auth-ldap): busca al usuario con la cuenta svc-lectura solo dentro de
       # ou=operaciones (RRHH y Médica no entran aquí) y luego hace bind con su propia clave. La cadena TLS se
       # verifica con la CA interna (servicios/ca/certs/ca.crt, montada en /certs/ca.crt).
       # Los usuarios LDAP se crean en InvenTree en el primer login, sin permisos: asignárselos como admin.
       INVENTREE_LDAP_ENABLED: "True"
-      INVENTREE_LDAP_SERVER_URI: ldaps://ldap.reservaviva.local:636
+      INVENTREE_LDAP_SERVER_URI: ldaps://ldap.reservaviva.lan:636
       INVENTREE_LDAP_GLOBAL_OPTIONS: '{"OPT_X_TLS_CACERTFILE": "/certs/ca.crt", "OPT_X_TLS_REQUIRE_CERT": "OPT_X_TLS_DEMAND"}'
       INVENTREE_LDAP_BIND_DN: cn=svc-lectura,ou=servicios,dc=reservaviva,dc=local
       # La misma clave que ERPNext: una sola cuenta svc-lectura y una sola variable (LDAP_SVC_LECTURA_PASSWORD).
@@ -393,11 +403,11 @@ services:
       INVENTREE_LDAP_SEARCH_BASE_DN: ou=operaciones,dc=reservaviva,dc=local
       # El valor por defecto de la imagen es "(uid= %(user)s)" (con espacio) y no encuentra a nadie.
       INVENTREE_LDAP_SEARCH_FILTER_STR: (uid=%(user)s)
-    # ldap.reservaviva.local lo resuelve ESTA línea, no bind9 (los contenedores usan el DNS de Docker). Apunta a openldap
+    # ldap.reservaviva.lan lo resuelve ESTA línea, no bind9 (los contenedores usan el DNS de Docker). Apunta a openldap
     # en vlan99_infra, a la que inventree-app tambien esta conectada; el nombre coincide con el certificado de OpenLDAP (SAN).
     extra_hosts:
-      - "ldap.reservaviva.local:${NET_INFRA:-10.10.99}.10"
-    # Host = localhost:INVENTREE_PORT, como INVENTREE_SITE_URL (lo que manda el navegador): hoy InvenTree acepta cualquier
+      - "ldap.reservaviva.lan:${NET_INFRA:-10.10.99}.10"
+    # Host = localhost:INVENTREE_PORT, el acceso directo (INVENTREE_TRUSTED_ORIGINS): hoy InvenTree acepta cualquier
     # Host (allowed_hosts '*' en su config.yaml), pero depender de esa tolerancia es el mismo defecto latente que tuvo Pretix.
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:8000/api/', headers={'Host': 'localhost:${INVENTREE_PORT:-8000}'}), timeout=5)"]
@@ -436,7 +446,8 @@ services:
       INVENTREE_DB_NAME: inventree
       INVENTREE_DB_USER: inventree
       INVENTREE_DB_PASSWORD: ${INVENTREE_DB_PASSWORD}
-      INVENTREE_SITE_URL: http://localhost:${INVENTREE_PORT:-8000}
+      INVENTREE_SITE_URL: http://inventree.reservaviva.lan
+      INVENTREE_TRUSTED_ORIGINS: http://localhost:${INVENTREE_PORT:-8000}
     volumes:
       - inventree_data:/home/inventree/data
     networks:
@@ -446,9 +457,12 @@ services:
   # =====================================================================================================================
   # Recursos Humanos (VLAN 40): ERPNext HR (stack de frappe_docker). Ficheros en servicios/erpnext/.
   # =====================================================================================================================
-  # El sitio "rrhh.reservaviva.local" lo crea solo "erpnext-create-site" (idempotente, sin pasos manuales). Solo el
-  # frontend (erpnext-hr, nginx) y el backend viven en VLAN 40; el backend llega a LDAP por vlan99_infra. El acceso se
-  # restringe con roles y permisos dentro de ERPNext: solo se exponen los perfiles y páginas del módulo HR.
+  # El sitio "rrhh.reservaviva.local" lo crea solo "erpnext-create-site" (idempotente, sin pasos manuales). Ese nombre de
+  # sitio es un identificador interno (carpeta sites/ y base de datos) y conserva el sufijo antiguo a proposito: el nombre
+  # DNS con el que se entra es rrhh.reservaviva.lan, y nginx elige el sitio por FRAPPE_SITE_NAME_HEADER, no por el Host
+  # (docs/arquitectura.md, "Identificadores con el sufijo antiguo"). Solo el frontend (erpnext-hr, nginx) y el backend
+  # viven en VLAN 40; el backend llega a LDAP por vlan99_infra y el frontend recibe al proxy web por vlan99_infra. El
+  # acceso se restringe con roles y permisos dentro de ERPNext: solo se exponen los perfiles y páginas del módulo HR.
   erpnext-db:
     image: mariadb:10.6.28@sha256:40153feb479c0da88b5cfe3f50f44c91f7baf05a1b7bcc5beb7eb37a890a8f16
     container_name: erpnext-db
@@ -625,6 +639,8 @@ services:
   # Job único e idempotente: deja configurado "LDAP Settings" de Frappe (autenticación contra OpenLDAP por
   # LDAPS, verificando la cadena con /certs/ca.crt). Solo escribe en la base de datos: no valida contra
   # LDAP (ignore_mandatory), así no necesita alcanzar VLAN 99. Los usuarios se buscan solo en ou=rrhh.
+  # Se ejecuta en cada `up -d` (compose vuelve a arrancar los trabajos terminados) y `d.update` sobrescribe los campos: en
+  # un sitio ya inicializado basta un arranque para que la URL pase a ldap.reservaviva.lan, sin tocar nada a mano.
   erpnext-ldap-config:
     image: *erpnext_image
     container_name: erpnext-ldap-config
@@ -642,7 +658,7 @@ services:
         d = frappe.get_doc("LDAP Settings")
         d.update({
             "enabled": 1,
-            "ldap_server_url": "ldaps://ldap.reservaviva.local:636",
+            "ldap_server_url": "ldaps://ldap.reservaviva.lan:636",
             "base_dn": "cn=svc-lectura,ou=servicios,dc=reservaviva,dc=local",
             "password": os.environ["LDAP_BIND_PASSWORD"],
             "ldap_directory_server": "OpenLDAP",
@@ -683,7 +699,7 @@ services:
     # El backend es quien habla LDAPS con OpenLDAP. Se fija el nombre (no lo resuelve bind9) para que coincida con el
     # certificado. Va directo a openldap por vlan99_infra, a la que el backend también está conectado.
     extra_hosts:
-      - "ldap.reservaviva.local:${NET_INFRA:-10.10.99}.10"
+      - "ldap.reservaviva.lan:${NET_INFRA:-10.10.99}.10"
     volumes:
       - erpnext_sites:/home/frappe/frappe-bench/sites
       - erpnext_logs:/home/frappe/frappe-bench/logs
@@ -746,7 +762,11 @@ services:
       - erpnext_internal
 
   # Punto de entrada HTTP de RRHH: el nginx de ERPNext (puerto 8080; 10.10.40.10 en vlan40). Es el contenedor al que
-  # apunta rrhh.reservaviva.local en la zona DNS. Desde el host: http://localhost:<ERPNEXT_PORT>.
+  # apunta rrhh.reservaviva.lan en la vista interna del DNS. Desde el host: http://localhost:<ERPNEXT_PORT>; por nombre,
+  # a traves del proxy web, que le llega por su pata en vlan99_infra (.25). Esa pata es la opcion menos invasiva: el
+  # proxy no puede ir a erpnext-backend (gunicorn no sirve /assets ni socket.io) ni entrar en vlan40_rrhh o en
+  # erpnext_internal (seria un router hacia la VLAN de RRHH o hacia su base de datos). Es la misma doble conexion que ya
+  # tienen openvpms-app, pretix-web e inventree-app, y erpnext-hr es un nginx sin estado.
   erpnext-hr:
     image: *erpnext_image
     container_name: erpnext-hr
@@ -778,12 +798,14 @@ services:
       erpnext_internal:
       vlan40_rrhh:
         ipv4_address: ${NET_RRHH:-10.10.40}.10
+      vlan99_infra:
+        ipv4_address: ${NET_INFRA:-10.10.99}.25
     ports:
       - "${PUBLISH_IP:-127.0.0.1}:${ERPNEXT_PORT:-8080}:8080"
 
   # =====================================================================================================================
-  # Infraestructura transversal (VLAN 99): OpenLDAP con LDAPS y CA interna, DNS (bind9) y NTP.
-  # Ficheros en servicios/openldap/, servicios/ca/, servicios/bind9/ y servicios/ntp/.
+  # Infraestructura transversal (VLAN 99): OpenLDAP con LDAPS y CA interna, DNS (bind9), NTP y el proxy web por nombre.
+  # Ficheros en servicios/openldap/, servicios/ca/, servicios/bind9/, servicios/ntp/ y servicios/proxy/.
   # =====================================================================================================================
   openldap:
     image: osixia/openldap:1.5.0@sha256:18742e9c449c9c1afe129d3f2f3ee15fb34cc43e5f940a20f3399728f41d7c28
@@ -793,6 +815,9 @@ services:
     command: ["--copy-service"]
     environment:
       LDAP_ORGANISATION: "Zoologico Reserva Viva"
+      # NO es el dominio DNS: la imagen deriva de aqui el DN base dc=reservaviva,dc=local, que esta guardado en el
+      # directorio (volumenes ldap_*) y en todas las cuentas. Conserva el sufijo antiguo a proposito; el nombre DNS del
+      # servidor es ldap.reservaviva.lan (docs/arquitectura.md, "Identificadores con el sufijo antiguo").
       LDAP_DOMAIN: reservaviva.local
       LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD}
       # LDAPS (636) con certificados propios generados por servicios/ca/generar-certificados.sh (lo ejecuta
@@ -828,14 +853,19 @@ services:
     image: internetsystemsconsortium/bind9:9.18@sha256:1ffb29c718ee2540c5643c1e8166629a07bbd505f99107baae535e9f86eb7eef
     container_name: dns-interno
     restart: unless-stopped
-    # zones/db.reservaviva.local no está en git: levantar-sistema.sh lo genera desde la plantilla .tpl de la misma carpeta.
+    # Dos vistas (split horizon, servicios/bind9/named.conf): los contenedores de las VLAN reciben las IP de contenedor y
+    # cualquier otro cliente (el host, los equipos de la LAN) la IP del anfitrion, donde escucha el proxy web.
+    # zones/ tiene lo GENERADO por levantar-sistema.sh (fuera de git): las dos zonas, desde sus plantillas .tpl, y la ACL
+    # de la vista interna (acl-interna.conf).
     volumes:
       - ./servicios/bind9/named.conf:/etc/bind/named.conf:ro
       - ./servicios/bind9/zones:/etc/bind/zones:ro
     networks:
       vlan99_infra:
         ipv4_address: ${NET_INFRA:-10.10.99}.11
-    # 53 suele estar ocupado en Windows: se publica en DNS_BIND_IP (127.0.0.1) y en DNS_PORT (1053), de sistema/test.env.
+    # 53 suele estar ocupado en Windows: en modo local se publica en DNS_BIND_IP (127.0.0.1) y DNS_PORT (1053), de
+    # sistema/test.env. En modo intranet (levantar-sistema --intranet) el lanzador exporta DNS_BIND_IP=<IP de la LAN> y
+    # DNS_PORT=53 solo para esa ejecucion: las variables del entorno mandan sobre --env-file.
     ports:
       - "${DNS_BIND_IP:-127.0.0.1}:${DNS_PORT:-53}:53/udp"
       - "${DNS_BIND_IP:-127.0.0.1}:${DNS_PORT:-53}:53/tcp"
@@ -860,6 +890,38 @@ services:
     # 123/udp suele estar ocupado por el servicio de hora de Windows (w32time): por eso NTP_PORT es 1123 en sistema/test.env.
     ports:
       - "${PUBLISH_IP:-127.0.0.1}:${NTP_PORT:-123}:123/udp"
+
+  # Proxy web por nombre (servicio 26). Ficheros en servicios/proxy/. Un nginx que atiende en el puerto 80 del anfitrion y
+  # reparte por el nombre pedido (openvpms/pretix/inventree/rrhh.reservaviva.lan) hacia la IP de cada aplicacion en
+  # vlan99_infra. Esta SOLO en vlan99_infra, a proposito: conectado a vlan10/20/30/40 seria un router entre VLAN y
+  # romperia la segmentacion que `verificar` demuestra. Llega a las aplicaciones por su pata de infraestructura, igual que
+  # ellas llegan a OpenLDAP. No depende de ningun servicio: las direcciones son IP literales y nginx arranca aunque una
+  # aplicacion aun no este lista (esa aplicacion da 502 hasta que lo este).
+  # Publicacion: por defecto en 127.0.0.1 (INTRANET_IP de sistema/test.env). `levantar-sistema --intranet` exporta
+  # INTRANET_IP=<IP de la LAN> para esa ejecucion y compose recrea solo este contenedor y dns-interno.
+  proxy:
+    image: nginx:1.30.5-alpine@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+    container_name: proxy-web
+    restart: unless-stopped
+    # La configuracion es una plantilla: el entrypoint de la imagen oficial (20-envsubst-on-templates.sh) sustituye
+    # ${NET_INFRA} y la escribe en /etc/nginx/conf.d/default.conf, en lugar de la pagina de bienvenida de la imagen. El
+    # filtro limita la sustitucion a NET_INFRA para que no toque las variables propias de nginx ($host, $http_upgrade...).
+    environment:
+      NET_INFRA: ${NET_INFRA:-10.10.99}
+      NGINX_ENVSUBST_FILTER: "^NET_INFRA$$"
+    volumes:
+      - ./servicios/proxy/reservaviva.conf.template:/etc/nginx/templates/default.conf.template:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/salud"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      vlan99_infra:
+        ipv4_address: ${NET_INFRA:-10.10.99}.13
+    ports:
+      - "${INTRANET_IP:-127.0.0.1}:${HTTP_PORT:-80}:80"
 
 volumes:
   # OpenVPMS
