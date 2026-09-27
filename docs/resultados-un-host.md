@@ -161,6 +161,39 @@ Prueba de que el directorio nace bien solo con `sistema/test.env`, sin claves en
 | `verificar` completo | 99 PASS, 0 FAIL, 13 INFO, RC=0 (tabla anterior). No hizo falta tocar ERPNext ni InvenTree: sus usuarios LDAP ya existentes tienen el mismo DN |
 | `ExecMainStartTimestamp` de `docker.service` | Sat 2026-09-26 21:13:43 -05 antes y después |
 
+## Acceso por nombre y modo intranet (27/09/2026)
+
+Cambio: dominio `reservaviva.lan`, servicio 26 `proxy-web` (nginx, solo en `vlan99_infra`), `erpnext-hr` con pata en la
+VLAN 99, DNS con vista interna y vista lan, y modo intranet opcional del lanzador. Detalle en
+[`arquitectura.md`](arquitectura.md#acceso-por-nombre-el-proxy-web) y [`operacion.md`](operacion.md#acceso-desde-la-lan).
+
+| Paso | Resultado |
+|---|---|
+| `preparar` con el certificado antiguo (SAN `ldap.reservaviva.local`) | Regenera solo `ldap.crt`/`ldap.key` con SAN `ldap.reservaviva.lan`, con la misma CA; caduca el 30/12/2028 |
+| Primer `arrancar` con el cambio (modo local) | RC=0, **26/26** sanos en **403 s** (6 min 43 s). Solo se recrean `pretix-web`, `-worker`, `-cron`, `inventree-app`, `-worker`, `erpnext-backend`, `erpnext-hr` y `erpnext-ldap-config`, y se crea `proxy-web`; `dns-interno` se reinicia porque `named.conf` es más nuevo |
+| Login LDAPS tras regenerar el certificado | **Falló** (ERPNext 417 por SSL, InvenTree 401): `openldap` reiniciado seguía sirviendo el certificado viejo. Arreglo: el lanzador **recrea** `openldap` si `ldap.crt` es más nuevo que el contenedor ([`seguridad.md`](seguridad.md#cuándo-se-regenera-y-cuándo-no)) |
+| InvenTree tras recrear `openldap` | Sus workers de gunicorn siguieron dando 401 (sin error en el log) mientras un proceso nuevo en el mismo contenedor autenticaba; al reiniciar `inventree-app`, `ldaplogin.py` dio PASS. El lanzador reinicia ahora los clientes LDAPS |
+| `touch ldap.crt` + `arrancar` (prueba de ese camino) | RC=0, 26/26 en 211 s: `openldap` recreado y clientes reiniciados. **Efecto no previsto:** `erpnext-backend` volvió con otra IP en `erpnext_internal` (10.201.0.10 → .9) y el nginx de `erpnext-hr` siguió llamando a la vieja: `rrhh` dio 502 (lo detectó `verificar`, ver abajo). Arreglo: se reinicia también `erpnext-hr` |
+| Sondas del proxy (127.0.0.1:80, cabecera `Host`) | `openvpms` `/` → 302 a `/openvpms/`; `/openvpms/login` 200 y `bootstrap.min.css` 200 `text/css`. `pretix` `/control/login` 200 y su CSS 200 `text/css`. `inventree` `/web/` 200 y `index-*.js` 200 `text/javascript`. `rrhh` `/login` 200 y `website.bundle.*.css` 200 `text/css`. WebSocket de socket.io por `rrhh` → 101. Nombre desconocido y la IP a secas → 404 del proxy |
+| Acceso directo `localhost:18080-18083` | Mismo HTML y estáticos 200: los `SITE_URL` por nombre no rompen el acceso de administración |
+| CSRF | Un POST de login con credenciales inventadas, por el nombre y por `localhost`, se rechaza por credenciales (Pretix 200 con error, InvenTree 400 `username_password_mismatch`), no por CSRF |
+| DNS, vista lan (desde el anfitrión, 127.0.0.1:1053/tcp) | `openvpms`, `pretix`, `inventree`, `rrhh`, `dns` → 127.0.0.1; `ldap`, `ntp` → NXDOMAIN; `example.com` → REFUSED. La vista interna sigue dando la IP del contenedor (`pretix` 10.10.20.10, `rrhh` 10.10.40.10) |
+| `-Intranet` con WSL en NAT (IP detectada 192.168.1.13, Wi-Fi) | El `.ps1` avisa de `networkingMode = nat` y de quién tiene el 53/udp en Windows (`portmaster-core` y `svchost`/`SharedAccess`). El `.sh` se niega antes de tocar nada: "WSL esta en modo de red 'nat', no 'mirrored' … Nada se ha cambiado". RC=1 |
+| Copia temporal del lanzador sin la comprobación de mirrored, con la IP de WSL (172.19.125.136) | Puerto ocupado: la comprobación previa lo detecta. Sin ella, compose falla con "address already in use", el lanzador lo explica y vuelve al modo local (así se encontró que la vuelta conservaba un `HTTP_PORT` del usuario; corregido). Modo intranet completo: RC=0 en 96 s, solo se recrean `proxy-web` y `dns-interno`; `verificar --rapido` con el bloque 4 en PASS contra esa IP |
+| Desde Windows contra 172.19.125.136 | Proxy correcto (openvpms 302, pretix 200, inventree 302, rrhh 200, CSS 200). DNS: NXDOMAIN con recursión activa y `example.com` resuelto, respuestas que nuestro bind9 no da: Portmaster intercepta el DNS saliente del anfitrión. Desde WSL, correcto |
+| Vuelta al modo local (`-Forzar` sin `-Intranet`) | RC=0 en 79 s; solo se recrean `proxy-web` y `dns-interno`, de nuevo en 127.0.0.1 |
+
+`verificar` con el bloque 4 (acceso por nombre):
+
+| Pasada | Resultado |
+|---|---|
+| 27/09 13:47, rápida, modo local | 131 PASS, 2 FAIL, 14 INFO (`verificacion-20260927-134740.txt`). Bloque 4 entero en PASS. FAIL: `ldaplogin` (el certificado viejo aún cargado en `openldap`) y el marcador de `--rapido` |
+| 27/09 14:08, rápida, modo intranet con la IP de WSL | Bloque 4 entero en PASS contra 172.19.125.136 (`verificacion-20260927-140844.txt`). FAIL: login LDAP de InvenTree (sus workers, antes de reiniciarlos) y el marcador de `--rapido` |
+| 27/09 14:38, completa, modo local | 128 PASS, **2 FAIL**, 14 INFO, RC=1 (`verificacion-20260927-143812.txt`). Los dos FAIL: `rrhh` `/login` 502 por el proxy y por `localhost:18081`. Causa: el efecto de la fila "`touch ldap.crt` + `arrancar`" de arriba (nginx de `erpnext-hr` con la IP vieja del backend). Tras el `down`/`up` del caso 4, `rrhh` volvió a dar 200. Es la sonda nueva de interfaz web detectando un fallo real |
+| 27/09 14:59, completa, modo local, tras `touch ldap.crt` + `arrancar` con el arreglo (RC=0, 26/26 en 258 s; `openldap` recreado y `inventree-app`, `erpnext-backend` y `erpnext-hr` reiniciados) | **132 PASS, 0 FAIL, 14 INFO, RC=0** (`sistema/resultados/verificacion-20260927-145944.txt`), 820 s. `ExecMainStartTimestamp` 12:29:58 antes y después |
+
+De 99 a 132 PASS: el bloque 4 añade 33 comprobaciones (proxy solo en `vlan99_infra`, vista lan, proxy y acceso directo con HTML y estático, WebSocket, 404). El INFO nuevo, 14 en vez de 13, es el modo de publicación detectado ("local: proxy en 127.0.0.1:80, DNS en 127.0.0.1:1053").
+
 ## Pendientes
 
 | ID | Qué | Tipo |
@@ -178,15 +211,18 @@ Prueba de que el directorio nace bien solo con `sistema/test.env`, sin claves en
 | — | Los simuladores de `diseno-red/` no se han vuelto a ejecutar tras moverlos (necesitan `nicolaka/netshoot`) | validación |
 | — | Diseño con switch L2/L3 sin probar contra hardware real | limitación conocida |
 | — | Rotar las contraseñas de laboratorio de `sistema/test.env` si el repositorio se hace público | seguridad |
-| — | InvenTree no sirve `/media` sin `DEBUG`: las imágenes de artículos y los adjuntos que se suban no se verán. Hoy solo existe `media/report`, así que no se pierde nada. Arreglarlo exige un proxy (contenedor nuevo y descarga de su imagen), que seguiría necesitando el arreglo de H22 | decisión del usuario |
-| — | `verificar` no comprueba la interfaz web de las aplicaciones: H22 pasó 7 pasadas en verde porque solo se probaban API y LDAP. Falta una sonda que pida un asset referenciado por el HTML de cada app y exija un `content-type` que no sea HTML | validación |
+| — | InvenTree no sirve `/media` sin `DEBUG`: las imágenes de artículos y los adjuntos que se suban no se verán. Hoy solo existe `media/report`, así que no se pierde nada. Ya existe un proxy (`proxy-web`), pero no sirve `/media`: haría falta montarle el volumen `inventree_data` en solo lectura y una `location /media/`, además de decidir si esos ficheros pueden verse sin autenticación | decisión del usuario |
+| — | Modo intranet sin probar de extremo a extremo: no se ha ejecutado `sistema/habilitar-intranet-windows.ps1`, WSL no ha estado en `mirrored` y ningún otro equipo de la LAN ha resuelto ni abierto los nombres. Pasos en [`operacion.md`](operacion.md#acceso-desde-la-lan) | validación |
+| — | En este PC, el 53/udp de Windows lo ocupan ICS (`SharedAccess`) y Portmaster, y Portmaster intercepta las consultas DNS salientes del anfitrión. Con WSL en mirrored, Docker no podrá publicar el DNS en el 53 hasta que el usuario libere ese puerto (el script de Windows informa, no toca nada) | decisión del usuario |
 | — | `arrancar` lanzado desde Git Bash devolvió RC=2 aunque el log decía "los 25 servicios estan sanos"; el siguiente, desde PowerShell, dio RC=0. Causa sin identificar (el envoltorio o el script) | robustez |
 | — | Ninguna aplicación es cliente de `ntp-interno`: solo lo consulta `verificar` (ver [`arquitectura.md`](arquitectura.md#ntp)). Falta decidir si se documenta como limitación o se configura un cliente en las apps | decisión del usuario |
 | — | Los volúmenes anónimos del proyecto se acumulan con las recreaciones y los `down`/`up` de `verificar` (74 el 26/09; 101 el 27/09, borrados en la prueba en frío) | mantenimiento |
 | — | `docker.service` se reinició entre dos sesiones de trabajo del 26/09 (`ExecMainStartTimestamp` pasó de 17:01:17 a 21:13:43), fuera de cualquier prueba y por causa desconocida | robustez |
-| — | El login real en un navegador con las claves de laboratorio no lo ha hecho ningún agente (la clave no se puede leer desde la sesión): administrador de Pretix `admin@reservaviva.local`, botón "Login with LDAP" de ERPNext y `taquilla.prueba` en InvenTree. Lo comprueba el usuario | validación |
-
+| — | El login real en un navegador con las claves de laboratorio no lo ha hecho ningún agente (la clave no se puede leer desde la sesión): administrador de Pretix `admin@reservaviva.local`, botón "Login with LDAP" de ERPNext y `taquilla.prueba` en InvenTree, tanto por su nombre `.lan` como por `localhost:<puerto>`. Lo comprueba el usuario | validación |
 Resuelto el 27/09/2026:
+
+- **`verificar` no comprobaba la interfaz web** (el hueco por el que H22 pasó 7 pasadas en verde). El bloque 4 pide, por el proxy y por `localhost:<puerto>`, la página de login de cada aplicación y el primer CSS o JS que referencia, y exige 200 con un `Content-Type` que no sea HTML (ver "Acceso por nombre").
+- **Acceso por nombre desde la LAN:** proxy web, vistas del DNS y modo intranet del lanzador (sección "Acceso por nombre y modo intranet").
 
 - **H17:** en el arranque en frío desde un clon limpio, `openvpms-db` quedó healthy **527 s** después de arrancar en la primera pasada y **440 s** en la segunda, dentro de su `start_period` de 600 s. Después OpenVPMS creó su esquema y `openvpms-app` quedó healthy.
 - **Pretix no arrancaba en frío** (`58f39df`). `pretix-web` dependía de `pretix-db` sin `condition`, y `pretix-db` no tenía healthcheck. En el primer arranque, Postgres ejecuta `initdb` y se reinicia, y `pretix-web` lanzaba su `migrate` antes de que aceptara conexiones ("Connection refused"). El script de la imagen no se detiene: arrancaba la web contra una base vacía (`relation "pretixbase_globalsettingsobject_settingsstore" does not exist`), la web quedaba `unhealthy` para siempre y `up -d` abortaba a los 60 min. Arreglo: healthcheck `pg_isready -h 127.0.0.1` en `pretix-db` e `inventree-db` (con `-h`, el servidor temporal de `initdb`, que solo escucha en el socket local, no cuenta como listo), `redis-cli ping` en los tres redis, y `condition: service_healthy` en `pretix-web`, `inventree-app` y `erpnext-create-site`. En `docker compose config` solo cambian los healthchecks y las condiciones.
