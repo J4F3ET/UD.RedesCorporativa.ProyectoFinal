@@ -14,6 +14,15 @@ Todo el sistema (25 servicios) corre **en un solo equipo**. Cada VLAN es una red
 
 ## Arranque rápido
 
+**Requisitos.** Las cifras medidas están en [`docs/resultados-un-host.md`](docs/resultados-un-host.md).
+
+- **Sistema:** Windows 11 con WSL2 y Docker Engine dentro de una distro (el entorno probado), o Docker Desktop con Git for Windows. En Linux o macOS, Docker Engine o Docker Desktop.
+- **Docker Compose 2.24.4 o superior**, y `openssl` donde corre el `.sh`.
+- **RAM:** el sistema completo necesita varios GB libres. El lanzador comprueba la memoria antes de arrancar y se niega si no hay suficiente (`-Forzar` salta la comprobación).
+- **Disco:** del orden de una decena de GB para imágenes y datos.
+- **Internet en el primer arranque**, que descarga las imágenes y construye la de OpenVPMS. Ese primer arranque es largo.
+- En [`docs/operacion.md`](docs/operacion.md) están el `.wslconfig` recomendado, qué hacer tras reiniciar el PC y las trampas de Windows/WSL.
+
 | Sistema | Cómo |
 |---|---|
 | Windows | Doble clic en **`levantar-sistema.cmd`**, o `.\levantar-sistema.ps1` en PowerShell |
@@ -43,8 +52,6 @@ Los usuarios aparecen al terminar el arranque. Las contraseñas de laboratorio, 
 | `estado` | Estado de cada servicio y direcciones de acceso |
 | `detener` | Para los contenedores sin borrar datos |
 | `borrar` | Borra contenedores **y datos**. Pide confirmación |
-
-**Requisitos:** Docker Desktop (en Windows, con Git for Windows) o Docker Engine en Linux/WSL, con Compose 2.24.4 o superior, y unos **7 GB de RAM libre**. El primer arranque descarga varios GB de imágenes (la de ERPNext/hrms ocupa 3,2 GB). Los requisitos completos, el `.wslconfig` recomendado, qué hacer tras reiniciar el PC y las trampas de Windows/WSL están en [`docs/operacion.md`](docs/operacion.md). Las cifras medidas de memoria y de arranque, en [`docs/resultados-un-host.md`](docs/resultados-un-host.md).
 
 ## Qué demuestra `verificar`
 
