@@ -8,7 +8,7 @@
 #
 # Acciones:
 #   arrancar   (por defecto) prepara todo, levanta los 25 servicios y espera a que esten sanos
-#   preparar   solo lo previo: certificados, zona DNS, validacion del compose e imagen de OpenVPMS. No arranca nada
+#   preparar   solo lo previo: certificados, zona DNS, LDIF de LDAP, validacion del compose e imagen de OpenVPMS
 #   estado     estado de cada servicio y direcciones de acceso
 #   verificar  ejecuta sistema/verificar_arquitectura.py contra el sistema levantado
 #   detener    para los contenedores sin borrar nada; "arrancar" los vuelve a levantar en minutos
@@ -177,6 +177,62 @@ generar_zona() {
   info "          inventree=${ip_inventree} rrhh=${ip_rrhh})"
 }
 
+# Hash {SSHA} de OpenLDAP: base64(sha1(clave + sal) + sal). Con openssl, que ya es requisito, para no depender de python ni
+# de la imagen de openldap (que en un primer arranque aun no esta descargada). La clave nunca va en la linea de comandos
+# de ningun proceso: printf es un builtin de bash y openssl la lee por la tuberia.
+hash_ssha() {
+  local clave="$1" tmp h
+  tmp="$(mktemp -d)"
+  openssl rand 8 >"${tmp}/sal"
+  { printf '%s' "${clave}"; cat "${tmp}/sal"; } | openssl dgst -sha1 -binary >"${tmp}/dig"
+  h="$(cat "${tmp}/dig" "${tmp}/sal" | openssl base64 -A)"
+  rm -rf "${tmp}"
+  [ "${#h}" -eq 40 ] || fallo "No se pudo calcular el hash SSHA con openssl."
+  printf '{SSHA}%s' "${h}"
+}
+
+# LDIF del primer arranque de OpenLDAP. sistema/test.env es la UNICA fuente de las claves del directorio: las plantillas
+# servicios/openldap/*.ldif.tpl (versionadas, sin claves) llevan marcadores ${SSHA_<CUENTA>} y aqui se sustituyen por el
+# hash de la variable de test.env correspondiente. El resultado va a servicios/openldap/generado/ (ignorado por git), que
+# es la carpeta que el compose monta como bootstrap "custom" de la imagen. La imagen solo la carga con el directorio
+# vacio (volumenes ldap_data y ldap_config), asi que regenerarla en cada "preparar" no cambia un directorio existente.
+generar_ldif() {
+  paso "LDIF del primer arranque de OpenLDAP (claves de sistema/test.env)"
+  local dir="${RAIZ}/servicios/openldap" out="${RAIZ}/servicios/openldap/generado"
+  local par marca var clave f base
+  local -a sust=()
+  for par in SVC_LECTURA:LDAP_SVC_LECTURA_PASSWORD VET:LDAP_PRUEBA_VET_PASSWORD \
+             LOGISTICA:LDAP_PRUEBA_LOGISTICA_PASSWORD TAQUILLA:LDAP_PRUEBA_TAQUILLA_PASSWORD \
+             RRHH:LDAP_PRUEBA_RRHH_PASSWORD; do
+    marca="SSHA_${par%%:*}"; var="${par#*:}"
+    clave="$(valor_env "${var}" "")"
+    [ -n "${clave}" ] || fallo "Falta la clave de LDAP ${var}: definir ${var} en sistema/test.env (ver docs/seguridad.md)."
+    # El hash usa base64 (A-Z a-z 0-9 + / =): "|" como separador de sed no puede aparecer en el.
+    sust+=(-e "s|\${${marca}}|$(hash_ssha "${clave}")|g")
+  done
+  # Se escribe DENTRO de la carpeta existente (no se reemplaza la carpeta): un bind mount apunta a la carpeta, y si se
+  # borrara y se creara de nuevo, un contenedor ya creado seguiria viendo la vieja.
+  mkdir -p "${out}"
+  rm -f "${out}"/*.tmp
+  tr -d '\r' <"${dir}/05-acl-servicio.ldif" >"${out}/05-acl-servicio.ldif.tmp"
+  for f in "${dir}"/*.ldif.tpl; do
+    base="$(basename "${f}" .tpl)"
+    { printf '# GENERADO por levantar-sistema.sh preparar desde servicios/openldap/%s.tpl: no editar.\n' "${base}"
+      tr -d '\r' <"${f}" | sed "${sust[@]}"; } >"${out}/${base}.tmp"
+  done
+  if grep -q '\${[A-Z0-9_]*}' "${out}"/*.tmp; then
+    rm -f "${out}"/*.tmp; fallo "Quedan marcadores sin sustituir en servicios/openldap/*.ldif.tpl."
+  fi
+  for f in "${out}"/*.tmp; do mv -f "${f}" "${f%.tmp}"; done
+  # Un .ldif que ya no tenga plantilla se cargaria igual en el proximo primer arranque: se quita.
+  for f in "${out}"/*.ldif; do
+    base="$(basename "${f}")"
+    [ "${base}" = "05-acl-servicio.ldif" ] || [ -f "${dir}/${base}.tpl" ] || rm -f "${f}"
+  done
+  info "Generados en servicios/openldap/generado/: $(cd "${out}" && ls *.ldif | tr '\n' ' ')"
+  info "(OpenLDAP solo los carga con el directorio vacio; con datos ya existentes no cambian nada)"
+}
+
 # bind9 lee la zona al arrancar y no vigila el fichero. Si la zona es mas nueva que el arranque de dns-interno (p. ej.
 # tras cambiar la plantilla), se reinicia solo ese contenedor: unos segundos, sin tocar datos.
 reiniciar_dns_si_zona_nueva() {
@@ -227,6 +283,7 @@ preparar() {
   cd "${RAIZ}"
   preparar_certificados
   generar_zona
+  generar_ldif
   validar_compose
   preparar_imagen_openvpms
 }

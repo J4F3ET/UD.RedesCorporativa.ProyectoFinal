@@ -191,7 +191,7 @@ Valores (los que no aparecen, déjalos como están):
 Claves con reglas propias:
 
 - PC-1: `OPENVPMS_ADMIN_PASSWORD` mínimo 8 caracteres con mayúscula, minúscula, número y un especial (por ejemplo `!`). Si no, OpenVPMS no arranca.
-- PC-2 y PC-3: `INVENTREE_LDAP_BIND_PASSWORD` y `ERPNEXT_LDAP_BIND_PASSWORD` deben ser **`Svc-Lectura1`** (la del LDIF de laboratorio). Si las cambias, cámbialas también en `docker/pc3-administracion-infra/ldap/`.
+- PC-2 y PC-3: `INVENTREE_LDAP_BIND_PASSWORD` y `ERPNEXT_LDAP_BIND_PASSWORD` deben ser la clave de la cuenta `svc-lectura` del directorio (en el despliegue de un host, `LDAP_SVC_LECTURA_PASSWORD` de `sistema/test.env`, con la que `levantar-sistema.sh preparar` genera el LDIF).
 - PC-3: `LDAP_ADMIN_PASSWORD`, `ERPNEXT_DB_ROOT_PASSWORD`, `ERPNEXT_ADMIN_PASSWORD`. Anótalas.
 
 Guardar y salir de nano: `Ctrl+O`, `Enter`, `Ctrl+X`.
@@ -404,10 +404,10 @@ curl -s -o /dev/null -w '%{http_code}\n' http://10.10.20.10/
 
 Esperado: `200` (Pretix puede dar `302`, también vale).
 
-LDAP en VLAN 99 (con la cuenta de búsqueda):
+LDAP en VLAN 99 (con la cuenta de búsqueda; `-W` pide su clave):
 
 ```
-ldapsearch -x -H ldap://10.10.99.10 -D "cn=svc-lectura,ou=servicios,dc=reservaviva,dc=local" -w Svc-Lectura1 -b "dc=reservaviva,dc=local" "(uid=rrhh.prueba)"
+ldapsearch -x -H ldap://10.10.99.10 -D "cn=svc-lectura,ou=servicios,dc=reservaviva,dc=local" -W -b "dc=reservaviva,dc=local" "(uid=rrhh.prueba)"
 ```
 
 Esperado: devuelve una entrada `uid=rrhh.prueba`.

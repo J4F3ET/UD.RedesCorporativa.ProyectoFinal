@@ -22,19 +22,34 @@ el host no alcanza esas IP). El ldapsearch corre en un contenedor efimero (image
 red del arnes y con el DNS del laboratorio (dns-interno). Hay que ejecutarlo donde `docker` sea el cliente
 nativo (p. ej. dentro de WSL): `docker` como .cmd no lo resuelve subprocess sin shell.
 """
-import argparse, json, subprocess, sys, time
+import argparse, json, os, subprocess, sys, time
 from pathlib import Path
 
 AQUI = Path(__file__).resolve().parent
 RAIZ = AQUI.parent   # donde esta docker-compose.yml
+ENV_FILE = RAIZ / "sistema" / "test.env"
 # El caso 4 llama a compose desde la raiz y con el fichero de variables: sin --env-file fallarian las variables ":?".
 COMPOSE = ["docker", "compose", "--env-file", "sistema/test.env"]
 SITE = "rrhh.reservaviva.local"
 BASE = "dc=reservaviva,dc=local"
 CA_EN_OPENLDAP = "/container/service/slapd/assets/certs/ca.crt"
-# Claves de laboratorio: servicios/openldap/README.md
-ERP_USER, ERP_PASS, ERP_OU = "rrhh.prueba", "Rrhh-Prueba1", "rrhh"
-INV_USER, INV_PASS, INV_OU = "logistica.prueba", "Oper-Prueba1", "operaciones"
+
+
+def valor_env(clave):
+    """Lee una variable de sistema/test.env sin ejecutarlo, como valor_env() de levantar-sistema.sh (gana la ultima)."""
+    valor = ""
+    for linea in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        if linea.startswith(clave + "="):
+            valor = linea.split("=", 1)[1].rstrip("\r")
+    if not valor:
+        sys.exit(f"Falta {clave}: definir {clave} en sistema/test.env")
+    return valor
+
+
+# Claves de los usuarios de prueba: sistema/test.env es su unica fuente (levantar-sistema.sh preparar genera con ellas
+# los LDIF del directorio). Nunca van en la linea de comandos: se pasan por la variable de entorno CLAVE_LDAP.
+ERP_USER, ERP_PASS, ERP_OU = "rrhh.prueba", valor_env("LDAP_PRUEBA_RRHH_PASSWORD"), "rrhh"
+INV_USER, INV_PASS, INV_OU = "logistica.prueba", valor_env("LDAP_PRUEBA_LOGISTICA_PASSWORD"), "operaciones"
 MALA = "clave-incorrecta-xyz"
 # Nombre real del despliegue (pc2: INVENTREE_LDAP_SERVER_URI) y presente en el SAN del certificado.
 # NO usar ldaps://localhost: libldap canonicaliza el nombre al hostname del contenedor (p. ej.
@@ -44,8 +59,9 @@ LDAP_URI = "ldaps://ldap.reservaviva.local:636"
 
 # Se ejecuta dentro del contenedor: imprime "<status> <cuerpo recortado>". Sin dependencias externas.
 HTTP_ERP = r"""
-import sys, urllib.request, urllib.parse, urllib.error
-u, p, site = sys.argv[1:4]
+import os, sys, urllib.request, urllib.parse, urllib.error
+u, site = sys.argv[1:3]
+p = os.environ["CLAVE_LDAP"]
 req = urllib.request.Request(
     "http://127.0.0.1:8000/api/method/frappe.integrations.doctype.ldap_settings.ldap_settings.login",
     data=urllib.parse.urlencode({"usr": u, "pwd": p}).encode(), headers={"Host": site})
@@ -58,8 +74,9 @@ except Exception as e:
     print("None", type(e).__name__ + ":", e)
 """
 HTTP_INV = r"""
-import sys, base64, urllib.request, urllib.error
-u, p = sys.argv[1:3]
+import os, sys, base64, urllib.request, urllib.error
+u = sys.argv[1]
+p = os.environ["CLAVE_LDAP"]
 tok = base64.b64encode((u + ":" + p).encode()).decode()
 req = urllib.request.Request("http://127.0.0.1:8000/api/user/token/", headers={"Authorization": "Basic " + tok})
 try:
@@ -72,13 +89,15 @@ except Exception as e:
 """
 
 
-def sh(cmd, entrada=None, timeout=1500, cwd=AQUI):
-    return subprocess.run(cmd, input=entrada, capture_output=True, text=True, timeout=timeout, cwd=cwd)
+def sh(cmd, entrada=None, timeout=1500, cwd=AQUI, clave=None):
+    """clave: se pasa como variable de entorno CLAVE_LDAP (docker exec/run -e CLAVE_LDAP la hereda), nunca en argv."""
+    env = None if clave is None else {**os.environ, "CLAVE_LDAP": clave}
+    return subprocess.run(cmd, input=entrada, capture_output=True, text=True, timeout=timeout, cwd=cwd, env=env)
 
 
-def http(contenedor, script, *args):
+def http(contenedor, script, clave, *args):
     """Devuelve (status:int|None, texto). None = no se pudo ejecutar."""
-    r = sh(["docker", "exec", "-i", contenedor, "python3", "-", *args], entrada=script)
+    r = sh(["docker", "exec", "-i", "-e", "CLAVE_LDAP", contenedor, "python3", "-", *args], entrada=script, clave=clave)
     salida = r.stdout.strip()
     if r.returncode != 0 or not salida.split(" ", 1)[0].isdigit():
         return None, (r.stderr or salida).strip()[:200]
@@ -105,10 +124,10 @@ def ldapsearch(usuario, ou, clave, ca="real"):
     # Contenedor efimero con el DNS del laboratorio: ldap.reservaviva.local se resuelve como en produccion.
     # --volumes-from openldap aporta el volumen de certificados (ca.crt).
     cmd = ["docker", "run", "--rm", "--network", red, "--dns", dns, "--volumes-from", "openldap",
-           "--entrypoint", "", "-e", "LDAPTLS_REQCERT=demand", imagen, "sh", "-c",
-           f'{pre}; exec ldapsearch "$@"', "_", "-x", "-LLL", "-d1", "-H", LDAP_URI, "-D", dn, "-w", clave,
-           "-b", dn, "-s", "base", "uid"]
-    r = sh(cmd, timeout=120)
+           "--entrypoint", "", "-e", "LDAPTLS_REQCERT=demand", "-e", "CLAVE_LDAP", imagen, "sh", "-c",
+           f'{pre}; umask 077; printf %s "$CLAVE_LDAP" >/tmp/clave; exec ldapsearch "$@"', "_", "-x", "-LLL", "-d1", "-H", LDAP_URI,
+           "-D", dn, "-y", "/tmp/clave", "-b", dn, "-s", "base", "uid"]
+    r = sh(cmd, timeout=120, clave=clave)
     salida = r.stdout + r.stderr
     # -d1 es muy verboso: se conservan las lineas utiles (resultado LDAP y errores TLS).
     utiles = [l for l in salida.splitlines() if l.startswith(("uid:", "dn:", "TLS:", "ldap_bind", "ldap_sasl_bind"))]
@@ -117,18 +136,18 @@ def ldapsearch(usuario, ou, clave, ca="real"):
 
 def caso1():
     res = []
-    s, t = http("erpnext-backend", HTTP_ERP, ERP_USER, ERP_PASS, SITE)
+    s, t = http("erpnext-backend", HTTP_ERP, ERP_PASS, ERP_USER, SITE)
     res.append((f"ERPNext {ERP_USER}", s == 200, f"status={s} {t[:80]}"))
-    s, t = http("inventree-app", HTTP_INV, INV_USER, INV_PASS)
+    s, t = http("inventree-app", HTTP_INV, INV_PASS, INV_USER)
     res.append((f"InvenTree {INV_USER}", s == 200 and "token" in t, f"status={s} {t[:80]}"))
     return res
 
 
 def caso2():
     res = []
-    s, t = http("erpnext-backend", HTTP_ERP, ERP_USER, MALA, SITE)
+    s, t = http("erpnext-backend", HTTP_ERP, MALA, ERP_USER, SITE)
     res.append(("ERPNext clave erronea", s in (401, 403, 417), f"status={s} (esperado 401/403/417)"))
-    s, t = http("inventree-app", HTTP_INV, INV_USER, MALA)
+    s, t = http("inventree-app", HTTP_INV, MALA, INV_USER)
     res.append(("InvenTree clave erronea", s in (401, 403), f"status={s} (esperado 401/403)"))
     return res
 
@@ -160,8 +179,8 @@ def ejecutar(titulo, fn):
 def esperar_apps(limite=1500):
     fin = time.time() + limite
     while time.time() < fin:
-        s1, _ = http("erpnext-backend", HTTP_ERP, ERP_USER, MALA, SITE)
-        s2, _ = http("inventree-app", HTTP_INV, INV_USER, MALA)
+        s1, _ = http("erpnext-backend", HTTP_ERP, MALA, ERP_USER, SITE)
+        s2, _ = http("inventree-app", HTTP_INV, MALA, INV_USER)
         if s1 is not None and s2 is not None and s1 != 404:
             break
         time.sleep(15)
@@ -171,7 +190,7 @@ def esperar_apps(limite=1500):
     # conexion LDAP y crea la sesion) puede agotar los 30 s con gunicorn aun en frio (H18). Se reintenta
     # el login correcto, dentro del mismo limite, hasta que devuelva 200.
     while time.time() < fin:
-        s, t = http("erpnext-backend", HTTP_ERP, ERP_USER, ERP_PASS, SITE)
+        s, t = http("erpnext-backend", HTTP_ERP, ERP_PASS, ERP_USER, SITE)
         if s == 200:
             return True
         print(f"  ERPNext aun no acepta el login correcto: status={s} {t[:80]}")

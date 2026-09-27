@@ -55,6 +55,8 @@ Ajustes que llevaron a esta cifra, sin quitar ninguna función:
 | 26/09 22:19, completa, con el `docker-compose.yml` único en la raíz y los ficheros en `servicios/` | **99 PASS, 0 FAIL, 13 INFO, RC=0** (`sistema/resultados/verificacion-20260926-221919.txt`). Configuración resuelta de compose igual a la de la pasada anterior salvo las rutas de origen de los montajes |
 | 26/09 22:46, completa, con H22 corregido | **99 PASS, 0 FAIL, 13 INFO, RC=0** (`sistema/resultados/verificacion-20260926-224652.txt`). Tras el `down`/`up` del caso 4, `/static` de InvenTree sigue respondiendo 200 |
 
+| 27/09 07:03, completa, tras reinicializar el directorio LDAP con los LDIF generados desde `test.env` (ver "Primer arranque de LDAP") | **99 PASS, 0 FAIL, 13 INFO, RC=0** (`sistema/resultados/verificacion-20260927-070340.txt`). Login LDAP de `rrhh.prueba` en ERPNext y de `logistica.prueba` en InvenTree en PASS, también tras el `down`/`up` del caso 4 |
+
 Desde el 26/09 21:59 hay 99 PASS y no 92: la comprobación "los nombres dns/ntp/ldap apuntan al contenedor que los sirve", que era 1 INFO, pasó a ser una comprobación por cada uno de los 7 nombres de la zona (7 PASS). De ahí también 13 INFO en vez de 14.
 
 En todas las pasadas válidas, `ExecMainStartTimestamp` de `docker.service` es el mismo antes y después: el demonio no se reinició durante la prueba.
@@ -72,6 +74,20 @@ Qué cubre cada bloque (detalle en [`../sistema/verificar_arquitectura.md`](../s
   - `ldapsearch` por LDAPS con la CA interna rc=0; con clave errónea rc=49; con una CA ajena rc≠0 ("untrusted").
   - Caso 4: `down` sin `-v` + `up -d`, y todo lo anterior se repite en PASS.
 
+## Primer arranque de LDAP (27/09/2026)
+
+Prueba de que el directorio nace bien solo con `sistema/test.env`, sin claves en ningún otro fichero:
+
+| Paso | Resultado |
+|---|---|
+| `levantar-sistema.ps1 preparar` | RC=0. `servicios/openldap/generado/` con 3 LDIF; 5 `userPassword: {SSHA}` (sal de 8 bytes), 0 claves en claro; cada hash comprobado contra su variable de `test.env` |
+| `docker compose config` antes y después del cambio | Solo cambia el origen del montaje del bootstrap de `openldap` (`servicios/openldap` → `servicios/openldap/generado`); los valores resueltos de las claves de InvenTree y ERPNext son idénticos |
+| Borrado | `stop` + `rm -f` de `openldap` y `docker volume rm reservaviva-smoke_ldap_data reservaviva-smoke_ldap_config`. Ningún otro volumen |
+| `levantar-sistema.ps1 arrancar` | RC=0, 25/25 sanos (22 en marcha + 3 `Exited (0)`) en 25 s de espera. El log de `openldap` muestra `Add custom bootstrap ldif...` y el contenedor ve los 3 `.ldif` en la carpeta de bootstrap |
+| `ldapsearch` por LDAPS como `svc-lectura` (clave leída de `test.env` por un fichero temporal, no en la línea de comandos) | rc=0 y los 4 usuarios de prueba; con una clave errónea, rc=49 |
+| `verificar` completo | 99 PASS, 0 FAIL, 13 INFO, RC=0 (tabla anterior). No hizo falta tocar ERPNext ni InvenTree: sus usuarios LDAP ya existentes tienen el mismo DN |
+| `ExecMainStartTimestamp` de `docker.service` | Sat 2026-09-26 21:13:43 -05 antes y después |
+
 ## Pendientes
 
 | ID | Qué | Tipo |
@@ -88,7 +104,6 @@ Qué cubre cada bloque (detalle en [`../sistema/verificar_arquitectura.md`](../s
 | — | Rotar las contraseñas de laboratorio de `sistema/test.env` si el repositorio se hace público | seguridad |
 | — | InvenTree no sirve `/media` sin `DEBUG`: las imágenes de artículos y los adjuntos que se suban no se verán. Hoy solo existe `media/report`, así que no se pierde nada. Arreglarlo exige un proxy (contenedor nuevo y descarga de su imagen), que seguiría necesitando el arreglo de H22 | decisión del usuario |
 | — | Los `ports:` del compose publican por defecto en `0.0.0.0` (`${PUBLISH_IP:-0.0.0.0}`, `${DNS_BIND_IP:-0.0.0.0}`); `test.env` fija `127.0.0.1`. Propuesta: que el valor por defecto sea `127.0.0.1`, más seguro si falta `test.env` | decisión del usuario |
-| — | El comentario de `servicios/openldap/10-estructura.ldif` contiene la clave de laboratorio de `svc-lectura`. Recomendación: dejarla, porque ya está en `test.env` y en el README de `servicios/openldap/`; quitarla no afecta a un sistema ya inicializado (el LDIF solo se carga con `ldap_data` vacío) | decisión del usuario |
 | — | `verificar` no comprueba la interfaz web de las aplicaciones: H22 pasó 7 pasadas en verde porque solo se probaban API y LDAP. Falta una sonda que pida un asset referenciado por el HTML de cada app y exija un `content-type` que no sea HTML | validación |
 | — | `arrancar` lanzado desde Git Bash devolvió RC=2 aunque el log decía "los 25 servicios estan sanos"; el siguiente, desde PowerShell, dio RC=0. Causa sin identificar (el envoltorio o el script) | robustez |
 | — | Ninguna aplicación es cliente de `ntp-interno`: solo lo consulta `verificar` (ver [`arquitectura.md`](arquitectura.md#ntp)). Falta decidir si se documenta como limitación o se configura un cliente en las apps | decisión del usuario |

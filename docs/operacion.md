@@ -61,7 +61,7 @@ Sin acción se ejecuta `arrancar`. Si PowerShell bloquea el script, usa el `.cmd
 | Acción | Qué hace | Cuánto tarda (orientativo) | ¿Borra datos? |
 |---|---|---|---|
 | `arrancar` | Requisitos, memoria, `preparar`, `up -d`, espera a que todo esté sano y crea el administrador de Pretix | Primer arranque: del orden de un cuarto de hora con las imágenes ya descargadas. Con el sistema ya arriba, alrededor de un minuto | No |
-| `preparar` | Solo lo previo: certificados, zona DNS, validación del compose e imagen de OpenVPMS. No arranca nada | Segundos, salvo la primera construcción de la imagen | No |
+| `preparar` | Solo lo previo: certificados, zona DNS, LDIF de LDAP, validación del compose e imagen de OpenVPMS. No arranca nada | Segundos, salvo la primera construcción de la imagen | No |
 | `estado` | Tabla de servicios (servicio, estado, detalle) y direcciones de acceso | De segundos a varios minutos (desde Windows, a través de WSL, es cuando más tarda) | No |
 | `verificar` | Ejecuta [`sistema/verificar_arquitectura.py`](../sistema/verificar_arquitectura.py) y guarda un informe. Con `-Rapido` / `--rapido` omite la prueba de persistencia | Completo: un cuarto de hora aproximadamente (incluye `down` + `up -d`). Rápido: bastante menos | No (el completo para y levanta los contenedores sin `-v`) |
 | `detener` | `docker compose stop`: para los contenedores y conserva todo | Segundos | No |
@@ -78,14 +78,15 @@ Las cifras medidas están en [`resultados-un-host.md`](resultados-un-host.md). A
 3. **`preparar`**:
    1. **Certificados** (`preparar_certificados`): ejecuta [`servicios/ca/generar-certificados.sh`](../servicios/ca/generar-certificados.sh) `--sin-instalar-ca`, que solo genera la CA interna y el certificado LDAPS si faltan o van a caducar. Después comprueba que `ca.crt`, `ldap.crt` y `ldap.key` existan en `servicios/ca/certs/` como **ficheros no vacíos**.
    2. **Zona DNS** (`generar_zona`): genera `servicios/bind9/zones/db.reservaviva.local` desde la plantilla `.tpl`, con la IP fija de cada contenedor. Si solo cambia el serial, conserva el fichero anterior.
-   3. **Validación** del compose (`docker compose config -q`).
-   4. **Imagen de OpenVPMS**: se reconstruye siempre (con caché tarda segundos). Sin red, solo acepta la imagen existente si su `entrypoint.sh` e `init-lib.sh` son idénticos a los del repositorio.
+   3. **LDIF de LDAP** (`generar_ldif`): genera en `servicios/openldap/generado/` (fuera de git) los LDIF del primer arranque del directorio, a partir de las plantillas `servicios/openldap/*.ldif.tpl` y de las claves de `sistema/test.env` (`LDAP_SVC_LECTURA_PASSWORD` y `LDAP_PRUEBA_<UID>_PASSWORD`), que guarda como hash `{SSHA}`. Si falta una de esas variables se detiene con `definir <VARIABLE> en sistema/test.env`. Se regenera en cada `preparar`, pero OpenLDAP solo lo carga con el directorio vacío: en un sistema ya inicializado no cambia nada ([`seguridad.md`](seguridad.md#3-ldap-y-ldaps)).
+   4. **Validación** del compose (`docker compose config -q`).
+   5. **Imagen de OpenVPMS**: se reconstruye siempre (con caché tarda segundos). Sin red, solo acepta la imagen existente si su `entrypoint.sh` e `init-lib.sh` son idénticos a los del repositorio.
 4. **`up -d`** de los 25 servicios. Si la zona es más nueva que el contenedor `dns-interno`, lo reinicia para que bind9 la lea (`reiniciar_dns_si_zona_nueva`).
 5. **Espera a que todo esté sano** (`esperar_sano`). Cada 20 s imprime `[mm:ss] sanos N/25 - esperando: …`. Los tres trabajos de un solo disparo (`erpnext-configurator`, `erpnext-create-site` y `erpnext-ldap-config`) cuentan como sanos cuando terminan con código 0. El límite es de 45 min (`-TimeoutMin` / `--timeout`).
 6. **Administrador de Pretix** (`crear_admin_pretix`): crea el de `PRETIX_ADMIN_EMAIL` y borra el `admin@localhost` que trae la imagen.
 7. **Accesos**: imprime las URL y los usuarios.
 
-**Primer arranque y siguientes.** El primero descarga imágenes e inicializa los volúmenes: OpenVPMS crea su esquema y carga los datos base, ERPNext crea su sitio, y Pretix e InvenTree migran. Es el lento. Con los volúmenes ya inicializados, los siguientes solo arrancan los contenedores y tardan unos minutos.
+**Primer arranque y siguientes.** El primero descarga imágenes e inicializa los volúmenes: OpenVPMS crea su esquema y carga los datos base, ERPNext crea su sitio, OpenLDAP carga los LDIF de `generado/`, y Pretix e InvenTree migran. Es el lento. Con los volúmenes ya inicializados, los siguientes solo arrancan los contenedores y tardan unos minutos.
 
 **Si se corta es reanudable.** Volver a ejecutar `arrancar` es seguro y retoma donde quedó: la inicialización de OpenVPMS y la creación del sitio de ERPNext se reanudan, y los demás pasos son idempotentes. No hace falta `borrar` para "empezar limpio".
 

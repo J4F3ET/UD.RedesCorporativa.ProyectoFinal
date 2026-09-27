@@ -359,7 +359,8 @@ services:
       INVENTREE_LDAP_SERVER_URI: ldaps://ldap.reservaviva.local:636
       INVENTREE_LDAP_GLOBAL_OPTIONS: '{"OPT_X_TLS_CACERTFILE": "/certs/ca.crt", "OPT_X_TLS_REQUIRE_CERT": "OPT_X_TLS_DEMAND"}'
       INVENTREE_LDAP_BIND_DN: cn=svc-lectura,ou=servicios,dc=reservaviva,dc=local
-      INVENTREE_LDAP_BIND_PASSWORD: ${INVENTREE_LDAP_BIND_PASSWORD:?definir INVENTREE_LDAP_BIND_PASSWORD en sistema/test.env}
+      # La misma clave que ERPNext: una sola cuenta svc-lectura y una sola variable (LDAP_SVC_LECTURA_PASSWORD).
+      INVENTREE_LDAP_BIND_PASSWORD: ${LDAP_SVC_LECTURA_PASSWORD:?definir LDAP_SVC_LECTURA_PASSWORD en sistema/test.env}
       INVENTREE_LDAP_SEARCH_BASE_DN: ou=operaciones,dc=reservaviva,dc=local
       # El valor por defecto de la imagen es "(uid= %(user)s)" (con espacio) y no encuentra a nadie.
       INVENTREE_LDAP_SEARCH_FILTER_STR: (uid=%(user)s)
@@ -624,7 +625,7 @@ services:
         PY
     environment:
       SITE: ${ERPNEXT_SITE:-rrhh.reservaviva.local}
-      LDAP_BIND_PASSWORD: ${ERPNEXT_LDAP_BIND_PASSWORD:?definir ERPNEXT_LDAP_BIND_PASSWORD en sistema/test.env}
+      LDAP_BIND_PASSWORD: ${LDAP_SVC_LECTURA_PASSWORD:?definir LDAP_SVC_LECTURA_PASSWORD en sistema/test.env}
     volumes: *erpnext_volumes
     networks:
       - erpnext_internal
@@ -770,8 +771,10 @@ services:
       - ./servicios/ca/certs/ca.crt:/container/service/slapd/assets/certs/ca.crt
       - ./servicios/ca/certs/ldap.crt:/container/service/slapd/assets/certs/ldap.crt
       - ./servicios/ca/certs/ldap.key:/container/service/slapd/assets/certs/ldap.key
-      # Estructura por departamento y usuarios de prueba (se cargan solo con ldap_data vacío).
-      - ./servicios/openldap:/container/service/slapd/assets/config/bootstrap/ldif/custom
+      # Estructura por departamento y usuarios de prueba (se cargan solo con ldap_data vacío). Es la carpeta GENERADA por
+      # levantar-sistema.sh preparar desde las plantillas servicios/openldap/*.ldif.tpl y las claves de sistema/test.env
+      # (no esta en git). Si faltara, Docker crearia una carpeta vacia y el directorio naceria sin usuarios.
+      - ./servicios/openldap/generado:/container/service/slapd/assets/config/bootstrap/ldif/custom
     networks:
       vlan99_infra:
         ipv4_address: ${NET_INFRA:-10.10.99}.10

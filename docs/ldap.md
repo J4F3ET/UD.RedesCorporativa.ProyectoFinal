@@ -23,9 +23,11 @@ OpenVPMS y Pretix siguen con su administrador local ([aplicaciones.md](aplicacio
 ## 2. El directorio
 
 Base `dc=reservaviva,dc=local`, con una OU por departamento (`ou=medica`, `ou=operaciones`, `ou=rrhh`) y `ou=servicios`
-para la cuenta de búsqueda `cn=svc-lectura`. No hay grupos, solo OU. Los LDIF de
-[`servicios/openldap/`](../servicios/openldap/README.md) se cargan **solo con el volumen `ldap_data` vacío**: con un
-directorio ya existente hay que borrar ese volumen (se pierden los datos) o aplicar los cambios con `ldapadd`.
+para la cuenta de búsqueda `cn=svc-lectura`. No hay grupos, solo OU. Las plantillas LDIF de
+[`servicios/openldap/`](../servicios/openldap/README.md) no llevan claves: `levantar-sistema.sh preparar` genera los LDIF
+definitivos con los hash de las claves de `sistema/test.env` en `servicios/openldap/generado/` (fuera de git). La imagen
+los carga **solo con el directorio vacío** (volúmenes `ldap_data` y `ldap_config`): con un directorio ya existente hay que
+borrar esos dos volúmenes (se pierden los datos del directorio) o aplicar los cambios con `ldapadd`.
 
 | `uid` | OU | Aplicación en la que puede entrar |
 |---|---|---|
@@ -34,8 +36,8 @@ directorio ya existente hay que borrar ese volumen (se pierden los datos) o apli
 | `logistica.prueba` | `ou=operaciones` | InvenTree |
 | `rrhh.prueba` | `ou=rrhh` | ERPNext |
 
-Las claves de estos usuarios y de `svc-lectura` están en el README de
-[`servicios/openldap/`](../servicios/openldap/README.md); qué variable de `sistema/test.env` guarda cada una, en
+Las claves de estos usuarios y de `svc-lectura` están solo en `sistema/test.env`, una variable por cuenta
+(`LDAP_PRUEBA_<UID>_PASSWORD` y `LDAP_SVC_LECTURA_PASSWORD`); la tabla completa, en
 [seguridad.md](seguridad.md#3-ldap-y-ldaps).
 
 ## 3. ERPNext e InvenTree
@@ -48,8 +50,9 @@ Las claves de estos usuarios y de `svc-lectura` están en el README de
   en `inventree-app` y `erpnext-backend`. Con la CA del sistema, o con otra CA, la conexión falla.
 - **Flujo:** la aplicación hace bind con `svc-lectura`, busca `uid=<usuario>` **solo en la OU de su departamento** y hace
   bind con el DN encontrado y la clave del usuario. Un usuario de otro departamento recibe "clave inválida".
-- **Clave de `svc-lectura`:** `INVENTREE_LDAP_BIND_PASSWORD` y `ERPNEXT_LDAP_BIND_PASSWORD` en `sistema/test.env`. Es una
-  sola cuenta compartida por las dos aplicaciones.
+- **Clave de `svc-lectura`:** `LDAP_SVC_LECTURA_PASSWORD` en `sistema/test.env`. Es una sola cuenta compartida por las dos
+  aplicaciones: el compose pasa esa variable a InvenTree (`INVENTREE_LDAP_BIND_PASSWORD`) y a `erpnext-ldap-config`, y la
+  misma variable genera el hash del LDIF.
 
 ### InvenTree
 
