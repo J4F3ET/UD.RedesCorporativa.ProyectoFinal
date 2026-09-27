@@ -9,7 +9,11 @@
 #   ldap.crt / ldap.key   certificado y clave de OpenLDAP (los monta el servicio openldap).
 #
 # Uso:  servicios/ca/generar-certificados.sh [--forzar] [--sin-instalar-ca]
-# Variables opcionales: LDAP_DOMAIN (reservaviva.local), LDAP_IP (10.10.99.10), CERTS_DIR (servicios/ca/certs).
+# Variables opcionales: DOMINIO_DNS (reservaviva.lan), LDAP_IP (10.10.99.10), CERTS_DIR (servicios/ca/certs).
+# DOMINIO_DNS es el dominio DNS del servidor (el SAN es ldap.<DOMINIO_DNS>), NO el DN base del directorio, que sigue
+# siendo dc=reservaviva,dc=local (LDAP_DOMAIN del compose). Si el SAN del certificado existente no cubre
+# ldap.<DOMINIO_DNS> (p. ej. uno anterior con ldap.reservaviva.local), se regenera SOLO ldap.crt/ldap.key, firmado por
+# la misma CA; levantar-sistema.sh recrea entonces openldap para que lo cargue (un restart no basta, ver alli).
 # Como root, además instala ca.crt en el almacén de confianza del host (para que ldapsearch, curl, etc.
 # confíen en ella); --sin-instalar-ca lo omite.
 #
@@ -20,7 +24,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 
 AQUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # servicios/ca
-DOMAIN="${LDAP_DOMAIN:-reservaviva.local}"
+DOMAIN="${DOMINIO_DNS:-reservaviva.lan}"
 LDAP_IP="${LDAP_IP:-10.10.99.10}"
 OUT="${CERTS_DIR:-${AQUI}/certs}"
 FORZAR=false
@@ -70,6 +74,9 @@ cubre_direcciones() {  # el certificado actual incluye la IP y el nombre esperad
 }
 if ${FORZAR} || [ ! -f ldap.key ] || ! vigente ldap.crt \
    || ! openssl verify -CAfile ca.crt ldap.crt >/dev/null 2>&1 || ! cubre_direcciones; then
+  if [ -f ldap.crt ] && ! cubre_direcciones; then
+    echo "[certs] El SAN del certificado actual no cubre ldap.${DOMAIN} y ${LDAP_IP}: se regenera (la CA se conserva)."
+  fi
   echo "[certs] Generando el certificado de OpenLDAP (ldap.${DOMAIN}, ${LDAP_IP})..."
   GENERADO_LDAP=true
   rm -f ldap.key ldap.crt   # pueden ser del contenedor (uid 911): no se sobrescriben, se sustituyen

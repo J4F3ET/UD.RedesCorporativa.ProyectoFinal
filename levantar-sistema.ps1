@@ -1,11 +1,14 @@
 # levantar-sistema.ps1 - Lanzador para Windows de levantar-sistema.sh (arquitectura completa en UN solo host).
 #
-#   .\levantar-sistema.ps1                  # prepara y levanta los 25 servicios
+#   .\levantar-sistema.ps1                  # prepara y levanta los 26 servicios (modo local)
 #   .\levantar-sistema.ps1 estado           # estado y direcciones de acceso
 #   .\levantar-sistema.ps1 verificar        # segmentacion, DNS, NTP y LDAP
 #   .\levantar-sistema.ps1 detener          # para todo sin borrar datos
 #   .\levantar-sistema.ps1 borrar           # borra contenedores Y datos (pide confirmacion)
-#   Opciones: -Distro <nombre WSL>  -Forzar  -Rapido  -Si  -TimeoutMin <min>
+#   .\levantar-sistema.ps1 -Intranet        # modo intranet: proxy web (80) y DNS (53) en la IP de la LAN
+#   Opciones: -Distro <nombre WSL>  -Forzar  -Rapido  -Si  -TimeoutMin <min>  -Intranet  -IP <X.X.X.X>
+#   El modo intranet necesita preparar Windows UNA vez (como administrador): sistema\habilitar-intranet-windows.ps1.
+#   Sin -Intranet, "arrancar" vuelve al modo local (todo en 127.0.0.1). Detalle: docs\operacion.md, "Acceso desde la LAN".
 #
 # Si PowerShell no deja ejecutar scripts, usa levantar-sistema.cmd (doble clic) o:
 #   powershell -ExecutionPolicy Bypass -File .\levantar-sistema.ps1
@@ -26,7 +29,9 @@ param(
     [switch]$Forzar,
     [switch]$Rapido,
     [switch]$Si,
-    [int]$TimeoutMin = 45
+    [int]$TimeoutMin = 45,
+    [switch]$Intranet,
+    [string]$IP = ''
 )
 
 # 'Continue' y no 'Stop': en PowerShell 5.1 cualquier linea que un ejecutable nativo escriba en stderr (wsl.exe avisa, por
@@ -34,14 +39,14 @@ param(
 $ErrorActionPreference = 'Continue'
 $Repo = $PSScriptRoot
 $Marca = 'reservaviva-keepalive'
-# Coste medido en el host: ~5,7 GB para los 25 servicios, mas 1,2 GB de margen para que Windows siga respondiendo.
+# Coste medido en el host: ~5,7 GB para los 25 servicios previos al proxy web (nginx, unos MB), mas 1,2 GB de margen para que Windows siga respondiendo.
 $MinLibreGB = 6.9
 
 function Paso([string]$t) { Write-Host ''; Write-Host "==> $t" }
 function Info([string]$t) { Write-Host "    $t" }
 function Fallo([string]$t) { Write-Host ''; Write-Host "ERROR: $t" -ForegroundColor Red; exit 1 }
 
-if ($Accion -eq 'ayuda') { Get-Content -LiteralPath $PSCommandPath -TotalCount 19 | ForEach-Object { $_ -replace '^# ?', '' }; exit 0 }
+if ($Accion -eq 'ayuda') { Get-Content -LiteralPath $PSCommandPath -TotalCount 22 | ForEach-Object { $_ -replace '^# ?', '' }; exit 0 }
 
 # Argumentos para levantar-sistema.sh
 $ArgsSh = @($Accion)
@@ -49,6 +54,8 @@ if ($Forzar) { $ArgsSh += '--forzar' }
 if ($Rapido) { $ArgsSh += '--rapido' }
 if ($Si) { $ArgsSh += '--si' }
 if ($TimeoutMin -ne 45) { $ArgsSh += @('--timeout', "$TimeoutMin") }
+if ($IP -and -not $Intranet) { Fallo '-IP solo tiene sentido con -Intranet.' }
+if ($Intranet -and $Accion -notin @('arrancar', 'preparar')) { Fallo "-Intranet solo se usa con arrancar o preparar; $Accion detecta solo el modo en que esta publicado el sistema." }
 
 function Probar-DockerDesktop {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { return $false }
@@ -110,9 +117,88 @@ function Comprobar-MemoriaHost {
     $libre = [math]::Round($os.FreePhysicalMemory / 1MB, 2)
     Info "Memoria libre en Windows: $libre GB (recomendado: $MinLibreGB GB o mas)"
     if ($libre -lt $MinLibreGB) {
-        $msg = "Solo hay $libre GB libres. Los 25 servicios consumen ~5,7 GB en el host; con menos, Windows empieza a paginar y el arranque puede fallar. Cierra navegadores y aplicaciones y repite."
+        $msg = "Solo hay $libre GB libres. Los servicios consumen ~5,7 GB en el host; con menos, Windows empieza a paginar y el arranque puede fallar. Cierra navegadores y aplicaciones y repite."
         if ($Forzar) { Write-Host "    AVISO: $msg Se continua por -Forzar." -ForegroundColor Yellow }
         else { Fallo "$msg O usa -Forzar para intentarlo igualmente." }
+    }
+}
+
+# --- Modo intranet: lo que solo se ve desde Windows -----------------------------------------------------------------
+
+# IP de la LAN: la de la interfaz con la ruta por defecto de menor metrica (la de Windows, no la de WSL con red NAT).
+function Detectar-IPLan {
+    $r = Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | ForEach-Object {
+        $i = Get-NetIPInterface -AddressFamily IPv4 -InterfaceIndex $_.ifIndex -ErrorAction SilentlyContinue
+        [pscustomobject]@{ Idx = $_.ifIndex; Alias = $_.InterfaceAlias; M = $_.RouteMetric + $i.InterfaceMetric }
+    } | Sort-Object M | Select-Object -First 1
+    if (-not $r) { return $null }
+    $a = Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $r.Idx -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '169.254.*' } | Select-Object -First 1
+    if ($a) { return [pscustomobject]@{ IP = $a.IPAddress; Alias = $r.Alias } }
+    return $null
+}
+
+# Quien tiene un puerto en Windows en esa IP o en todas (0.0.0.0 / ::). Con WSL en modo mirrored, Linux no puede tomar
+# un puerto que ya tiene Windows: es la causa mas probable de que el DNS no pueda publicarse en el 53.
+function Describir-Proceso([int]$ProcId) {
+    $p = Get-Process -Id $ProcId -ErrorAction SilentlyContinue
+    $n = if ($p) { $p.ProcessName } else { "pid $ProcId" }
+    $svc = @(Get-CimInstance Win32_Service -Filter "ProcessId=$ProcId" -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+    if ($svc.Count -gt 0) { $n += " (servicio: $($svc -join ', '))" }
+    return "$n"
+}
+
+function Comprobar-PuertosWindows([string]$Ip) {
+    $hallazgos = @()
+    $comodines = @($Ip, '0.0.0.0', '::')
+    foreach ($e in @(Get-NetUDPEndpoint -LocalPort 53 -ErrorAction SilentlyContinue)) {
+        if ($comodines -contains $e.LocalAddress) { $hallazgos += "53/udp en $($e.LocalAddress): $(Describir-Proceso $e.OwningProcess)" }
+    }
+    foreach ($puerto in @(53, 80)) {
+        foreach ($c in @(Get-NetTCPConnection -LocalPort $puerto -State Listen -ErrorAction SilentlyContinue)) {
+            if ($comodines -contains $c.LocalAddress) { $hallazgos += "$puerto/tcp en $($c.LocalAddress): $(Describir-Proceso $c.OwningProcess)" }
+        }
+    }
+    return $hallazgos
+}
+
+function Modo-RedWslconfig {
+    $f = Join-Path $env:USERPROFILE '.wslconfig'
+    if (-not (Test-Path -LiteralPath $f)) { return 'nat (no hay .wslconfig)' }
+    $seccion = ''
+    foreach ($l in Get-Content -LiteralPath $f) {
+        $t = $l.Trim()
+        if ($t -match '^\[(.+)\]$') { $seccion = $Matches[1].ToLower(); continue }
+        if ($seccion -eq 'wsl2' -and $t -match '^networkingMode\s*=\s*(\S+)') { return $Matches[1] }
+    }
+    return 'nat (networkingMode sin definir en .wslconfig)'
+}
+
+if ($Intranet) {
+    Paso 'Modo intranet: comprobaciones del lado de Windows'
+    if (-not $IP) {
+        $d = Detectar-IPLan
+        if (-not $d) { Fallo 'No se pudo detectar la IP de la LAN. Indicala a mano: .\levantar-sistema.ps1 -Intranet -IP X.X.X.X (la IPv4 del adaptador Wi-Fi o Ethernet en ipconfig).' }
+        $IP = $d.IP
+        Info "IP de la LAN detectada: $IP (interfaz '$($d.Alias)', la de la ruta por defecto). Otra IP: -IP X.X.X.X"
+    } else {
+        Info "IP de la LAN indicada: $IP"
+    }
+    if ($IP -notmatch '^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$') { Fallo "-IP necesita una direccion IPv4 (recibido: $IP)." }
+    $ArgsSh += @('--intranet', '--ip', $IP)
+    $mr = Modo-RedWslconfig
+    Info ".wslconfig: networkingMode = $mr"
+    if ($mr -ne 'mirrored') {
+        Write-Host '    AVISO: sin networkingMode=mirrored los demas equipos no llegan a los contenedores de WSL. Ejecuta una vez,' -ForegroundColor Yellow
+        Write-Host '    como administrador: sistema\habilitar-intranet-windows.ps1  (y despues wsl --shutdown).' -ForegroundColor Yellow
+    }
+    $h = @(Comprobar-PuertosWindows $IP)
+    if ($h.Count -gt 0) {
+        Write-Host '    AVISO: puertos que Windows ya tiene en esa IP (o en todas). En modo mirrored chocan con el proxy (80) o el DNS (53):' -ForegroundColor Yellow
+        foreach ($x in $h) { Write-Host "      - $x" -ForegroundColor Yellow }
+        Write-Host '    SharedAccess es "Conexion compartida a Internet" (ICS); portmaster-core es Portmaster. Que hacer con cada uno:' -ForegroundColor Yellow
+        Write-Host '    sistema\habilitar-intranet-windows.ps1 lo detecta y da los comandos (no los ejecuta por su cuenta).' -ForegroundColor Yellow
+    } else {
+        Info 'Puertos 80/tcp y 53/udp+tcp libres en Windows para esa IP.'
     }
 }
 
