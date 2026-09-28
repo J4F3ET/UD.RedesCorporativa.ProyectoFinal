@@ -71,6 +71,10 @@ ya local, referencia con digest) con `--pull=never`, y la de `ntp-interno`; llev
      el proxy (127.0.0.1 en modo local, la IP de la LAN en modo intranet); `ldap` y `ntp`, NXDOMAIN; `example.com`, REFUSED.
      Se contrasta con la vista interna: el mismo nombre da la IP del contenedor desde las VLAN y la del proxy desde fuera.
      TCP y no UDP porque es lo más fiable a través de la publicación de Docker; el cliente UDP ya lo ejercita el bloque 2.
+     Con Docker Engine en WSL, en modo intranet el DNS se publica en el 1053 y el 53 lo atiende el reenviador de Windows
+     (`sistema/reenviador-dns.ps1`): entonces se consulta además `pretix` por `<IP>:53`, por UDP y por TCP, que es la ruta
+     completa de un cliente de la LAN. Desde WSL esa consulta llega de verdad al reenviador (comprobado: con el
+     reenviador parado, UDP no responde y TCP da "connection refused").
    - **Proxy:** por cada nombre, con la cabecera `Host` de un navegador que llega por él: la página de login responde 200
      `text/html` (y sin `INVE-E7`), y **el primer CSS o JS que referencia** responde 200 con su `Content-Type` (H22: un 200 del
      HTML no prueba que la web funcione). Además: `openvpms.reservaviva.lan/` redirige a `/openvpms/`, el WebSocket de

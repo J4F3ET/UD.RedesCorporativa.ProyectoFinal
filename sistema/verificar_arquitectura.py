@@ -673,6 +673,16 @@ def bloque_nombres(ctx):
     d = dns_consulta_tcp(dnsp[0], "example.com", puerto=dnsp[1])
     reg("vista lan: example.com -> REFUSED (sin recursion tampoco hacia la LAN)",
         "PASS" if "error" not in d and d["rcode"] == 5 else "FAIL", f"respuesta={d}")
+    # Con Docker Engine en WSL, dns-interno va a <IP>:1053 y el 53 de la LAN lo atiende el reenviador de Windows
+    # (sistema/reenviador-dns.ps1; ver docs/operacion.md). Se prueba esa ruta completa por UDP y TCP.
+    if modo == "intranet" and dnsp[1] != 53:
+        pista = ("\nsin respuesta en el 53: el reenviador de Windows no esta en marcha o no reenvia. "
+                 "Arrancarlo: .\\levantar-sistema.ps1 -Intranet (Windows); comprobarlo: .\\levantar-sistema.ps1 estado")
+        for proto, consulta in (("udp", dns_consulta), ("tcp", dns_consulta_tcp)):
+            d = consulta(dnsp[0], f"pretix.{DOMINIO}", puerto=53)
+            ok = "error" not in d and d["rcode"] == 0 and d["aa"] and d["respuestas"] == [anfitrion]
+            reg(f"reenviador de Windows: pretix.{DOMINIO} por {dnsp[0]}:53/{proto} (-> :{dnsp[1]}) -> {anfitrion}",
+                "PASS" if ok else "FAIL", f"respuesta={d}" + ("" if ok else pista))
     imprime("  -- la vista interna (bloque 2) da la IP del contenedor a los mismos nombres: split horizon")
     zi = zona() or {}
     for h in ("pretix", "rrhh"):
