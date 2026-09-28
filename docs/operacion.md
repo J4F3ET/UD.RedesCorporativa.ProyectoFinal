@@ -74,7 +74,8 @@ Las cifras medidas están en [`resultados-un-host.md`](resultados-un-host.md). A
 
 **Modo local y modo intranet.** Por defecto (`arrancar` sin opciones) el sistema está en **modo local**: todo se publica
 en `127.0.0.1` y solo se entra desde el propio equipo. Con `-Intranet` / `--intranet` pasa a **modo intranet**: el proxy
-web (80) y el DNS (53) se publican en la IP de la LAN y otros equipos entran por nombre (siguiente apartado). El modo no
+web (80) y el DNS (53 para los clientes; con Docker Engine en WSL, a través de un reenviador de Windows) se publican en
+la IP de la LAN y otros equipos entran por nombre (siguiente apartado). El modo no
 se guarda en ningún fichero: un `arrancar` sin la opción vuelve al modo local, y `estado`, `preparar` y `verificar`
 detectan el modo en que está el sistema y lo conservan.
 
@@ -121,10 +122,45 @@ ninguno: muestra los comandos para ICS y los pasos para Portmaster.
    Windows, el DNS de WSL ya dio problemas en este equipo (ver los comentarios de `.wslconfig`).
 3. Si el script avisó de ICS o de Portmaster en el 53, sigue sus indicaciones.
 4. `.\levantar-sistema.ps1 -Intranet -Forzar`. Detecta la IP de la LAN (la de la ruta por defecto de Windows); otra se
-   indica con `-IP X.X.X.X`. Antes de tocar nada comprueba que WSL está en mirrored, que la IP está en la distro y que 80
-   y 53 están libres en ella; si algo falla lo dice y no cambia nada. Si Docker no puede publicar (por ejemplo, el 53
-   ocupado en Windows), explica la causa y vuelve a dejar el proxy y el DNS en `127.0.0.1`.
-5. Al terminar, el lanzador muestra las cuatro URL, la IP del DNS y cómo configurarla en los clientes.
+   indica con `-IP X.X.X.X`. Antes de tocar nada comprueba que WSL está en mirrored, que la IP está en la distro, que el
+   80 y el 1053 están libres en ella dentro de WSL y que el 53 de Windows está libre para el reenviador (siguiente
+   apartado); si algo falla dice quién ocupa el puerto y qué hacer, y no cambia nada. Si Docker no puede publicar,
+   explica la causa y vuelve a dejar el proxy y el DNS en `127.0.0.1`.
+5. Al terminar, el lanzador arranca el reenviador DNS, comprueba que responde y muestra las cuatro URL, la IP del DNS y
+   cómo configurarla en los clientes.
+
+**El reenviador DNS de Windows (Docker Engine en WSL).** Con WSL en `networkingMode=mirrored`, **Windows no entrega a
+Linux el tráfico que llega a su puerto 53**. Se comprobó con un servidor mínimo dentro de WSL, ligado a la IP de la LAN:
+recibe UDP y TCP desde Windows en el puerto 54, en el 1053 o en el 5453, pero en el 53 Windows responde "puerto
+inalcanzable" por UDP y rechaza la conexión TCP, sin que nada escuche en ese puerto en Windows; el 80 del proxy sí llega.
+Por eso, en modo intranet con Docker Engine en WSL:
+
+- `dns-interno` se publica en `<IP de la LAN>:1053` (no en el 53);
+- [`sistema/reenviador-dns.ps1`](../sistema/reenviador-dns.ps1), un proceso de Windows sin ventana, escucha en
+  `<IP de la LAN>:53` (UDP y TCP) y pasa cada consulta tal cual a `<IP de la LAN>:1053`, y la respuesta de vuelta. Los
+  clientes siguen usando el 53 y no notan nada.
+
+Lo gestiona el lanzador de Windows, sin pasos a mano:
+
+- `.\levantar-sistema.ps1 -Intranet` lo arranca tras el arranque, guarda su PID en `sistema\.reenviador-dns.pid`
+  (ignorado por git) y hace una consulta A de `pretix.reservaviva.lan` a `<IP>:53`, que debe devolver la IP. Si ya hay
+  uno vivo para la misma IP no lanza otro; si hay uno de otra IP, lo sustituye. Si el 53 de Windows está ocupado
+  (ICS/`SharedAccess`, Portmaster…), dice quién lo tiene y remite a `habilitar-intranet-windows.ps1`.
+- `detener`, `borrar` y un `arrancar` en modo local lo paran. Sobrevive al cierre de la ventana, pero no a un reinicio:
+  tras reiniciar el PC basta con volver a ejecutar `.\levantar-sistema.ps1 -Intranet`.
+- **Cómo ver que está vivo:** `.\levantar-sistema.ps1 estado` termina con el apartado "Reenviador DNS de Windows": PID,
+  `<IP>:53 -> <IP>:1053` y el resultado de una consulta de prueba. `verificar` (bloque 4) consulta la ruta completa por
+  el 53, por UDP y por TCP, además del 1053. A mano: `nslookup pretix.reservaviva.lan <IP>` desde Windows.
+- No necesita administrador: las reglas de entrada de 53/udp y 53/tcp que crea `habilitar-intranet-windows.ps1` son por
+  puerto, no por programa, y le sirven.
+- Si se lanza `./levantar-sistema.sh --intranet` directamente dentro de WSL, el DNS queda en el 1053 y nadie arranca el
+  reenviador: el script lo avisa. Se arranca con `.\levantar-sistema.ps1 -Intranet` o a mano:
+  `powershell -ExecutionPolicy Bypass -File .\sistema\reenviador-dns.ps1 -IP <IP>` (con `-Registro <archivo>` anota el
+  origen de cada consulta UDP, para diagnóstico).
+- Con Docker Desktop (publica desde Windows) o en Linux nativo no hace falta: el DNS se publica directamente en el 53.
+
+Las cifras de la prueba (ráfaga de consultas, tiempos) están en
+[`resultados-un-host.md`](resultados-un-host.md#dns-desde-la-lan-con-wsl-mirrored-reenviador-27092026).
 
 **Configurar el DNS de los clientes.** Los nombres `*.reservaviva.lan` solo los conoce el DNS del laboratorio, que
 escucha en la IP de la LAN del equipo anfitrión, puerto 53. Dos formas:
@@ -137,6 +173,24 @@ escucha en la IP de la LAN del equipo anfitrión, puerto 53. Dos formas:
 - **Para toda la LAN**, en el DHCP del router: DNS primario = la IP del anfitrión. Misma advertencia sobre la recursión.
   Conviene además reservar esa IP para el anfitrión en el router, porque si cambia hay que volver a arrancar con
   `-Intranet`.
+
+**Lista de comprobación por tipo de cliente** (aprendida probando con el iPhone y los navegadores del usuario):
+
+- **iPhone** (Ajustes > Wi-Fi > (i) de la red > Configurar DNS > Manual): **solo** la IP del anfitrión, sin otros
+  servidores. Desactivar el **Relay privado** de iCloud y **Limitar rastreo de dirección IP** en esa Wi-Fi: los dos
+  hacen que Safari no use el DNS de la Wi-Fi. Probar en **Safari**.
+- **Brave y Chrome** (en cualquier sistema) tienen su propio **DNS seguro** (DNS sobre HTTPS) que se salta el DNS de la
+  Wi-Fi: desactivarlo (Configuración > Privacidad y seguridad > Seguridad > "Usar DNS seguro") o probar con otro
+  navegador.
+- **Android**: Ajustes > Red > **DNS privado** = desactivado; si no, el DNS de la Wi-Fi no se usa.
+- Con este DNS como **único** servidor, el cliente **no resuelve Internet** (no hace recursión): es lo esperado. Al
+  terminar, volver a DNS automático.
+
+**El propio anfitrión no es un buen cliente del DNS.** El equipo que aloja el sistema no puede usarse a sí mismo como
+servidor DNS de forma fiable: su Wi-Fi recibe del router un DNS IPv6 (`fe80::1`, "gpon.net" en el equipo de medida) que
+Windows prefiere al IPv4 manual, así que `*.reservaviva.lan` falla aunque se ponga la IP a mano. En el anfitrión, usa el
+archivo `hosts` (`<IP> pretix.reservaviva.lan`, una línea por nombre; siguiente párrafo) o prueba desde otro equipo.
+`nslookup <nombre> <IP>` sí sirve en el anfitrión para comprobar el servidor, porque pregunta directamente a esa IP.
 
 **Pruebas desde otro equipo de la LAN** (sustituye `192.168.1.13` por la IP del anfitrión):
 
@@ -151,18 +205,21 @@ escucha en la IP de la LAN del equipo anfitrión, puerto 53. Dos formas:
    de login de cada aplicación, con su aspecto normal (hojas de estilo cargadas).
 6. `http://192.168.1.13` a secas → página 404 del proxy que lista los nombres válidos.
 
-Si falla el paso 2 o el 4, el orden de sospechosos es: WSL no está en mirrored (`wsl.exe --exec wslinfo
---networking-mode` debe decir `mirrored`), el firewall de Hyper-V, Portmaster y el Firewall de Windows. En el propio
-anfitrión, `.\levantar-sistema.ps1 estado` muestra en qué IP y puerto publica cada uno.
+Si falla el paso 2 o el 4, el orden de sospechosos es: el reenviador DNS no está vivo (solo afecta al paso 2; ver
+`estado`), WSL no está en mirrored (`wsl.exe --exec wslinfo --networking-mode` debe decir `mirrored`), el firewall de
+Hyper-V, Portmaster y el Firewall de Windows. En el propio anfitrión, `.\levantar-sistema.ps1 estado` muestra en qué IP
+y puerto publica cada uno y si el reenviador está vivo y responde.
 
 **Probar el DNS desde el propio anfitrión con Portmaster activo da un falso negativo.** Medido el 27/09: con el DNS
 publicado en la IP de WSL, `nslookup pretix.reservaviva.lan <IP>` desde Windows devolvió NXDOMAIN con la marca de
 recursión activa y resolvió `example.com`, cosas que nuestro bind9 nunca hace: Portmaster intercepta las consultas DNS
 salientes del equipo y responde él. La misma consulta hecha desde dentro de WSL dio la respuesta correcta. El DNS se
-prueba desde otro equipo de la LAN (o con Portmaster en pausa); el proxy web no se ve afectado.
+prueba desde otro equipo de la LAN (o con Portmaster en pausa); el proxy web no se ve afectado. Con Docker Engine en WSL,
+preguntar a `<IP>:53` sin el reenviador vivo también engaña: la consulta no llega a bind9 (Windows no entrega el 53 a
+WSL). Mira primero `estado`.
 
 **Volver al modo local:** `.\levantar-sistema.ps1 -Forzar` (sin `-Intranet`). Recrea solo el proxy y el DNS en
-`127.0.0.1`. Para deshacer también la preparación de Windows: el script con `-Deshacer` (quita las reglas y restaura
+`127.0.0.1` y para el reenviador DNS. Para deshacer también la preparación de Windows: el script con `-Deshacer` (quita las reglas y restaura
 `networkingMode`) y después `wsl --shutdown`.
 
 **Acceso por nombre desde el propio anfitrión.** En modo local el proxy también funciona, en `127.0.0.1:80`, pero
@@ -175,7 +232,7 @@ http://127.0.0.1/`. El acceso directo `http://localhost:1808x` no cambia en ning
 `arrancar` ejecuta, en este orden:
 
 1. **Requisitos** (`comprobar_requisitos`): `docker` responde, Compose ≥ 2.24.4 y `openssl` presente.
-2. **Modo** (`resolver_modo`): local, o intranet con `--intranet`. En modo intranet, además, las comprobaciones previas (`comprobar_intranet`): WSL en mirrored, la IP presente en la distro y los puertos 80 y 53 libres en ella. Si algo falla, se detiene sin tocar ningún contenedor.
+2. **Modo** (`resolver_modo`): local, o intranet con `--intranet`. En modo intranet, además, las comprobaciones previas (`comprobar_intranet`): WSL en mirrored, la IP presente en la distro y los puertos 80 y del DNS libres en ella (el 1053 con Docker Engine en WSL, el 53 en los demás casos; el 53 de Windows lo comprueba antes el `.ps1`). Si algo falla, se detiene sin tocar ningún contenedor.
 3. **Memoria** (`comprobar_memoria`). En Windows, el `.ps1` ya ha comprobado antes la memoria libre del equipo.
 4. **`preparar`**:
    1. **Certificados** (`preparar_certificados`): ejecuta [`servicios/ca/generar-certificados.sh`](../servicios/ca/generar-certificados.sh) `--sin-instalar-ca`, que solo genera la CA interna y el certificado LDAPS si faltan, van a caducar o su SAN no cubre `ldap.reservaviva.lan`. Después comprueba que `ca.crt`, `ldap.crt` y `ldap.key` existan en `servicios/ca/certs/` como **ficheros no vacíos**.
@@ -188,6 +245,7 @@ http://127.0.0.1/`. El acceso directo `http://localhost:1808x` no cambia en ning
 7. **Espera a que todo esté sano** (`esperar_sano`). Cada 20 s imprime `[mm:ss] sanos N/26 - esperando: …`. Los tres trabajos de un solo disparo (`erpnext-configurator`, `erpnext-create-site` y `erpnext-ldap-config`) cuentan como sanos cuando terminan con código 0. El límite es de 45 min (`-TimeoutMin` / `--timeout`).
 8. **Administrador de Pretix** (`crear_admin_pretix`): crea el de `PRETIX_ADMIN_EMAIL` y borra el `admin@localhost` que trae la imagen.
 9. **Accesos**: imprime el modo, las URL y los usuarios; en modo intranet, también la IP del DNS para los clientes y el aviso de las claves públicas.
+10. **Reenviador DNS** (solo el `.ps1`, en modo intranet con Docker Engine en WSL): lo arranca o reutiliza y comprueba que responde; en modo local lo para ([Acceso desde la LAN](#acceso-desde-la-lan)).
 
 **Primer arranque y siguientes.** El primero descarga imágenes e inicializa los volúmenes: OpenVPMS crea su esquema y carga los datos base, ERPNext crea su sitio, OpenLDAP carga los LDIF de `generado/`, y Pretix e InvenTree migran. Es el lento. Con los volúmenes ya inicializados, los siguientes solo arrancan los contenedores y tardan unos minutos.
 
@@ -202,6 +260,11 @@ Por qué hay que hacerlo desde Windows con Docker Engine en WSL: si no queda nin
 - Lo abren `arrancar`, `preparar`, `estado` y `verificar`. Lo cierran `detener` y `borrar` cuando terminan bien.
 - Si arrancas con `./levantar-sistema.sh` desde una terminal de WSL, no hay keepalive: el script avisa de que no cierres esa terminal.
 - Con Docker Desktop no hace falta, porque no se usa.
+
+En modo intranet, el reenviador DNS de Windows tampoco sobrevive al reinicio: se vuelve a ejecutar
+`.\levantar-sistema.ps1 -Intranet` (sin `-Intranet` el sistema vuelve al modo local). Tras el reinicio, Docker tarda unos
+minutos en responder dentro de WSL mientras restaura los contenedores; el lanzador se queda en "Buscando Docker" y es
+normal.
 
 ## 5. Diagnóstico
 
@@ -226,7 +289,7 @@ docker compose --env-file sistema/test.env logs --tail 100 <servicio>
 
 ## 6. Liberar memoria y apagar
 
-- **`detener`** es la forma normal de apagar y de liberar la RAM. Para los contenedores (`stop`), conserva volúmenes y contenedores, y en modo WSL cierra el keepalive. `arrancar` lo vuelve a levantar en minutos.
+- **`detener`** es la forma normal de apagar y de liberar la RAM. Para los contenedores (`stop`), conserva volúmenes y contenedores, y en modo WSL cierra el keepalive y el reenviador DNS. `arrancar` lo vuelve a levantar en minutos.
 - **`borrar`** ejecuta `down -v`: **destruye los volúmenes**, es decir, las bases de datos, el sitio de ERPNext, el directorio LDAP y los datos de Pretix e InvenTree. El siguiente arranque vuelve a inicializarlo todo, como el primero. Úsalo solo si de verdad quieres partir de cero. **No existe un `down -v` "seguro"**, y `-Si` / `--si` quita incluso la confirmación.
 - `docker compose down` **sin** `-v` borra los contenedores pero conserva los datos: es lo que hace la prueba de persistencia de `verificar`.
 
