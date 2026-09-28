@@ -18,9 +18,10 @@
 #   --timeout MIN   espera maxima a que todo quede sano tras el arranque (por defecto 45)
 #   --rapido        (verificar) omite la prueba de persistencia de LDAP (down + up -d); ese caso queda como no verificado
 #   --si            (borrar) no pedir confirmacion
-#   --intranet      (arrancar/preparar) publica el proxy web (80) y el DNS (53) en la IP de la LAN, para que otros
-#                   equipos entren por nombre (*.reservaviva.lan). Sin esta opcion, "arrancar" deja el modo local
-#                   (todo en 127.0.0.1). Requisitos en Windows: docs/operacion.md, "Acceso desde la LAN"
+#   --intranet      (arrancar/preparar) publica el proxy web (80) y el DNS en la IP de la LAN, para que otros
+#                   equipos entren por nombre (*.reservaviva.lan). El DNS va al 53, salvo con Docker Engine en WSL: ahi
+#                   va al 1053 y levantar-sistema.ps1 deja un reenviador de Windows en el 53. Sin esta opcion,
+#                   "arrancar" deja el modo local (todo en 127.0.0.1). Requisitos: docs/operacion.md, "Acceso desde la LAN"
 #   --ip X.X.X.X    (con --intranet) la IP de la LAN a usar; si no se da, la de la ruta por defecto de Windows (o del
 #                   sistema, fuera de Windows)
 #
@@ -52,7 +53,7 @@ SI=false
 INTRANET=false
 IP_PEDIDA=""
 
-uso() { sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+uso() { sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 es_ipv4() { [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] && \
             [ "${BASH_REMATCH[1]}" -le 255 ] && [ "${BASH_REMATCH[2]}" -le 255 ] && \
@@ -115,12 +116,23 @@ valor_efectivo() {
 # --- Modo de publicacion: local (127.0.0.1, por defecto) o intranet (IP de la LAN) ----------------------------------
 #
 # Solo cambian dos contenedores: proxy-web (INTRANET_IP:HTTP_PORT -> 80) y dns-interno (DNS_BIND_IP:DNS_PORT -> 53). El
-# modo intranet no toca test.env en disco: exporta INTRANET_IP, DNS_BIND_IP y DNS_PORT=53 para esta ejecucion. Por eso
+# modo intranet no toca test.env en disco: exporta INTRANET_IP, DNS_BIND_IP y DNS_PORT para esta ejecucion. Por eso
 # "arrancar" sin --intranet vuelve al modo local, y "verificar"/"estado"/"preparar" detectan el modo en que esta
-# publicado el sistema (para que el down + up -d de la verificacion no lo cambie).
+# publicado el sistema, con el puerto real del DNS (para que el down + up -d de la verificacion no lo cambie).
+#
+# Puerto del DNS en modo intranet: 53, salvo con Docker Engine dentro de WSL, donde es PUERTO_DNS_WSL (1053). Con WSL en
+# networkingMode=mirrored, Windows NO entrega a Linux el trafico que llega a su puerto 53 (medido el 27/09/2026: un
+# servidor en WSL recibe en el 54 y en el 1053, pero en el 53 Windows responde "puerto inalcanzable" por UDP y rechaza la
+# conexion TCP). Por eso dns-interno se publica en <IP>:1053 y levantar-sistema.ps1 arranca en Windows
+# sistema/reenviador-dns.ps1, que escucha en <IP>:53 (UDP y TCP) y reenvia cada consulta a <IP>:1053. Los clientes de la
+# LAN siguen usando el 53. Con Docker Desktop (publica desde Windows) o con Linux nativo el DNS va directo al 53.
 
 MODO="local"
 IP_ANFITRION="127.0.0.1"   # a donde apunta la vista "lan" del DNS: la IP en la que escucha el proxy web
+PUERTO_DNS_WSL=1053        # puerto de dns-interno en modo intranet con Docker Engine en WSL (ver arriba)
+
+# true si el DNS del modo intranet necesita el reenviador de Windows: Docker Engine dentro de WSL.
+dns_por_reenviador() { en_wsl && [ "$(sistema_docker)" != "Docker Desktop" ]; }
 
 # "IP|puerto" publicados por un contenedor para un puerto interno, o vacio si no existe o no publica.
 publicacion_de() {
@@ -170,7 +182,9 @@ resolver_modo() {
       127.*|0.0.0.0) fallo "La IP ${ip} no sirve para el modo intranet: otros equipos no pueden llegar a ella. Usa la IP de la LAN (ipconfig en Windows) o arranca sin --intranet para el modo local." ;;
     esac
     MODO="intranet"; IP_ANFITRION="${ip}"
-    export INTRANET_IP="${ip}" DNS_BIND_IP="${ip}" DNS_PORT=53
+    local puerto_dns=53
+    if dns_por_reenviador; then puerto_dns="${PUERTO_DNS_WSL}"; fi
+    export INTRANET_IP="${ip}" DNS_BIND_IP="${ip}" DNS_PORT="${puerto_dns}"
   elif [ "${ACCION}" != "arrancar" ]; then
     detectar_modo_actual
   fi
@@ -198,19 +212,20 @@ comprobar_intranet() {
        Comprueba la IP con ipconfig (Windows) o ip addr y pasala con --ip (PowerShell: -IP). Nada se ha cambiado."
     fi
   fi
-  # (b) Que los puertos 80 y 53 esten libres en esa IP (o ya sean nuestros, de una ejecucion anterior en modo intranet).
-  local http_port ocupado="" l
+  # (b) Que el puerto del proxy y el del DNS esten libres en esa IP (o ya sean nuestros, de una ejecucion anterior en modo
+  # intranet). En WSL el del DNS es el 1053: el 53 de Windows es del reenviador y lo comprueba levantar-sistema.ps1.
+  local http_port dns_port="${DNS_PORT}" ocupado="" l
   http_port="$(valor_efectivo HTTP_PORT 80)"
   if command -v ss >/dev/null 2>&1; then
     if [ "$(publicacion_de proxy-web 80/tcp)" != "${IP_ANFITRION}|${http_port}" ]; then
       l="$(ss -H -ltn "( sport = :${http_port} )" 2>/dev/null | awk -v ip="${IP_ANFITRION}" '$4 ~ "^(" ip "|0\\.0\\.0\\.0|\\*|\\[::\\]):"' | head -n 3)"
       [ -n "${l}" ] && ocupado+=$'\n'"       ${http_port}/tcp (proxy web): ${l//$'\n'/ ; }"
     fi
-    if [ "$(publicacion_de dns-interno 53/udp)" != "${IP_ANFITRION}|53" ]; then
-      l="$(ss -H -lun "( sport = :53 )" 2>/dev/null | awk -v ip="${IP_ANFITRION}" '$4 ~ "^(" ip "|0\\.0\\.0\\.0|\\*|\\[::\\]):"' | head -n 3)"
-      [ -n "${l}" ] && ocupado+=$'\n'"       53/udp (DNS): ${l//$'\n'/ ; }"
-      l="$(ss -H -ltn "( sport = :53 )" 2>/dev/null | awk -v ip="${IP_ANFITRION}" '$4 ~ "^(" ip "|0\\.0\\.0\\.0|\\*|\\[::\\]):"' | head -n 3)"
-      [ -n "${l}" ] && ocupado+=$'\n'"       53/tcp (DNS): ${l//$'\n'/ ; }"
+    if [ "$(publicacion_de dns-interno 53/udp)" != "${IP_ANFITRION}|${dns_port}" ]; then
+      l="$(ss -H -lun "( sport = :${dns_port} )" 2>/dev/null | awk -v ip="${IP_ANFITRION}" '$4 ~ "^(" ip "|0\\.0\\.0\\.0|\\*|\\[::\\]):"' | head -n 3)"
+      [ -n "${l}" ] && ocupado+=$'\n'"       ${dns_port}/udp (DNS): ${l//$'\n'/ ; }"
+      l="$(ss -H -ltn "( sport = :${dns_port} )" 2>/dev/null | awk -v ip="${IP_ANFITRION}" '$4 ~ "^(" ip "|0\\.0\\.0\\.0|\\*|\\[::\\]):"' | head -n 3)"
+      [ -n "${l}" ] && ocupado+=$'\n'"       ${dns_port}/tcp (DNS): ${l//$'\n'/ ; }"
     fi
   fi
   if [ -n "${ocupado}" ]; then
@@ -219,14 +234,18 @@ comprobar_intranet() {
        Liberalos o, para el proxy web, usa otro puerto libre: HTTP_PORT=<puerto> ./levantar-sistema.sh --intranet
        (los clientes entraran entonces con http://<nombre>:<puerto>). Nada se ha cambiado."
   fi
-  info "IP presente en el sistema y puertos ${http_port}/tcp y 53/udp+tcp libres en ella (vistos desde aqui)."
+  info "IP presente en el sistema y puertos ${http_port}/tcp y ${dns_port}/udp+tcp libres en ella (vistos desde aqui)."
+  if [ "${dns_port}" != "53" ]; then
+    info "DNS en ${IP_ANFITRION}:${dns_port}: con WSL mirrored, Windows no entrega su puerto 53 a Linux. El 53 lo atiende"
+    info "el reenviador de Windows (sistema/reenviador-dns.ps1), que arranca levantar-sistema.ps1 -Intranet."
+  fi
 }
 
 # Publica primero SOLO proxy-web y dns-interno en la IP de la LAN. Si Docker no puede (puerto ocupado en Windows por el
 # servicio ICS o por Portmaster, IP ausente...), explica la causa y vuelve a publicarlos en 127.0.0.1: el sistema no queda
 # a medias.
 publicar_intranet() {
-  paso "Publicando el proxy web (${IP_ANFITRION}:$(valor_efectivo HTTP_PORT 80)) y el DNS (${IP_ANFITRION}:53) en la LAN"
+  paso "Publicando el proxy web (${IP_ANFITRION}:$(valor_efectivo HTTP_PORT 80)) y el DNS (${IP_ANFITRION}:${DNS_PORT}) en la LAN"
   local salida
   if salida="$(dc up -d --no-deps proxy dns 2>&1)"; then
     printf '%s\n' "${salida}" | sed 's/^/    /'
@@ -235,11 +254,11 @@ publicar_intranet() {
   printf '%s\n' "${salida}" | sed 's/^/    /' >&2
   local causa="Docker no pudo publicar en ${IP_ANFITRION} (salida de compose arriba)."
   if printf '%s' "${salida}" | grep -qi 'address already in use'; then
-    if printf '%s' "${salida}" | grep -q ':53'; then
-      causa="El puerto 53 de ${IP_ANFITRION} ya esta en uso. En Windows lo suelen tener el servicio 'Conexion compartida a
-       Internet' (ICS, SharedAccess, en 0.0.0.0:53/udp) y Portmaster (portmaster-core, en [::]:53). Con WSL en modo
-       mirrored Linux no puede tomar un puerto que Windows ya tiene. Ejecuta sistema\\habilitar-intranet-windows.ps1 como
-       administrador: detecta quien lo ocupa y da los comandos para liberarlo (no los ejecuta por su cuenta)."
+    if printf '%s' "${salida}" | grep -q ":${DNS_PORT}[^0-9]"; then
+      causa="El puerto ${DNS_PORT} de ${IP_ANFITRION} (DNS) ya esta en uso por otro programa. Si es el 53, en Windows lo
+       suelen tener el servicio 'Conexion compartida a Internet' (ICS, SharedAccess, en 0.0.0.0:53/udp) y Portmaster
+       (portmaster-core, en [::]:53): sistema\\habilitar-intranet-windows.ps1, como administrador, detecta quien lo ocupa
+       y da los comandos para liberarlo (no los ejecuta por su cuenta). Si es otro puerto, liberalo y repite."
     else
       causa="El puerto $(valor_efectivo HTTP_PORT 80) de ${IP_ANFITRION} ya esta en uso por otro servidor web (en Windows: IIS,
        Skype antiguo, otro contenedor...). Liberalo o usa otro puerto libre para el proxy: HTTP_PORT=<puerto> en el entorno."
@@ -648,7 +667,7 @@ accesos() {
       Taquilla           Pretix     http://pretix.reservaviva.lan${suf}        usuario: $(valor_env PRETIX_ADMIN_EMAIL admin@reservaviva.local)
       Logistica          InvenTree  http://inventree.reservaviva.lan${suf}     usuario: $(valor_env INVENTREE_ADMIN_USER admin)
       RRHH               ERPNext    http://rrhh.reservaviva.lan${suf}          usuario: Administrator
-    Para que esos nombres resuelvan, cada cliente debe usar como DNS la IP ${dns_ip} (puerto ${dns}):
+    Para que esos nombres resuelvan, cada cliente debe usar como DNS la IP ${dns_ip} (puerto 53):
       - a mano en el cliente (Windows: Configuracion > Red > Editar DNS; comprobar con: nslookup pretix.reservaviva.lan ${dns_ip}), o
       - para toda la LAN, en el DHCP del router (DNS primario ${dns_ip}). OJO: este DNS solo conoce reservaviva.lan
         (no hace recursion); con el DHCP, los clientes necesitan un DNS secundario para Internet.
@@ -658,6 +677,11 @@ accesos() {
     Acceso directo desde este equipo (administracion): http://localhost:${p1}/openvpms  :${p3}  :${p4}  :${p2}
       Infra              LDAP localhost:${ldap}  LDAPS localhost:${ldaps}  NTP localhost:${ntp}/udp  (solo este equipo)
 EOF
+    if [ "${dns}" != "53" ]; then
+      info "DNS: dns-interno se publica en ${dns_ip}:${dns}; el puerto 53 lo atiende el reenviador de Windows"
+      info "(sistema/reenviador-dns.ps1), que arranca y comprueba levantar-sistema.ps1 -Intranet. Si lanzaste este script"
+      info "desde WSL a mano, ejecuta en Windows .\\levantar-sistema.ps1 -Intranet para tener el 53."
+    fi
   else
     cat <<EOF
 
@@ -722,8 +746,10 @@ accion_estado() {
   paso "Modo de publicacion: ${MODO}"
   local p d
   p="$(publicacion_de proxy-web 80/tcp)"; d="$(publicacion_de dns-interno 53/udp)"
-  info "proxy web (proxy-web):  ${p:+${p/|/:}}${p:-no publicado (contenedor ausente)}"
-  info "DNS (dns-interno):      ${d:+${d/|/:} udp y tcp}${d:-no publicado (contenedor ausente)}"
+  if [ -n "${p}" ]; then p="${p/|/:}"; else p="no publicado (contenedor ausente)"; fi
+  if [ -n "${d}" ]; then d="${d/|/:} udp y tcp"; else d="no publicado (contenedor ausente)"; fi
+  info "proxy web (proxy-web):  ${p}"
+  info "DNS (dns-interno):      ${d}"
   accesos
   aviso_sesion_wsl
 }
