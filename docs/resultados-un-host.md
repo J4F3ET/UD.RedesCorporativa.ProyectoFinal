@@ -194,6 +194,27 @@ VLAN 99, DNS con vista interna y vista lan, y modo intranet opcional del lanzado
 
 De 99 a 132 PASS: el bloque 4 añade 33 comprobaciones (proxy solo en `vlan99_infra`, vista lan, proxy y acceso directo con HTML y estático, WebSocket, 404). El INFO nuevo, 14 en vez de 13, es el modo de publicación detectado ("local: proxy en 127.0.0.1:80, DNS en 127.0.0.1:1053").
 
+## DNS desde la LAN con WSL mirrored: reenviador (27/09/2026)
+
+Equipo: Windows 11, Docker Engine en WSL `Ubuntu-24.04` con `networkingMode=mirrored`, IP de la LAN 192.168.1.13 (Wi-Fi);
+ICS (`SharedAccess`) detenido y deshabilitado, Portmaster cerrado. Mecanismo en [`operacion.md`](operacion.md#acceso-desde-la-lan).
+
+| Paso | Resultado |
+|---|---|
+| Hallazgo: servidor mínimo en WSL ligado a 192.168.1.13, consultado desde Windows | Recibe UDP y TCP en el 54, el 1053 y el 5453; en el **53** Windows responde "puerto inalcanzable" (UDP, `WSAECONNRESET`) y rechaza la conexión (TCP). El 80 del proxy sí llega. Con el DNS publicado en el 53, los clientes de la LAN no resolvían |
+| Solución probada a mano | `dns-interno` en 192.168.1.13:1053 + `sistema/reenviador-dns.ps1` en 192.168.1.13:53: 200/200 consultas en 0,6 s; `nslookup` por UDP y TCP correcto; `example.com` REFUSED. **iPhone** (192.168.1.6) con DNS manual 192.168.1.13: Safari abrió `http://pretix.reservaviva.lan` (log del proxy con los estáticos en 200) |
+| Desde WSL, con el reenviador parado | `192.168.1.13:53`: UDP sin respuesta, TCP "connection refused"; con él vivo, las dos correctas. `verificar` puede así probar la ruta completa desde WSL |
+| `.\levantar-sistema.ps1 -Intranet -Forzar` (integrado) | RC=0, 26/26. `docker port dns-interno` → `192.168.1.13:1053` (udp y tcp); proxy en `192.168.1.13:80`. Reenviador lanzado oculto, PID en `sistema\.reenviador-dns.pid`, prueba A de `pretix` → 192.168.1.13 |
+| Desde Windows, con el integrado | `nslookup pretix.reservaviva.lan 192.168.1.13` y `nslookup -vc rrhh.reservaviva.lan 192.168.1.13` → 192.168.1.13; `example.com` → "Query refused". Ráfaga UDP: 200/200 en 0,5-0,7 s (tres pasadas). Ráfaga TCP (una conexión por consulta): 100/100 en 0,7 s |
+| Segundo `-Intranet -Forzar` | RC=0 en 67 s; "Ya estaba en marcha (PID …): no se lanza otro"; un solo proceso |
+| `estado` | Modo intranet, DNS `192.168.1.13:1053 udp y tcp`, reenviador "Vivo … Responde: pretix.reservaviva.lan -> 192.168.1.13" |
+| `verificar --rapido` (modo intranet) | 134 PASS, 1 FAIL, 14 INFO: el FAIL es el marcador del caso 4, no ejecutado por `--rapido`. Las dos comprobaciones nuevas del reenviador (UDP y TCP por el 53) en PASS |
+| `verificar` completo (modo intranet) | **134 PASS, 0 FAIL, 14 INFO, RC=0**, 710 s (`verificacion-20260927-200228.txt`); el modo intranet se conserva tras el `down`/`up`; `ExecMainStartTimestamp` igual antes y después |
+| Vuelta al modo local (`-Forzar`) | RC=0 en 69 s: reenviador parado y archivo de PID borrado; DNS en `127.0.0.1:1053`, proxy en `127.0.0.1:80` |
+| De nuevo `-Intranet -Forzar` | RC=0 en 76 s; reenviador nuevo, responde; ráfagas UDP 200/200 y TCP 100/100 |
+
+De 132 a 134 PASS: el bloque 4 añade las dos consultas por el 53 cuando el DNS está detrás del reenviador.
+
 ## Pendientes
 
 | ID | Qué | Tipo |
@@ -212,14 +233,18 @@ De 99 a 132 PASS: el bloque 4 añade 33 comprobaciones (proxy solo en `vlan99_in
 | — | Diseño con switch L2/L3 sin probar contra hardware real | limitación conocida |
 | — | Rotar las contraseñas de laboratorio de `sistema/test.env` si el repositorio se hace público | seguridad |
 | — | InvenTree no sirve `/media` sin `DEBUG`: las imágenes de artículos y los adjuntos que se suban no se verán. Hoy solo existe `media/report`, así que no se pierde nada. Ya existe un proxy (`proxy-web`), pero no sirve `/media`: haría falta montarle el volumen `inventree_data` en solo lectura y una `location /media/`, además de decidir si esos ficheros pueden verse sin autenticación | decisión del usuario |
-| — | Modo intranet sin probar de extremo a extremo: no se ha ejecutado `sistema/habilitar-intranet-windows.ps1`, WSL no ha estado en `mirrored` y ningún otro equipo de la LAN ha resuelto ni abierto los nombres. Pasos en [`operacion.md`](operacion.md#acceso-desde-la-lan) | validación |
-| — | En este PC, el 53/udp de Windows lo ocupan ICS (`SharedAccess`) y Portmaster, y Portmaster intercepta las consultas DNS salientes del anfitrión. Con WSL en mirrored, Docker no podrá publicar el DNS en el 53 hasta que el usuario libere ese puerto (el script de Windows informa, no toca nada) | decisión del usuario |
+| — | Modo intranet probado de extremo a extremo solo con un cliente (el iPhone del usuario, por Pretix). Faltan las otras tres aplicaciones desde otro equipo, un cliente Windows/Android y el login real por los nombres `.lan` | validación |
+| — | No se ha medido desde otro equipo si `<IP>:1053` (DNS detrás del reenviador) queda filtrado para la LAN: no hay regla de entrada para él, pero con WSL mirrored no está comprobado | validación |
+| — | El reenviador DNS no arranca solo tras reiniciar el PC (hay que volver a ejecutar `-Intranet`) y es secuencial por UDP (una consulta cada vez, 3 s de espera máxima por consulta a bind9): suficiente para el laboratorio, no medido con muchos clientes a la vez | robustez |
+| — | Con Docker Desktop, el lanzador publica el DNS directamente en el 53 y no usa reenviador: camino sin probar (en este PC no hay Docker Desktop) | validación |
 | — | `arrancar` lanzado desde Git Bash devolvió RC=2 aunque el log decía "los 25 servicios estan sanos"; el siguiente, desde PowerShell, dio RC=0. Causa sin identificar (el envoltorio o el script) | robustez |
 | — | Ninguna aplicación es cliente de `ntp-interno`: solo lo consulta `verificar` (ver [`arquitectura.md`](arquitectura.md#ntp)). Falta decidir si se documenta como limitación o se configura un cliente en las apps | decisión del usuario |
 | — | Los volúmenes anónimos del proyecto se acumulan con las recreaciones y los `down`/`up` de `verificar` (74 el 26/09; 101 el 27/09, borrados en la prueba en frío) | mantenimiento |
 | — | `docker.service` se reinició entre dos sesiones de trabajo del 26/09 (`ExecMainStartTimestamp` pasó de 17:01:17 a 21:13:43), fuera de cualquier prueba y por causa desconocida | robustez |
 | — | El login real en un navegador con las claves de laboratorio no lo ha hecho ningún agente (la clave no se puede leer desde la sesión): administrador de Pretix `admin@reservaviva.local`, botón "Login with LDAP" de ERPNext y `taquilla.prueba` en InvenTree, tanto por su nombre `.lan` como por `localhost:<puerto>`. Lo comprueba el usuario | validación |
 Resuelto el 27/09/2026:
+
+- **DNS del modo intranet inalcanzable desde la LAN con WSL mirrored:** Windows no entrega su 53 a WSL. `dns-interno` va al 1053 y el reenviador de Windows (`sistema/reenviador-dns.ps1`), gestionado por `levantar-sistema.ps1`, atiende el 53 (sección "DNS desde la LAN con WSL mirrored"). El 53/udp de Windows ya no lo ocupan ICS (deshabilitado) ni Portmaster (cerrado) en este PC.
 
 - **`verificar` no comprobaba la interfaz web** (el hueco por el que H22 pasó 7 pasadas en verde). El bloque 4 pide, por el proxy y por `localhost:<puerto>`, la página de login de cada aplicación y el primer CSS o JS que referencia, y exige 200 con un `Content-Type` que no sea HTML (ver "Acceso por nombre").
 - **Acceso por nombre desde la LAN:** proxy web, vistas del DNS y modo intranet del lanzador (sección "Acceso por nombre y modo intranet").

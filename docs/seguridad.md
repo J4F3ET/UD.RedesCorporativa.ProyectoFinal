@@ -205,7 +205,10 @@ Si alguna de esas variables faltara en `test.env`, el compose publica igualmente
 ### Modo intranet: qué se expone y por qué es opcional
 
 El **modo intranet** (`levantar-sistema --intranet`) publica **solo dos puertos** en la IP de la LAN del equipo: el proxy
-web (80/tcp), que da acceso a las cuatro aplicaciones por su nombre, y el DNS (53/udp y tcp). OpenLDAP, NTP y el acceso
+web (80/tcp), que da acceso a las cuatro aplicaciones por su nombre, y el DNS (53/udp y tcp). Con Docker Engine en WSL,
+el 53 lo atiende un reenviador de Windows (`sistema/reenviador-dns.ps1`, sin privilegios de administrador) que pasa las
+consultas tal cual a bind9, publicado en `<IP de la LAN>:1053`. Para el 1053 no se crea ninguna regla de entrada: los
+clientes solo deben usar el 53 (no se ha medido desde otro equipo si el 1053 queda filtrado). OpenLDAP, NTP y el acceso
 directo 1808x siguen en `127.0.0.1`. Es **opcional y no persistente** (un `arrancar` sin la opción vuelve al modo local)
 por una razón concreta: las contraseñas de laboratorio están **públicas en git**. Con el modo intranet activo, cualquier
 equipo de la misma red puede entrar como administrador en OpenVPMS, Pretix, InvenTree y ERPNext, y todo viaja por HTTP

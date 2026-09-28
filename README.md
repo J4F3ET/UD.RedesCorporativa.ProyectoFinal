@@ -49,7 +49,8 @@ El script hace todo lo necesario y se puede volver a ejecutar sin riesgo: si un 
 web (80) y el DNS del laboratorio (53) en la IP de la LAN, para que cualquier equipo entre por nombre usando ese DNS. En
 Windows hay que preparar antes el equipo **una vez**, como administrador, con
 [`sistema/habilitar-intranet-windows.ps1`](sistema/habilitar-intranet-windows.ps1) (WSL en modo `mirrored` y reglas de
-cortafuegos). Las contraseñas de laboratorio son públicas: úsalo solo en una red de laboratorio. Pasos, configuración de
+cortafuegos). Con Docker Engine en WSL, el 53 lo atiende un reenviador de Windows (`sistema/reenviador-dns.ps1`) que
+arranca y para el propio lanzador. Las contraseñas de laboratorio son públicas: úsalo solo en una red de laboratorio. Pasos, configuración de
 los clientes y pruebas: [`docs/operacion.md`](docs/operacion.md#acceso-desde-la-lan).
 
 Los usuarios aparecen al terminar el arranque. Las contraseñas de laboratorio, que son desechables, están en [`sistema/test.env`](sistema/test.env).
@@ -106,7 +107,7 @@ servicios/                          # una carpeta por servicio, con su README
   ntp/                              # Infraestructura: servidor de hora
   proxy/                            # Infraestructura: proxy web por nombre (nginx)
   ca/                               # CA interna + certificado LDAPS (lo ejecuta levantar-sistema.sh)
-sistema/                            # test.env (variables y claves de laboratorio), la verificación y el script de Windows para el modo intranet
+sistema/                            # test.env (variables y claves de laboratorio), la verificación y los scripts de Windows del modo intranet
 docs/                               # arquitectura, operación, seguridad, aplicaciones, LDAP y resultados vigentes
 diseno-red/                         # ANEXO: diseño con switch L2/L3, VLANs 802.1Q, matriz y diagramas (no se despliega)
 ```

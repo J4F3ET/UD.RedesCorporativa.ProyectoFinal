@@ -865,7 +865,9 @@ services:
         ipv4_address: ${NET_INFRA:-10.10.99}.11
     # 53 suele estar ocupado en Windows: en modo local se publica en DNS_BIND_IP (127.0.0.1) y DNS_PORT (1053), de
     # sistema/test.env. En modo intranet (levantar-sistema --intranet) el lanzador exporta DNS_BIND_IP=<IP de la LAN> y
-    # DNS_PORT=53 solo para esa ejecucion: las variables del entorno mandan sobre --env-file.
+    # DNS_PORT solo para esa ejecucion (las variables del entorno mandan sobre --env-file): 53, o 1053 con Docker Engine
+    # en WSL, porque con WSL mirrored Windows no entrega su 53 a Linux; ahi el 53 de la LAN lo atiende en Windows
+    # sistema/reenviador-dns.ps1, que reenvia a <IP>:1053 (lo arranca levantar-sistema.ps1 -Intranet).
     ports:
       - "${DNS_BIND_IP:-127.0.0.1}:${DNS_PORT:-53}:53/udp"
       - "${DNS_BIND_IP:-127.0.0.1}:${DNS_PORT:-53}:53/tcp"

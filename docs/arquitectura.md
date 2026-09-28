@@ -103,7 +103,7 @@ flowchart LR
   NAV -->|"1123 udp"| NTP
   NAV -->|"80"| PRX
   CLI -->|"80 (IP de la LAN)"| PRX
-  CLI -->|"53 udp+tcp (IP de la LAN)"| DNS
+  CLI -->|"53 udp+tcp (IP de la LAN; con WSL, vía reenviador de Windows al 1053)"| DNS
 ```
 
 En modo local (el de por defecto) el proxy y el DNS se publican en `127.0.0.1`, como todo lo demás; en modo intranet
@@ -219,7 +219,8 @@ necesita `vlan99_infra`. Detalle y pruebas en
 - **bind9 (`dns-interno`, 10.10.99.11)** es el servidor autoritativo de `reservaviva.lan`, sin recursión
   ([`named.conf`](../servicios/bind9/named.conf)), con dos vistas (siguiente apartado). Lo consultan la verificación
   (desde `vlan99_infra`, desde las aplicaciones y desde el anfitrión), el equipo anfitrión por `localhost:1053` y, en modo
-  intranet, los equipos de la LAN por el 53. Las aplicaciones no dependen de él.
+  intranet, los equipos de la LAN por el 53 (con Docker Engine en WSL, a través del reenviador de Windows, sección 7).
+  Las aplicaciones no dependen de él.
 - **`extra_hosts`** fija `ldap.reservaviva.lan → 10.10.99.10` en `inventree-app` y `erpnext-backend`, los dos
   contenedores que hacen LDAPS. Así el nombre coincide con el certificado sin depender de ningún DNS.
 
@@ -318,9 +319,13 @@ puertos del host están desplazados porque OpenVPMS y ERPNext escuchan ambos en 
 ocupados en Windows.
 
 En **modo intranet** (`levantar-sistema --intranet`) cambian solo dos publicaciones: el proxy web pasa a
-`<IP de la LAN>:80` y bind9 a `<IP de la LAN>:53`. El lanzador exporta `INTRANET_IP`, `DNS_BIND_IP` y `DNS_PORT=53` para
+`<IP de la LAN>:80` y bind9 a `<IP de la LAN>:53`. El lanzador exporta `INTRANET_IP`, `DNS_BIND_IP` y `DNS_PORT` para
 esa ejecución, sin tocar `test.env` (en compose, el entorno manda sobre `--env-file`), así que compose recrea solo
-`proxy-web` y `dns-interno`. Todo lo demás, incluido el acceso directo 1808x, sigue en `127.0.0.1`. Cómo se activa y
+`proxy-web` y `dns-interno`. Con **Docker Engine en WSL** (`networkingMode=mirrored`) `DNS_PORT` es 1053, no 53: Windows
+no entrega a Linux el tráfico de su puerto 53, así que bind9 se publica en `<IP de la LAN>:1053` y un proceso de Windows,
+[`sistema/reenviador-dns.ps1`](../sistema/reenviador-dns.ps1), escucha en `<IP de la LAN>:53` (UDP y TCP) y reenvía cada
+consulta al 1053. Lo arranca y lo para `levantar-sistema.ps1`; los clientes solo ven el 53. Con Docker Desktop o en
+Linux nativo, bind9 va directo al 53. Todo lo demás, incluido el acceso directo 1808x, sigue en `127.0.0.1`. Cómo se activa y
 qué requiere Windows: [operacion.md](operacion.md#acceso-desde-la-lan).
 
 | Servicio (contenedor) | Puerto del host | Puerto del contenedor | Dirección | Variable |
@@ -331,7 +336,7 @@ qué requiere Windows: [operacion.md](operacion.md#acceso-desde-la-lan).
 | InvenTree (`inventree-app`) | 18083 | 8000 | `PUBLISH_IP` = 127.0.0.1 | `INVENTREE_PORT` |
 | OpenLDAP, sin cifrar (`openldap`) | 1389 | 389 | `PUBLISH_IP` = 127.0.0.1 | `LDAP_PORT` |
 | OpenLDAP, LDAPS (`openldap`) | 1636 | 636 | `PUBLISH_IP` = 127.0.0.1 | `LDAPS_PORT` |
-| bind9 (`dns-interno`) | 1053 udp y tcp (modo intranet: 53 en la IP de la LAN) | 53 | `DNS_BIND_IP` = 127.0.0.1 | `DNS_PORT` |
+| bind9 (`dns-interno`) | 1053 udp y tcp (modo intranet: 53 en la IP de la LAN; con WSL, 1053 en la IP de la LAN + reenviador en el 53) | 53 | `DNS_BIND_IP` = 127.0.0.1 | `DNS_PORT` |
 | NTP (`ntp-interno`) | 1123 udp | 123 | `PUBLISH_IP` = 127.0.0.1 | `NTP_PORT` |
 | Proxy web por nombre (`proxy-web`) | 80 (en modo intranet, en la IP de la LAN) | 80 | `INTRANET_IP` = 127.0.0.1 | `HTTP_PORT` |
 

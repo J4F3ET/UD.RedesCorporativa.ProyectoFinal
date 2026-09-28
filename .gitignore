@@ -11,6 +11,8 @@ servicios/openldap/generado/
 
 # Salidas de levantar-sistema.sh verificar
 sistema/resultados/
+# PID del reenviador DNS de Windows del modo intranet (levantar-sistema.ps1 -Intranet)
+sistema/.reenviador-dns.pid
 
 # Worktrees y ficheros locales de sesiones de agentes
 .claude/
