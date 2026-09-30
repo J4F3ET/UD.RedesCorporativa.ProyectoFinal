@@ -68,6 +68,15 @@ reflejen con claridad en vez de quedarse "sembrando" indefinidamente sobre un pr
 Idempotente: comprueba antes de crear (o interpreta un "ya existe" de `samba-tool` como éxito), así que repetirla en
 cada arranque no duplica nada.
 
+**Trampa (real, ya la sufrimos):** `samba-tool user create` no toca la clave de una cuenta que ya existía — solo la
+fija al crearla. Como la siembra es idempotente y se repite en cada arranque, una cuenta creada en un arranque o una
+provisión anterior se queda con la clave de entonces aunque `sistema/test.env` cambie después; `kinit`/el bind LDAPS
+fallan con "contraseña incorrecta" sin que nada avise. Por eso cada cuenta (`vet.prueba`, `logistica.prueba`,
+`taquilla.prueba`, `rrhh.prueba`, `svc-lectura` y también `Administrator`, cuya clave normalmente solo fija `domain
+provision` la primera vez) lleva además un `samba-tool user setpassword` en cada arranque, que **reconcilia** la
+clave real con la de `test.env` sin tocar nada más de la cuenta. No se usa `--must-change-at-next-login`: rompería
+los logins automáticos de `levantar-sistema.sh verificar`.
+
 | Objeto | OU / grupo |
 |---|---|
 | `OU=Medica`, `OU=Operaciones`, `OU=RRHH`, `OU=Servicios`, `OU=Grupos` | bajo `DC=ad,DC=reservaviva,DC=lan` |

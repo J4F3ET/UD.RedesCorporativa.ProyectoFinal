@@ -6,10 +6,14 @@
 # (o interpreta "ya existe"/"already" en la salida de samba-tool como exito), asi que repetirla no duplica nada ni
 # falla si ya se sembro en un arranque anterior.
 #
-# Claves: las lee de las variables de entorno que compose pasa desde sistema/test.env (unica fuente). Deben cumplir
-# la complejidad de contrasenas de AD (longitud minima, 3 de 4 categorias de caracteres, y no contener el nombre de
-# la cuenta): si "samba-tool user create" la rechaza, se cambia la clave en sistema/test.env, nunca la politica del
-# dominio (docs/directorio-activo.md, "regla del proyecto").
+# Claves: las lee de las variables de entorno que compose pasa desde sistema/test.env (unica fuente de verdad). Deben
+# cumplir la complejidad de contrasenas de AD (longitud minima, 3 de 4 categorias de caracteres, y no contener el
+# nombre de la cuenta): si "samba-tool user create" la rechaza, se cambia la clave en sistema/test.env, nunca la
+# politica del dominio (docs/directorio-activo.md, "regla del proyecto"). Cada cuenta (incluida Administrator) lleva
+# ademas un "samba-tool user setpassword" en cada arranque para RECONCILIAR la clave real con la de test.env: "user
+# create" no toca la clave de una cuenta que ya existia, asi que sin esto una cuenta creada en un arranque o una
+# provision anterior se queda con una clave vieja en cuanto test.env cambia, y los logins de prueba fallan sin avisar.
+# No se usa --must-change-at-next-login: rompería los logins automaticos de "levantar-sistema.sh verificar".
 set -euo pipefail
 
 BASE_DN="DC=ad,DC=reservaviva,DC=lan"
@@ -39,6 +43,13 @@ intentar_o_existe() {
 : "${LDAP_PRUEBA_LOGISTICA_PASSWORD:?Falta LDAP_PRUEBA_LOGISTICA_PASSWORD}"
 : "${LDAP_PRUEBA_TAQUILLA_PASSWORD:?Falta LDAP_PRUEBA_TAQUILLA_PASSWORD}"
 : "${LDAP_PRUEBA_RRHH_PASSWORD:?Falta LDAP_PRUEBA_RRHH_PASSWORD}"
+: "${SAMBA_ADMIN_PASSWORD:?Falta SAMBA_ADMIN_PASSWORD}"
+
+# --- Administrator: su clave la fija "domain provision" (--adminpass), solo la primera vez que se provisiona. Si
+# SAMBA_ADMIN_PASSWORD cambia despues en sistema/test.env con el dominio ya provisionado, "domain provision" no se
+# vuelve a ejecutar (ver entrypoint.sh) y la clave real se queda desactualizada; se reconcilia aqui en cada arranque
+# por la misma razon que los usuarios de prueba, mas abajo.
+intentar_o_existe "clave de Administrator" samba-tool user setpassword "Administrator" --newpassword="${SAMBA_ADMIN_PASSWORD}"
 
 # --- OUs: una por departamento, mas Servicios (cuentas de aplicacion) y Grupos (los GG-*) -----------------------
 for ou in Medica Operaciones RRHH Servicios Grupos; do
@@ -57,6 +68,10 @@ crear_usuario() {  # crear_usuario <uid> <OU> <clave> <grupo>
   local uid="$1" ou="$2" clave="$3" grupo="$4"
   intentar_o_existe "usuario ${uid}" samba-tool user create "${uid}" "${clave}" \
     --userou="OU=${ou}" --mail-address="${uid}@reservaviva.lan" --use-username-as-cn
+  # Reconciliar la clave con sistema/test.env en cada arranque: "user create" no toca la clave si la cuenta ya
+  # existia (creada en un arranque o una provision anterior), asi que sin este paso una cuenta vieja se queda con
+  # una clave que ya no coincide con test.env y el kinit/bind LDAPS de las pruebas falla en silencio.
+  intentar_o_existe "clave de ${uid}" samba-tool user setpassword "${uid}" --newpassword="${clave}"
   intentar_o_existe "membresia de ${uid} en ${grupo}" samba-tool group addmembers "${grupo}" "${uid}"
 }
 
@@ -68,6 +83,7 @@ crear_usuario "rrhh.prueba"      "RRHH"        "${LDAP_PRUEBA_RRHH_PASSWORD}"   
 # --- svc-lectura: cuenta de servicio (bind de InvenTree y ERPNext), sin grupo y con la clave sin caducar --------
 intentar_o_existe "usuario svc-lectura" samba-tool user create "svc-lectura" "${LDAP_SVC_LECTURA_PASSWORD}" \
   --userou="OU=Servicios" --mail-address="svc-lectura@reservaviva.lan" --use-username-as-cn
+intentar_o_existe "clave de svc-lectura" samba-tool user setpassword "svc-lectura" --newpassword="${LDAP_SVC_LECTURA_PASSWORD}"
 samba-tool user setexpiry "svc-lectura" --noexpiry >/dev/null
 log "svc-lectura: clave sin caducidad."
 
