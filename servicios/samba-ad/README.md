@@ -8,8 +8,10 @@ hiciera falta partir de un OpenLDAP con datos reales) están en `docs/directorio
 
 - **Servicio de compose:** `samba-ad` (`container_name: samba-ad`; el nombre está escrito tal cual en
   `levantar-sistema.sh` y en los scripts de verificación: no cambiarlo).
-- **Imagen propia** (`Dockerfile`): `debian:trixie` + `samba-ad-dc krb5-user krb5-config winbind ldap-utils
-  dnsutils acl attr python3-setproctitle`.
+- **Imagen propia** (`Dockerfile`): `debian:trixie` + `samba-ad-dc samba-ad-provision krb5-user krb5-config winbind
+  ldap-utils dnsutils acl attr python3-setproctitle`. **Trampa:** en Debian trixie `samba-ad-provision` va separado
+  de `samba-ad-dc` y trae los LDIF del esquema de AD; sin él, `samba-tool domain provision` falla con
+  `File [...AD_DS_Attributes_Windows_Server_v1903.ldf] not found` y el contenedor queda en bucle de reinicio.
 - **Realm:** `AD.RESERVAVIVA.LAN` (subdominio; Samba no admite `.local` ni renombrar el realm después).
   **Dominio/NetBIOS:** `RESERVAVIVA`. **DN base:** `DC=ad,DC=reservaviva,DC=lan`.
 - **Hostname:** `dc1` (≤ 15 caracteres, lo exige Samba), **FQDN:** `dc1.ad.reservaviva.lan`.

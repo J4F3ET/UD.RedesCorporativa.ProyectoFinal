@@ -7,14 +7,19 @@ FROM debian:trixie
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# samba-ad-dc: el rol de Domain Controller. krb5-user/krb5-config: Kerberos (autenticacion del realm). winbind:
-# utilidades de dominio (id/getent contra AD). ldap-utils: ldapsearch, para el healthcheck y para depurar a mano.
-# dnsutils: dig/host, para comprobar el DNS interno de Samba y el reenvio de bind9. acl/attr: Samba guarda las ACL de
-# AD en atributos extendidos security.* del sistema de ficheros (por eso el servicio necesita "privileged: true" en
-# compose). python3-setproctitle: lo pide samba-tool para nombrar sus procesos; sin el, algunos subcomandos avisan.
+# samba-ad-dc: el rol de Domain Controller. samba-ad-provision: en Debian trixie va SEPARADO de samba-ad-dc y trae
+# los LDIF del esquema de AD (/usr/share/samba/setup/ad-schema/*.ldf); sin el, "samba-tool domain provision" falla
+# con "File [...AD_DS_Attributes_Windows_Server_v1903.ldf] not found. Please install samba-ad-provision package" y
+# el contenedor queda en bucle de reinicio (probado: sin este paquete no provisiona). krb5-user/krb5-config:
+# Kerberos (autenticacion del realm). winbind: utilidades de dominio (id/getent contra AD). ldap-utils: ldapsearch,
+# para el healthcheck y para depurar a mano. dnsutils: dig/host, para comprobar el DNS interno de Samba y el
+# reenvio de bind9. acl/attr: Samba guarda las ACL de AD en atributos extendidos security.* del sistema de ficheros
+# (por eso el servicio necesita "privileged: true" en compose). python3-setproctitle: lo pide samba-tool para
+# nombrar sus procesos; sin el, algunos subcomandos avisan.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       samba-ad-dc \
+      samba-ad-provision \
       krb5-user \
       krb5-config \
       winbind \
