@@ -1,7 +1,10 @@
 # Verificación de la arquitectura en un host (`verificar_arquitectura.py`)
 
 Objetivo: demostrar que la topología diseñada **se comporta como está diseñada**, no solo que los contenedores arrancan.
-Estado: **ejecutado contra el sistema completo** con `levantar-sistema.sh verificar`. Las cifras de cada pasada están en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md).
+Estado: **adaptado a Samba AD DC** (rama `feat/samba-ad-dc`, sustituye a OpenLDAP). Los bloques 1-4 y 6 ya estaban
+**ejecutados contra el sistema completo** con OpenLDAP; el bloque 5 (Active Directory) es nuevo. La reejecución
+completa contra `samba-ad` ocurre en la Fase 2 del plan de migración, una vez dev tenga el servicio arriba con la
+siembra completa. Las cifras de cada pasada están en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md).
 
 ## La topología que se prueba
 
@@ -15,7 +18,7 @@ cuatro apps se conectan además a `vlan99_infra` con IP fija:
 | inventree-app | vlan30 | 8000 |
 | erpnext-backend | vlan40 | 8000 |
 
-`openldap`, `dns-interno`, `ntp-interno` y `proxy-web` están en `vlan99_infra` (y `erpnext-hr` tiene ahí su pata para el
+`samba-ad`, `dns-interno`, `ntp-interno` y `proxy-web` están en `vlan99_infra` (y `erpnext-hr` tiene ahí su pata para el
 proxy). Las IP de cada contenedor están en
 [`../docs/arquitectura.md`](../docs/arquitectura.md#4-servicios). Dos bridges de Docker no se enrutan entre sí: esa es la
 segmentación que se pone a prueba.
@@ -41,7 +44,7 @@ ya local, referencia con digest) con `--pull=never`, y la de `ntp-interno`; llev
 
 1. **Segmentación (prueba negativa).** Un cliente efímero *solo* en una VLAN de departamento no alcanza otro departamento
    ni `vlan99_infra`; un cliente con la pila de red de la app (`--network container:<app>`, dual-homed) **sí** alcanza
-   `openldap:389/636` y **no** otros departamentos.
+   `samba-ad:389/636` y **no** otros departamentos.
 2. **DNS, vista interna.** Se consulta a `10.10.99.11` de verdad desde `vlan99_infra`: cada registro de
    `servicios/bind9/zones/db.reservaviva.lan` (autoritativo, igual que la zona), un nombre inexistente (NXDOMAIN) y
    `example.com` (REFUSED: sin recursión). Además, cada uno de los 7 nombres de la zona debe apuntar a la IP real
@@ -50,7 +53,7 @@ ya local, referencia con digest) con `--pull=never`, y la de `ntp-interno`; llev
    | Nombre | Contenedor | Red en la que se toma su IP |
    |---|---|---|
    | `dns` | `dns-interno` | vlan99 |
-   | `ldap` | `openldap` | vlan99 |
+   | `ldap` | `samba-ad` | vlan99 |
    | `ntp` | `ntp-interno` | vlan99 |
    | `openvpms` | `openvpms-app` | vlan10 |
    | `pretix` | `pretix-web` | vlan20 |
@@ -68,7 +71,8 @@ ya local, referencia con digest) con `--pull=never`, y la de `ntp-interno`; llev
    - **Vista lan:** se pregunta a `dns-interno` desde **fuera** de las VLAN, desde el anfitrión por el puerto publicado y por
      **TCP** (el mismo camino que un equipo de la LAN; a bind9 le llega con el gateway del bridge como origen, que la ACL
      deja fuera de la vista interna). `openvpms`, `pretix`, `inventree`, `rrhh` y `dns` deben dar la IP en la que se publica
-     el proxy (127.0.0.1 en modo local, la IP de la LAN en modo intranet); `ldap` y `ntp`, NXDOMAIN; `example.com`, REFUSED.
+     el proxy (127.0.0.1 en modo local, la IP de la LAN en modo intranet); `ldap`, `ntp` y `ad` (zona AD completa), NXDOMAIN;
+     `example.com`, REFUSED.
      Se contrasta con la vista interna: el mismo nombre da la IP del contenedor desde las VLAN y la del proxy desde fuera.
      TCP y no UDP porque es lo más fiable a través de la publicación de Docker; el cliente UDP ya lo ejercita el bloque 2.
      Con Docker Engine en WSL, en modo intranet el DNS se publica en el 1053 y el 53 lo atiende el reenviador de Windows
@@ -83,8 +87,22 @@ ya local, referencia con digest) con `--pull=never`, y la de `ntp-interno`; llev
      de administración.
    Se hace desde el anfitrión, donde corre el guion, contra lo que Docker publica (`docker inspect`): no hace falta que el
    anfitrión use este DNS.
-5. **Consolidación.** Invoca `ldapprobe.py`, `probe.py` y `ldaplogin.py --persistencia` (caso 4, ya ejecutado: ver la tabla de estado);
-   no los duplica. La verificación conserva el modo de publicación (local o intranet) en el `up -d` del caso 4.
+5. **Active Directory** (nuevo, especifico de Samba AD DC; no existia con OpenLDAP):
+   - **SRV via bind9.** `_ldap._tcp.ad.reservaviva.lan` y `_kerberos._tcp.ad.reservaviva.lan`, consultados a
+     `dns-interno` (10.10.99.11) desde `vlan99_infra` (una VLAN interna): demuestra que la zona `type forward`
+     de bind9 reenvia de verdad hacia `samba-ad` y que el registro apunta al puerto esperado (389 y 88).
+   - **Kerberos.** `kinit vet.prueba@AD.RESERVAVIVA.LAN` y `klist` con `docker exec` dentro de `samba-ad`; la
+     clave viaja **siempre por stdin**, nunca en el argv (visible con `docker top`/`ps`).
+   - **Grupos.** `samba-tool group listmembers` para `GG-Medica`, `GG-Operaciones` y `GG-RRHH` debe devolver
+     exactamente los usuarios de prueba esperados de cada grupo.
+   - **Prueba NEGATIVA de membresia.** `vet.prueba` (solo en `GG-Medica`) no debe poder entrar en InvenTree
+     (exige `GG-Operaciones`) ni en ERPNext (exige `GG-RRHH`): reutiliza el mecanismo HTTP de `ldaplogin.py`
+     (casos 1/2) con un usuario valido pero sin el grupo que exige el filtro `memberOf` de cada app.
+   - La vista lan sin `ad.reservaviva.lan` (bloque 4, tabla de arriba) completa la prueba: ni el registro
+     suelto `ldap` ni la zona AD entera se anuncian a la LAN.
+6. **Consolidación.** Invoca `ldapprobe.py` (bind anonimo + busqueda al rootDSE: AD no permite busqueda anonima
+   en el resto del arbol), `probe.py` y `ldaplogin.py --persistencia` (caso 4); no los duplica. La verificación
+   conserva el modo de publicación (local o intranet) en el `up -d` del caso 4.
 
 ## Cómo se lee un resultado (esto decide si la prueba vale algo)
 
@@ -133,6 +151,7 @@ Un destino inalcanzable y un nombre que no resuelve dan resultados parecidos y s
 | Clasificador de conexiones, cliente DNS por UDP (compresión, NXDOMAIN, REFUSED, timeout) y por TCP, cliente SNTP, lector de las dos zonas, extracción del estático del HTML | **Verificado** con `--autotest` en WSL contra sockets locales (PASS). En Windows el caso "puerto cerrado" falla por un artefacto de loopback (sin RST inmediato); en Linux/WSL pasa. |
 | Modo `--sonda` por stdin (el que corre dentro del contenedor, sin `__file__`) | **Verificado** en WSL sin Docker |
 | Fallo limpio con el sistema apagado (7 FAIL en prerrequisitos, exit 1, sin excepción) | **Verificado** |
-| Todo lo que toca contenedores: segmentación, DNS, NTP, ldapprobe/probe/ldaplogin | **Verificado** el 26/09/2026 contra los 25 servicios, incluida la persistencia (cifras en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md)) |
-| Acceso por nombre (bloque 4) | **Verificado** el 27/09/2026 contra los 26 servicios, en modo local y en modo intranet con la IP de la distro de WSL (cifras en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md)) |
+| Todo lo que toca contenedores (con OpenLDAP): segmentación, DNS, NTP, ldapprobe/probe/ldaplogin | **Verificado** el 26/09/2026 contra los 25 servicios, incluida la persistencia (cifras en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md)); base sobre la que se adapto a Samba AD DC |
+| Acceso por nombre (bloque 4, con OpenLDAP) | **Verificado** el 27/09/2026 contra los 26 servicios, en modo local y en modo intranet con la IP de la distro de WSL (cifras en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md)) |
 | Supuestos: puertos 8080/80/8000/8000 de las apps, `chronyd -Q` con la imagen de cturra, `--network container:<app>` | **Verificado** en esa misma ejecución (los bloques que dependen de ellos dan PASS) |
+| Bloque 5 (Active Directory: SRV, kinit/klist, grupos, prueba negativa) y adaptacion de los bloques 1/2/6 a `samba-ad` | **Pendiente**: escrito y compilado (`python -m py_compile`), probado en `--autotest` (mecanica de SRV) y con un servidor LDAP/BER falso local para `ldapprobe.py`; falta ejecutar contra el `samba-ad` real en la Fase 2 |
