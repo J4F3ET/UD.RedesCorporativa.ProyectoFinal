@@ -466,25 +466,49 @@ def bloque_dns(ctx, m, zonas):
     if zonas is None:
         reg(f"zona {DOMINIO} (vista interna) generada", "FAIL", f"falta {ZONA}. Generarla con: levantar-sistema.sh preparar.")
         return
-    nombres = [(f"{h}.{DOMINIO}", ip) for h, ip in zonas.items()]
-    inf = vantage(ctx["pref"] + RED[99], {"dns": [(h, dns_ip, h) for h, _ in nombres] + [
+    # "." en la clave de la zona = glue de una delegacion (p. ej. "dc1.ad" -> dc1.ad.reservaviva.lan, el glue de
+    # "ad IN NS dc1.ad.reservaviva.lan." que bind9 delega a samba-ad): esa direccion es correcta pero NO la sirve
+    # bind9 con autoridad (aa=0), la resuelve por recursion hacia el propio DC. Los nombres de servicio (dns, ldap,
+    # ntp, las 4 apps) son etiquetas planas y siguen siendo autoritativos (aa=1) como siempre.
+    nombres = [(f"{h}.{DOMINIO}", ip, "." in h) for h, ip in zonas.items()]
+    inf = vantage(ctx["pref"] + RED[99], {"dns": [(h, dns_ip, h) for h, _, _ in nombres] + [
         ("inexistente", dns_ip, f"no-existe-xyz.{DOMINIO}"), ("externo", dns_ip, "example.com")]},
         ctx["img_py"], SCRIPT)
     if "error" in inf:
         reg("contenedor de sondeo en vlan99", "FAIL", cuerpo_error(inf))
         return
     por = {d["et"]: d for d in inf["dns"]}
-    for h, ip in nombres:
+    for h, ip, delegado in nombres:
         d = por[h]
-        ok = "error" not in d and d["rcode"] == 0 and d["aa"] and d["respuestas"] == [ip]
-        reg(f"{h} -> {ip} (autoritativo, igual que la zona)", "PASS" if ok else "FAIL",
-            f"servidor={dns_ip} respuesta={ {k: v for k, v in d.items() if k not in ('et', 'srv')} }")
+        if delegado:
+            ok = "error" not in d and d["rcode"] == 0 and not d["aa"] and d["respuestas"] == [ip]
+            reg(f"{h} -> {ip} (glue de delegacion: NO autoritativo aqui, se resuelve por recursion hacia samba-ad)",
+                "PASS" if ok else "FAIL", f"servidor={dns_ip} respuesta={ {k: v for k, v in d.items() if k not in ('et', 'srv')} }")
+        else:
+            ok = "error" not in d and d["rcode"] == 0 and d["aa"] and d["respuestas"] == [ip]
+            reg(f"{h} -> {ip} (autoritativo, igual que la zona)", "PASS" if ok else "FAIL",
+                f"servidor={dns_ip} respuesta={ {k: v for k, v in d.items() if k not in ('et', 'srv')} }")
     d = por["inexistente"]
     reg("nombre inexistente -> NXDOMAIN autoritativo (distingue 'nombre desconocido' de 'sin respuesta')",
         "PASS" if "error" not in d and d["rcode"] == 3 and d["aa"] else "FAIL", f"respuesta={d}")
     d = por["externo"]
-    reg("example.com -> REFUSED (sin recursion: la zona interna no sale a Internet)",
-        "PASS" if "error" not in d and d["rcode"] == 5 else "FAIL", f"respuesta={d}")
+    # DESVIACION DEL PLAN (ver servicios/bind9/named.conf, vista "interna"): la delegacion real de ad.reservaviva.lan
+    # obliga a "recursion yes" para TODA la vista "interna" (BIND no permite acotar la recursion a una sola zona
+    # dentro de una vista); antes, con la zona "type forward" del plan original, alcanzaba con recursion solo para
+    # ese subdominio. El efecto practico hoy es que un cliente de red-interna YA NO recibe un REFUSED explicito para
+    # example.com, sino SERVFAIL: bind9 intenta recursionar de verdad y falla porque vlan99_infra no tiene salida a
+    # Internet. La propiedad de seguridad ("nunca se devuelve una IP real de Internet") se sigue cumpliendo, pero
+    # ahora depende de que esta VLAN no tenga salida, no de una politica explicita de bind9.
+    ok = "error" not in d and d["rcode"] in (2, 5) and not d["respuestas"]
+    reg("example.com: sin resolucion real hacia Internet (SERVFAIL o REFUSED, sin respuestas)",
+        "PASS" if ok else "FAIL", f"respuesta={d}")
+    if ok and d.get("rcode") == 2:
+        reg("aviso: ya no es REFUSED sino SERVFAIL (recursion ahora es global para la vista 'interna', no solo "
+            "para ad.reservaviva.lan)", "INFO",
+            f"respuesta={d}\nRiesgo latente para pm/dev: si vlan99_infra alguna vez tuviera salida real a Internet, "
+            "esta vista SI recursionaria de verdad para cualquier cliente de red-interna (BIND no admite acotar la "
+            "recursion por zona dentro de una vista). Valorar una RPZ u otro control explicito si eso preocupa; hoy "
+            "el aislamiento es incidental (falta de ruta), no una politica de bind9.")
     # Cada nombre de la zona debe resolver a la IP real (docker inspect) del contenedor que da ese servicio.
     for h, (cont, d_) in ZONA_ESPERADA.items():
         real = ip_real(ctx, cont, d_) or f"(sin IP en vlan{d_})"
