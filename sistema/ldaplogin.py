@@ -176,7 +176,7 @@ def ejecutar(titulo, fn):
     return todo
 
 
-def esperar_apps(limite=1500):
+def esperar_apps(limite=600):
     fin = time.time() + limite
     while time.time() < fin:
         s1, _ = http("erpnext-backend", HTTP_ERP, MALA, ERP_USER, SITE)
