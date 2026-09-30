@@ -9,6 +9,8 @@ servicios/bind9/zones/*.tmp
 
 # Salidas de levantar-sistema.sh verificar
 sistema/resultados/
+# Cache de bytecode de Python (sistema/*.py)
+sistema/__pycache__/
 # PID del reenviador DNS de Windows del modo intranet (levantar-sistema.ps1 -Intranet)
 sistema/.reenviador-dns.pid
 

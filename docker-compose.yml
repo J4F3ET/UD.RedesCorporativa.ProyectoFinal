@@ -835,6 +835,12 @@ services:
       - ./servicios/ca/certs/ca.crt:/certs/ca.crt:ro
       - ./servicios/ca/certs/ldap.crt:/certs/ldap.crt:ro
       - ./servicios/ca/certs/ldap.key:/certs/ldap.key:ro
+    # Docker pondria aqui su DNS embebido (127.0.0.11), que no sabe nada de ad.reservaviva.lan y reenviaria a un DNS
+    # publico. kinit y samba_dnsupdate, dentro de este mismo contenedor, resuelven por SRV: necesitan un resolver que
+    # sepa llegar a la zona AD. Se usa bind9 (dns-interno): con la delegacion de servicios/bind9/zones/db.reservaviva.lan.tpl
+    # (vista "interna"), bind9 reenvia de vuelta aqui mismo (10.10.99.10) para esa zona.
+    dns:
+      - ${NET_INFRA:-10.10.99}.11
     networks:
       vlan99_infra:
         ipv4_address: ${NET_INFRA:-10.10.99}.10
