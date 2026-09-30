@@ -14,6 +14,11 @@
 # create" no toca la clave de una cuenta que ya existia, asi que sin esto una cuenta creada en un arranque o una
 # provision anterior se queda con una clave vieja en cuanto test.env cambia, y los logins de prueba fallan sin avisar.
 # No se usa --must-change-at-next-login: rompería los logins automaticos de "levantar-sistema.sh verificar".
+#
+# Caducidad: las 4 cuentas de prueba y svc-lectura llevan "samba-tool user setexpiry --noexpiry" (decision de
+# laboratorio, documentada en servicios/samba-ad/README.md; NO se toca la politica del dominio, maxPwdAge). Sin
+# esto, la clave caduca a los 41 dias (la politica por defecto de Samba AD) y un login de prueba en una sesion de
+# clase fallaria por caducidad, no por credenciales.
 set -euo pipefail
 
 BASE_DN="DC=ad,DC=reservaviva,DC=lan"
@@ -73,6 +78,12 @@ crear_usuario() {  # crear_usuario <uid> <OU> <clave> <grupo>
   # una clave que ya no coincide con test.env y el kinit/bind LDAPS de las pruebas falla en silencio.
   intentar_o_existe "clave de ${uid}" samba-tool user setpassword "${uid}" --newpassword="${clave}"
   intentar_o_existe "membresia de ${uid} en ${grupo}" samba-tool group addmembers "${grupo}" "${uid}"
+  # Decision de laboratorio (NO toca la politica del dominio, maxPwdAge): estas cuentas son de demostracion y su
+  # clave caduca a los 41 dias (la politica por defecto de Samba AD); un login de prueba en una sesion de clase
+  # fallaria por caducidad, no por credenciales. Se reconcilia en cada arranque igual que svc-lectura, por si la
+  # cuenta se creo antes de este cambio.
+  samba-tool user setexpiry "${uid}" --noexpiry >/dev/null
+  log "${uid}: clave sin caducidad (decision de laboratorio)."
 }
 
 crear_usuario "vet.prueba"       "Medica"      "${LDAP_PRUEBA_VET_PASSWORD}"       "GG-Medica"

@@ -77,6 +77,12 @@ provision` la primera vez) lleva además un `samba-tool user setpassword` en cad
 clave real con la de `test.env` sin tocar nada más de la cuenta. No se usa `--must-change-at-next-login`: rompería
 los logins automáticos de `levantar-sistema.sh verificar`.
 
+**Decisión de laboratorio: las claves de las 4 cuentas de prueba y de `svc-lectura` no caducan** (`samba-tool user
+setexpiry --noexpiry`, en cada arranque, igual que la reconciliación de arriba). La política del dominio
+(`maxPwdAge`) sigue intacta — no se toca —, pero sin esto la clave de una cuenta caduca a los 41 días (valor por
+defecto de Samba AD) y un login de prueba en una sesión de clase fallaría por caducidad, no por credenciales.
+`Administrator` no lleva `setexpiry`: no es una cuenta de demostración.
+
 | Objeto | OU / grupo |
 |---|---|
 | `OU=Medica`, `OU=Operaciones`, `OU=RRHH`, `OU=Servicios`, `OU=Grupos` | bajo `DC=ad,DC=reservaviva,DC=lan` |
