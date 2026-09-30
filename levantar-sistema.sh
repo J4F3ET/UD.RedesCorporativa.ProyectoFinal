@@ -659,7 +659,11 @@ accion_arrancar() {
   ${INTRANET} && publicar_intranet
   local n; n="$(dc config --services | grep -c .)"
   paso "Levantando los ${n} servicios en modo ${MODO} (la primera vez descarga varios GB de imagenes)"
-  if ! dc up -d; then
+  # --remove-orphans: quien venia de un stack con "openldap" (servicio ya borrado del compose, sustituido por
+  # samba-ad) se encuentra ese contenedor huerfano en cada "arrancar", con el aviso de Docker pero sin fallar.
+  # Este flag SOLO borra contenedores que ya no estan en el compose actual; nunca toca volumenes (ldap_data y
+  # ldap_config de quien venia del stack viejo siguen intactos y hay que borrarlos a mano si ya no hacen falta).
+  if ! dc up -d --remove-orphans; then
     diagnostico
     fallo "docker compose up fallo. Volver a ejecutar el script es seguro: retoma donde quedo."
   fi
