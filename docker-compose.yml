@@ -141,7 +141,7 @@ services:
       # OpenVPMS desde cero y terminó sano; el consumo medido está en docs/resultados-un-host.md.
       CATALINA_OPTS: "-Xms128m -Xmx768m"
       # Variables informativas: OpenVPMS 2.4.0.1 no tiene soporte LDAP y nada en el repo las lee. Son las IP de
-      # openldap, dns-interno y ntp-interno en vlan99_infra, a la que openvpms-app tambien esta conectada.
+      # samba-ad, dns-interno y ntp-interno en vlan99_infra, a la que openvpms-app tambien esta conectada.
       LDAP_HOST: ${NET_INFRA:-10.10.99}.10
       DNS_HOST: ${NET_INFRA:-10.10.99}.11
       NTP_HOST: ${NET_INFRA:-10.10.99}.12
@@ -357,6 +357,10 @@ services:
     depends_on:
       inventree-db:
         condition: service_healthy
+      # Arranque en frio: sin esto, inventree-app podria arrancar y aceptar logins LDAP antes de que samba-ad
+      # termine de sembrar (reconciliar la clave de svc-lectura con test.env), y el primer bind fallaria.
+      samba-ad:
+        condition: service_healthy
     # H22: whitenoise sirve /static desde STATIC_ROOT (volumen inventree_data) y solo lo indexa al arrancar, pero
     # INVENTREE_AUTO_UPDATE solo migra: sin collectstatic el directorio queda vacio y /web falla con "INVE-E1".
     # Se recogen los estaticos (invoke static, idempotente: --clear por defecto) y luego se ejecuta EXACTAMENTE el CMD
@@ -390,21 +394,31 @@ services:
       # Identificador guardado en la base (el superusuario ya existe): conserva el sufijo antiguo a proposito
       # (docs/arquitectura.md, "Identificadores con el sufijo antiguo").
       INVENTREE_ADMIN_EMAIL: ${INVENTREE_ADMIN_EMAIL:-admin@reservaviva.local}
-      # Autenticación LDAPS (django-auth-ldap): busca al usuario con la cuenta svc-lectura solo dentro de
-      # ou=operaciones (RRHH y Médica no entran aquí) y luego hace bind con su propia clave. La cadena TLS se
+      # Autenticación LDAPS contra Samba AD (django-auth-ldap): busca al usuario por sAMAccountName en todo el
+      # dominio y exige que sea miembro DIRECTO de GG-Operaciones (Medica y RRHH no entran aquí; ver
+      # servicios/samba-ad/sembrar.sh para los grupos), luego hace bind con su propia clave. La cadena TLS se
       # verifica con la CA interna (servicios/ca/certs/ca.crt, montada en /certs/ca.crt).
       # Los usuarios LDAP se crean en InvenTree en el primer login, sin permisos: asignárselos como admin.
       INVENTREE_LDAP_ENABLED: "True"
       INVENTREE_LDAP_SERVER_URI: ldaps://ldap.reservaviva.lan:636
       INVENTREE_LDAP_GLOBAL_OPTIONS: '{"OPT_X_TLS_CACERTFILE": "/certs/ca.crt", "OPT_X_TLS_REQUIRE_CERT": "OPT_X_TLS_DEMAND"}'
-      INVENTREE_LDAP_BIND_DN: cn=svc-lectura,ou=servicios,dc=reservaviva,dc=local
+      # CN=svc-lectura,OU=Servicios: sembrar.sh crea la cuenta con --use-username-as-cn, asi que el CN coincide con
+      # el uid (samba-ad-provision "Fase 1", ver commit correspondiente).
+      INVENTREE_LDAP_BIND_DN: CN=svc-lectura,OU=Servicios,DC=ad,DC=reservaviva,DC=lan
       # La misma clave que ERPNext: una sola cuenta svc-lectura y una sola variable (LDAP_SVC_LECTURA_PASSWORD).
       INVENTREE_LDAP_BIND_PASSWORD: ${LDAP_SVC_LECTURA_PASSWORD:?definir LDAP_SVC_LECTURA_PASSWORD en sistema/test.env}
-      INVENTREE_LDAP_SEARCH_BASE_DN: ou=operaciones,dc=reservaviva,dc=local
-      # El valor por defecto de la imagen es "(uid= %(user)s)" (con espacio) y no encuentra a nadie.
-      INVENTREE_LDAP_SEARCH_FILTER_STR: (uid=%(user)s)
-    # ldap.reservaviva.lan lo resuelve ESTA línea, no bind9 (los contenedores usan el DNS de Docker). Apunta a openldap
-    # en vlan99_infra, a la que inventree-app tambien esta conectada; el nombre coincide con el certificado de OpenLDAP (SAN).
+      # Base = raiz del dominio: el filtro de abajo, no la base, es quien restringe por departamento (via memberOf).
+      INVENTREE_LDAP_SEARCH_BASE_DN: DC=ad,DC=reservaviva,DC=lan
+      # AD no expone "uid": el login es por sAMAccountName. objectClass=user descarta grupos y equipos; memberOf
+      # exige la pertenencia DIRECTA a GG-Operaciones (AD no expande anidamiento sin el "matching rule in chain"
+      # 1.2.840.113556.1.4.1941, que aqui no hace falta: sembrar.sh no anida grupos).
+      INVENTREE_LDAP_SEARCH_FILTER_STR: (&(objectClass=user)(sAMAccountName=%(user)s)(memberOf=CN=GG-Operaciones,OU=Grupos,DC=ad,DC=reservaviva,DC=lan))
+      # AUTH_LDAP_USER_ATTR_MAP: el valor por defecto de InvenTree (InvenTree/setting/ldap.py) ya es
+      # {"first_name": "givenName", "last_name": "sn", "email": "mail"}: los mismos atributos que AD usa, no hace
+      # falta fijarlo aqui.
+    # ldap.reservaviva.lan lo resuelve ESTA línea, no bind9 (los contenedores usan el DNS de Docker). Apunta a
+    # samba-ad en vlan99_infra, a la que inventree-app tambien esta conectada; el nombre coincide con el SAN del
+    # certificado (servicios/ca/generar-certificados.sh).
     extra_hosts:
       - "ldap.reservaviva.lan:${NET_INFRA:-10.10.99}.10"
     # Host = localhost:INVENTREE_PORT, el acceso directo (INVENTREE_TRUSTED_ORIGINS): hoy InvenTree acepta cualquier
@@ -636,9 +650,10 @@ services:
     networks:
       - erpnext_internal
 
-  # Job único e idempotente: deja configurado "LDAP Settings" de Frappe (autenticación contra OpenLDAP por
+  # Job único e idempotente: deja configurado "LDAP Settings" de Frappe (autenticación contra Samba AD por
   # LDAPS, verificando la cadena con /certs/ca.crt). Solo escribe en la base de datos: no valida contra
-  # LDAP (ignore_mandatory), así no necesita alcanzar VLAN 99. Los usuarios se buscan solo en ou=rrhh.
+  # LDAP (ignore_mandatory), así no necesita alcanzar VLAN 99. Los usuarios se buscan en todo el dominio, filtrados
+  # por pertenencia directa a GG-RRHH (ver ldap_search_string, mas abajo).
   # Se ejecuta en cada `up -d` (compose vuelve a arrancar los trabajos terminados) y `d.update` sobrescribe los campos: en
   # un sitio ya inicializado basta un arranque para que la URL pase a ldap.reservaviva.lan, sin tocar nada a mano.
   erpnext-ldap-config:
@@ -648,6 +663,11 @@ services:
     depends_on:
       erpnext-create-site:
         condition: service_completed_successfully
+      # No hace falta red hasta samba-ad (este job no valida contra LDAP, ver comentario de arriba), pero la clave
+      # de svc-lectura que escribe aqui solo es correcta una vez que samba-ad termino de sembrar/reconciliar
+      # (Fase 1): esperar a que este healthy evita escribir una clave que la siembra vaya a cambiar justo despues.
+      samba-ad:
+        condition: service_healthy
     entrypoint: ["bash", "-c"]
     command:
       - |
@@ -659,14 +679,20 @@ services:
         d.update({
             "enabled": 1,
             "ldap_server_url": "ldaps://ldap.reservaviva.lan:636",
-            "base_dn": "cn=svc-lectura,ou=servicios,dc=reservaviva,dc=local",
+            # Bind DN del servicio (no la base de busqueda: en Frappe "base_dn" es el DN con el que se autentica la
+            # cuenta de busqueda). CN=svc-lectura,OU=Servicios: sembrar.sh crea la cuenta con --use-username-as-cn.
+            "base_dn": "CN=svc-lectura,OU=Servicios,DC=ad,DC=reservaviva,DC=lan",
             "password": os.environ["LDAP_BIND_PASSWORD"],
-            "ldap_directory_server": "OpenLDAP",
-            "ldap_search_path_user": "ou=rrhh,dc=reservaviva,dc=local",
-            "ldap_search_path_group": "ou=rrhh,dc=reservaviva,dc=local",
-            "ldap_search_string": "(uid={0})",
+            "ldap_directory_server": "Active Directory",
+            # Base de busqueda de usuarios = raiz del dominio: el filtro (memberOf), no la base, restringe a RRHH.
+            "ldap_search_path_user": "DC=ad,DC=reservaviva,DC=lan",
+            "ldap_search_path_group": "OU=Grupos,DC=ad,DC=reservaviva,DC=lan",
+            # AD no expone "uid": el login es por sAMAccountName. memberOf exige pertenencia DIRECTA a GG-RRHH (AD
+            # no expande anidamiento sin el "matching rule in chain" 1.2.840.113556.1.4.1941; sembrar.sh no anida
+            # grupos, asi que no hace falta).
+            "ldap_search_string": "(&(sAMAccountName={0})(memberOf=CN=GG-RRHH,OU=Grupos,DC=ad,DC=reservaviva,DC=lan))",
             "ldap_email_field": "mail",
-            "ldap_username_field": "uid",
+            "ldap_username_field": "sAMAccountName",
             "ldap_first_name_field": "givenName",
             "ldap_last_name_field": "sn",
             "ssl_tls_mode": "Off",
@@ -694,10 +720,12 @@ services:
     depends_on:
       erpnext-create-site:
         condition: service_completed_successfully
-    environment:
-      LDAP_HOST: ${NET_INFRA:-10.10.99}.10
-    # El backend es quien habla LDAPS con OpenLDAP. Se fija el nombre (no lo resuelve bind9) para que coincida con el
-    # certificado. Va directo a openldap por vlan99_infra, a la que el backend también está conectado.
+      # El backend es quien habla LDAPS de verdad (login): sin esto, un primer login LDAP en frio podria llegar
+      # antes de que samba-ad termine de sembrar/reconciliar las claves de test.env (Fase 1).
+      samba-ad:
+        condition: service_healthy
+    # El backend es quien habla LDAPS con Samba AD. Se fija el nombre (no lo resuelve bind9) para que coincida con
+    # el certificado. Va directo a samba-ad por vlan99_infra, a la que el backend también está conectado.
     extra_hosts:
       - "ldap.reservaviva.lan:${NET_INFRA:-10.10.99}.10"
     volumes:
@@ -709,7 +737,7 @@ services:
       erpnext_internal:
       vlan40_rrhh:
         ipv4_address: ${NET_RRHH:-10.10.40}.11
-      # Sin gateway entre VLAN, el backend se conecta también a la red de OpenLDAP para poder hacer LDAPS.
+      # Sin gateway entre VLAN, el backend se conecta también a la red de Samba AD para poder hacer LDAPS.
       vlan99_infra:
         ipv4_address: ${NET_INFRA:-10.10.99}.23
 
@@ -854,7 +882,11 @@ services:
       # AD no permite busquedas anonimas salvo al rootDSE: es la unica consulta que un healthcheck sin credenciales
       # puede hacer. Se consulta por la IP fija, no 127.0.0.1: "bind interfaces only = yes" con "interfaces = eth0"
       # hace que Samba no escuche en loopback.
-      test: ["CMD-SHELL", "ldapsearch -x -H ldap://10.10.99.10 -b '' -s base >/dev/null 2>&1"]
+      # /run/samba-ad-sembrado.ok (entrypoint.sh) es igual de necesaria: LDAP responde antes de que sembrar.sh
+      # reconcilie las claves de test.env (Fase 1), y con solo el ldapsearch, un "healthy" prematuro en un arranque
+      # en frio dejaria a InvenTree/ERPNext (depends_on samba-ad: service_healthy) haciendo su primer bind LDAPS
+      # con una clave todavia vieja.
+      test: ["CMD-SHELL", "test -f /run/samba-ad-sembrado.ok && ldapsearch -x -H ldap://10.10.99.10 -b '' -s base >/dev/null 2>&1"]
       interval: 15s
       timeout: 10s
       retries: 20

@@ -20,6 +20,14 @@ KRB5_PRIVADO="${PRIVATE_DIR}/krb5.conf"
 TLS_DIR="${PRIVATE_DIR}/tls"
 CERTS_ORIGEN="/certs"      # montaje de solo lectura: ca.crt, ldap.crt y ldap.key (servicios/ca/certs)
 SMB_CONF="/etc/samba/smb.conf"
+# Marca de "siembra completa de ESTE arranque" (no persiste en un volumen a proposito: se borra y se vuelve a crear
+# en cada arranque del contenedor). La lee el healthcheck de compose (docker-compose.yml, servicio samba-ad): sin
+# ella, un "docker compose up" en frio podria marcar samba-ad "healthy" en cuanto el LDAP anonimo del rootDSE
+# responde, que pasa ANTES de que sembrar.sh reconcilie las claves de sistema/test.env (Fase 1); un servicio que
+# dependiera de "samba-ad: condition: service_healthy" (InvenTree, ERPNext) podria entonces hacer su primer bind
+# LDAPS con una clave todavia vieja.
+MARCA_SEMBRADO="/run/samba-ad-sembrado.ok"
+rm -f "${MARCA_SEMBRADO}"
 
 log() { printf '[samba-ad] %s\n' "$*"; }
 
@@ -116,7 +124,12 @@ trap 'log "Deteniendo samba..."; kill -TERM "${SAMBA_PID}" 2>/dev/null; wait "${
 
 log "Sembrando OUs, grupos y usuarios de prueba (idempotente)..."
 intento=0
-until /usr/local/bin/sembrar.sh; do
+sembrado_ok=0
+while true; do
+  if /usr/local/bin/sembrar.sh; then
+    sembrado_ok=1
+    break
+  fi
   # Si samba ya ha muerto, seguir reintentando la siembra no tiene sentido (samba-tool puede seguir "funcionando"
   # porque escribe directo en sam.ldb, sin pasar por el proceso samba): se para aqui con un error claro y se deja
   # que el "wait" de abajo propague el codigo de salida real de samba, en vez de enmascararlo con reintentos.
@@ -132,5 +145,10 @@ until /usr/local/bin/sembrar.sh; do
   log "La siembra fallo (intento ${intento}/5): reintentando en 5s..."
   sleep 5
 done
+
+if [ "${sembrado_ok}" -eq 1 ]; then
+  touch "${MARCA_SEMBRADO}"
+  log "Siembra completa (marca ${MARCA_SEMBRADO}): el healthcheck ya puede dar 'healthy'."
+fi
 
 wait "${SAMBA_PID}"
