@@ -20,8 +20,9 @@ hiciera falta partir de un OpenLDAP con datos reales) están en `docs/directorio
 
 ## `entrypoint.sh`
 
-Provisiona el dominio (`samba-tool domain provision --dns-backend=SAMBA_INTERNAL --dns-forwarder=10.10.99.11
---use-rfc2307 ...`) **solo la primera vez**, y solo si `private/` (en el volumen `samba_data`) está realmente vacía.
+Provisiona el dominio (`samba-tool domain provision --dns-backend=SAMBA_INTERNAL
+--option="dns forwarder=10.10.99.11" --use-rfc2307 ...`) **solo la primera vez**, y solo si `private/` (en el
+volumen `samba_data`) está realmente vacía.
 Con datos ya existentes no reprovisiona: solo repite los pasos idempotentes y arranca `samba -F`.
 
 **Trampa (real, ya la sufrimos):** `samba-tool domain provision` no es reanudable. Si el contenedor se reinicia a
@@ -34,8 +35,9 @@ una marca propia, `private/.provisionado-reserva-viva`, que solo se escribe cuan
 reprovisionar sobre restos o dejar que `samba` arranque con credenciales rotas; la solución es
 `./levantar-sistema.sh borrar-directorio` (vacía `samba_data` y `samba_etc`) y dejar que reprovisione desde cero.
 
-También por eso se pasa `--dns-forwarder` explícito a `domain provision`: sin él, autodetecta el `resolv.conf` del
-propio contenedor (el DNS interno de Docker, `127.0.0.11`) y lo escribe en `smb.conf`; si luego el entrypoint
+También por eso se pasa `--option="dns forwarder=..."` explícito a `domain provision` (no existe un flag dedicado
+`--dns-forwarder`, comprobado con `samba-tool domain provision --help`): sin fijarlo, autodetecta el `resolv.conf`
+del propio contenedor (el DNS interno de Docker, `127.0.0.11`) y lo escribe en `smb.conf`; si luego el entrypoint
 "asegurara" la línea correcta con un simple `grep`, no vería el valor distinto ya presente y añadiría una SEGUNDA
 línea `dns forwarder` duplicada (Samba se queda con la última, que sería la incorrecta).
 

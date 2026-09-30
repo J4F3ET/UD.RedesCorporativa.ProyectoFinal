@@ -44,15 +44,17 @@ else
   log "private/ vacia: provisionando el dominio ${DOMINIO} (realm ${REALM})..."
   # El paquete deja un smb.conf de ejemplo en el volumen samba_etc; "domain provision" exige que no exista.
   rm -f "${SMB_CONF}"
-  # --dns-forwarder explicito: sin el, "domain provision" autodetecta el resolv.conf del CONTENEDOR (el DNS interno
-  # de Docker, 127.0.0.11) y lo escribe en smb.conf; el "asegurar_directiva" de mas abajo habria anadido una SEGUNDA
-  # linea "dns forwarder" con el valor correcto en vez de sustituir la incorrecta (Samba se queda con la ultima).
+  # --option="dns forwarder=..." explicito: "domain provision" no tiene un flag dedicado (no existe --dns-forwarder;
+  # comprobado con "samba-tool domain provision --help"), y sin fijarlo autodetecta el resolv.conf del CONTENEDOR (el
+  # DNS interno de Docker, 127.0.0.11) y lo escribe en smb.conf; el "asegurar_directiva" de mas abajo habria anadido
+  # una SEGUNDA linea "dns forwarder" con el valor correcto en vez de sustituir la incorrecta (Samba se queda con la
+  # ultima que encuentra).
   samba-tool domain provision \
     --server-role=dc \
     --realm="${REALM}" \
     --domain="${DOMINIO}" \
     --dns-backend=SAMBA_INTERNAL \
-    --dns-forwarder="${DNS_FORWARDER}" \
+    --option="dns forwarder=${DNS_FORWARDER}" \
     --use-rfc2307 \
     --host-ip="${HOST_IP}" \
     --adminpass="${SAMBA_ADMIN_PASSWORD}"
