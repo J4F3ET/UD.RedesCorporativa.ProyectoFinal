@@ -11,7 +11,7 @@ $TTL 300
                 300 )      ; negative TTL
         IN NS   dns.reservaviva.lan.
 
-; --- Infraestructura (vlan99): openldap, dns-interno (bind9), ntp-interno ---
+; --- Infraestructura (vlan99): samba-ad, dns-interno (bind9), ntp-interno ---
 dns         IN A ${IP_DNS}
 ldap        IN A ${IP_LDAP}
 ntp         IN A ${IP_NTP}

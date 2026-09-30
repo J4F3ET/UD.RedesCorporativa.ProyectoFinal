@@ -4,7 +4,7 @@
 ; DNS (INTRANET_IP: 127.0.0.1 en modo local, la IP de la LAN en modo intranet) y SERIAL por la fecha.
 ;
 ; Solo se anuncian las cuatro aplicaciones (las sirve el proxy web en el puerto 80 de esa IP) y el propio DNS.
-; ldap y ntp NO estan en esta vista a proposito: OpenLDAP y NTP se publican solo en 127.0.0.1 y en puertos desplazados
+; ldap y ntp NO estan en esta vista a proposito: Samba AD y NTP se publican solo en 127.0.0.1 y en puertos desplazados
 ; (1389/1636/1123), asi que un nombre que apuntara a la IP de la LAN llevaria a un puerto cerrado. Un cliente de la LAN
 ; recibe NXDOMAIN para ellos, que es lo honesto.
 $TTL 300
