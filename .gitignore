@@ -6,8 +6,6 @@ servicios/bind9/zones/db.reservaviva.lan
 servicios/bind9/zones/db.reservaviva.lan.vista-lan
 servicios/bind9/zones/acl-interna.conf
 servicios/bind9/zones/*.tmp
-# LDIF del primer arranque de OpenLDAP, con los hashes de las claves de sistema/test.env (levantar-sistema.sh preparar)
-servicios/openldap/generado/
 
 # Salidas de levantar-sistema.sh verificar
 sistema/resultados/
