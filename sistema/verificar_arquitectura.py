@@ -518,7 +518,7 @@ def bloque_dns(ctx, m, zonas):
         else:
             reg(nombre, "PASS" if zonas[h] == real else "FAIL", f"la zona dice {zonas[h]}, el contenedor real esta en {real}")
     imprime("  -- los clientes solo de departamento NO deben alcanzar el DNS interno (UDP; control = la consulta de arriba)")
-    ctl = all(por[h]["rcode"] == 0 for h, _ in nombres if "error" not in por[h]) and "error" not in por[nombres[0][0]]
+    ctl = all(por[h]["rcode"] == 0 for h, _, _ in nombres if "error" not in por[h]) and "error" not in por[nombres[0][0]]
     for d_, (app, _) in APPS.items():
         r = m["dept"][d_]
         x = (r.get("dns") or [{}])[0]
