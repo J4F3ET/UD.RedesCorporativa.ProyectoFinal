@@ -1,42 +1,63 @@
 #!/usr/bin/env bash
 # entrypoint.sh - arranca el contenedor samba-ad (Samba AD DC).
 #
-# Provisiona el dominio SOLO la primera vez, cuando el volumen samba_data todavia no tiene sam.ldb (compose lo monta
-# en /var/lib/samba). Con datos ya existentes, no se reprovisiona: solo se repiten los pasos idempotentes (copiar el
-# certificado con los permisos que Samba exige, asegurar smb.conf y /etc/hosts) y se arranca "samba -F". Detalle del
-# diseno: docs/directorio-activo.md (o, mientras se escribe, el plan de migracion en C:\Users\jafet\.claude\plans\).
+# Provisiona el dominio SOLO la primera vez, con el volumen samba_data (montado en /var/lib/samba) realmente vacio.
+# Con datos ya existentes, no se reprovisiona: solo se repiten los pasos idempotentes (copiar el certificado con los
+# permisos que Samba exige, asegurar smb.conf y /etc/hosts) y se arranca "samba -F". Detalle del diseno:
+# docs/directorio-activo.md (o, mientras se escribe, el plan de migracion en C:\Users\jafet\.claude\plans\).
 set -euo pipefail
 
 REALM="AD.RESERVAVIVA.LAN"
 DOMINIO="RESERVAVIVA"
 HOST_IP="10.10.99.10"      # la misma IP que tenia openldap en vlan99_infra: el DC se registra a si mismo en su DNS
                             # con la IP que ve aqui, nunca con 127.0.0.1 (si no, los clientes no lo alcanzarian).
+DNS_FORWARDER="10.10.99.11"  # bind9 (dns-interno): resuelve todo lo que no sea la zona AD (SAMBA_INTERNAL).
 FQDN="dc1.ad.reservaviva.lan"
-SAM_LDB="/var/lib/samba/private/sam.ldb"
-KRB5_PRIVADO="/var/lib/samba/private/krb5.conf"
-TLS_DIR="/var/lib/samba/private/tls"
+PRIVATE_DIR="/var/lib/samba/private"
+SAM_LDB="${PRIVATE_DIR}/sam.ldb"
+MARCA_PROVISION="${PRIVATE_DIR}/.provisionado-reserva-viva"
+KRB5_PRIVADO="${PRIVATE_DIR}/krb5.conf"
+TLS_DIR="${PRIVATE_DIR}/tls"
 CERTS_ORIGEN="/certs"      # montaje de solo lectura: ca.crt, ldap.crt y ldap.key (servicios/ca/certs)
 SMB_CONF="/etc/samba/smb.conf"
 
 log() { printf '[samba-ad] %s\n' "$*"; }
 
-# --- Provision (solo la primera vez) --------------------------------------------------------------------------------
-if [ ! -f "${SAM_LDB}" ]; then
+# --- Provision (solo la primera vez, y solo sobre una carpeta private/ realmente vacia) -----------------------------
+# "samba-tool domain provision" no es reanudable: si esta orden se interrumpe a medias (p. ej. el motor de Docker se
+# reinicia durante el arranque), puede dejar ALGUNOS ficheros de private/ escritos (sam.ldb entre ellos) pero otros
+# no, o inconsistentes entre si (comprobado: un secrets.ldb y un sam.ldb con 9 minutos de diferencia entre sus
+# timestamps, de dos intentos distintos, causaban "Failed to obtain server credentials... NT_STATUS_CANT_ACCESS_
+# DOMAIN_INFO" al arrancar samba). Comprobar solo "existe sam.ldb" no detecta ese caso: aqui se usa una marca propia
+# que SOLO se escribe cuando "domain provision" termina con exito, y si private/ tiene datos pero falta la marca, se
+# para con un error claro en vez de reprovisionar sobre restos o de arrancar samba con credenciales rotas.
+if [ -f "${MARCA_PROVISION}" ]; then
+  log "Dominio ya provisionado (marca ${MARCA_PROVISION}): no se reprovisiona."
+elif [ -d "${PRIVATE_DIR}" ] && [ -n "$(find "${PRIVATE_DIR}" -mindepth 1 -maxdepth 1 2>/dev/null)" ]; then
+  log "ERROR: ${PRIVATE_DIR} tiene datos pero falta la marca de provision completa (${MARCA_PROVISION})."
+  log "La provision anterior quedo a medias (probablemente el contenedor se reinicio durante 'domain provision')."
+  log "No se puede reanudar una provision interrumpida. Solucion: borrar los volumenes del directorio y reprovisionar"
+  log "desde cero: ./levantar-sistema.sh borrar-directorio (borra SOLO samba_data y samba_etc)."
+  exit 1
+else
   : "${SAMBA_ADMIN_PASSWORD:?Falta SAMBA_ADMIN_PASSWORD (definida en sistema/test.env y pasada por compose)}"
-  log "No existe ${SAM_LDB}: provisionando el dominio ${DOMINIO} (realm ${REALM})..."
+  log "private/ vacia: provisionando el dominio ${DOMINIO} (realm ${REALM})..."
   # El paquete deja un smb.conf de ejemplo en el volumen samba_etc; "domain provision" exige que no exista.
   rm -f "${SMB_CONF}"
+  # --dns-forwarder explicito: sin el, "domain provision" autodetecta el resolv.conf del CONTENEDOR (el DNS interno
+  # de Docker, 127.0.0.11) y lo escribe en smb.conf; el "asegurar_directiva" de mas abajo habria anadido una SEGUNDA
+  # linea "dns forwarder" con el valor correcto en vez de sustituir la incorrecta (Samba se queda con la ultima).
   samba-tool domain provision \
     --server-role=dc \
     --realm="${REALM}" \
     --domain="${DOMINIO}" \
     --dns-backend=SAMBA_INTERNAL \
+    --dns-forwarder="${DNS_FORWARDER}" \
     --use-rfc2307 \
     --host-ip="${HOST_IP}" \
     --adminpass="${SAMBA_ADMIN_PASSWORD}"
+  touch "${MARCA_PROVISION}"
   log "Dominio provisionado."
-else
-  log "${SAM_LDB} ya existe: no se reprovisiona (datos conservados)."
 fi
 
 # private/krb5.conf esta en el volumen samba_data y persiste; /etc/krb5.conf es del contenedor y NO persiste (se
@@ -69,8 +90,8 @@ chmod 600 "${TLS_DIR}/ca.crt" "${TLS_DIR}/ldap.crt" "${TLS_DIR}/ldap.key"
 asegurar_directiva() {  # asegurar_directiva "clave = valor"
   grep -qF "$1" "${SMB_CONF}" || sed -i "/^\[global\]/a\\	$1" "${SMB_CONF}"
 }
-# SAMBA_INTERNAL solo resuelve la zona AD; el resto (reservaviva.lan) lo da bind9 (dns-interno, 10.10.99.11).
-asegurar_directiva "dns forwarder = 10.10.99.11"
+# "dns forwarder" NO se asegura aqui: ya la fija "domain provision" con --dns-forwarder (ver arriba). Repetirla aqui
+# con un simple grep -qF no detectaria un valor previo DISTINTO y anadiria una segunda linea duplicada.
 asegurar_directiva "tls enabled = yes"
 # Rutas relativas a la carpeta "private" (aqui: /var/lib/samba/private/tls/...).
 asegurar_directiva "tls keyfile = tls/ldap.key"
@@ -84,14 +105,23 @@ asegurar_directiva "ldap server require strong auth = yes"
 
 # --- Arranque ----------------------------------------------------------------------------------------------------
 # samba en segundo plano, como hijo de este script (que es el PID 1 del contenedor): asi se puede sembrar despues y
-# reenviar la senal de parada de Docker al proceso real.
-samba -F --no-process-group &
+# reenviar la senal de parada de Docker al proceso real. --debug-stdout: sin el, samba escribe en
+# /var/log/samba/log.samba y "docker logs" solo muestra la siembra; el fallo real queda enterrado y hay que entrar
+# al contenedor a leerlo a mano (asi se diagnostico el bug de las credenciales, ver arriba).
+samba -F --no-process-group --debug-stdout &
 SAMBA_PID=$!
 trap 'log "Deteniendo samba..."; kill -TERM "${SAMBA_PID}" 2>/dev/null; wait "${SAMBA_PID}"' TERM INT
 
 log "Sembrando OUs, grupos y usuarios de prueba (idempotente)..."
 intento=0
 until /usr/local/bin/sembrar.sh; do
+  # Si samba ya ha muerto, seguir reintentando la siembra no tiene sentido (samba-tool puede seguir "funcionando"
+  # porque escribe directo en sam.ldb, sin pasar por el proceso samba): se para aqui con un error claro y se deja
+  # que el "wait" de abajo propague el codigo de salida real de samba, en vez de enmascararlo con reintentos.
+  if ! kill -0 "${SAMBA_PID}" 2>/dev/null; then
+    log "ERROR: samba ya no esta en marcha; no se reintenta la siembra. Revisa el log de arriba (--debug-stdout)."
+    break
+  fi
   intento=$((intento + 1))
   if [ "${intento}" -ge 5 ]; then
     log "AVISO: la siembra no se completo tras ${intento} intentos; se reintentara en el proximo arranque del contenedor."

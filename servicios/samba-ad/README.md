@@ -20,9 +20,24 @@ hiciera falta partir de un OpenLDAP con datos reales) están en `docs/directorio
 
 ## `entrypoint.sh`
 
-Provisiona el dominio (`samba-tool domain provision --dns-backend=SAMBA_INTERNAL --use-rfc2307 ...`) **solo la
-primera vez**, cuando el volumen `samba_data` (montado en `/var/lib/samba`) todavía no tiene `sam.ldb`. Con datos ya
-existentes no reprovisiona: solo repite los pasos idempotentes y arranca `samba -F`.
+Provisiona el dominio (`samba-tool domain provision --dns-backend=SAMBA_INTERNAL --dns-forwarder=10.10.99.11
+--use-rfc2307 ...`) **solo la primera vez**, y solo si `private/` (en el volumen `samba_data`) está realmente vacía.
+Con datos ya existentes no reprovisiona: solo repite los pasos idempotentes y arranca `samba -F`.
+
+**Trampa (real, ya la sufrimos):** `samba-tool domain provision` no es reanudable. Si el contenedor se reinicia a
+medio provisionar (nos pasó con el motor de Docker inestable por memoria), puede quedar `sam.ldb` escrito pero
+`secrets.ldb` de un intento distinto (o al revés), y `samba -F` muere en bucle con `Failed to obtain server
+credentials... NT_STATUS_CANT_ACCESS_DOMAIN_INFO` — mientras `sembrar.sh` sigue "funcionando" porque `samba-tool`
+escribe directo en `sam.ldb`, sin pasar por el proceso `samba`. Por eso NO se comprueba solo "existe sam.ldb": se usa
+una marca propia, `private/.provisionado-reserva-viva`, que solo se escribe cuando `domain provision` termina con
+éxito. Si `private/` tiene datos pero falta la marca, el entrypoint **para con un error explícito** en vez de
+reprovisionar sobre restos o dejar que `samba` arranque con credenciales rotas; la solución es
+`./levantar-sistema.sh borrar-directorio` (vacía `samba_data` y `samba_etc`) y dejar que reprovisione desde cero.
+
+También por eso se pasa `--dns-forwarder` explícito a `domain provision`: sin él, autodetecta el `resolv.conf` del
+propio contenedor (el DNS interno de Docker, `127.0.0.11`) y lo escribe en `smb.conf`; si luego el entrypoint
+"asegurara" la línea correcta con un simple `grep`, no vería el valor distinto ya presente y añadiría una SEGUNDA
+línea `dns forwarder` duplicada (Samba se queda con la última, que sería la incorrecta).
 
 En cada arranque (haya provisionado o no):
 - copia `private/krb5.conf` a `/etc/krb5.conf` (lo primero no persiste entre arranques del contenedor, lo segundo sí,
@@ -34,14 +49,17 @@ En cada arranque (haya provisionado o no):
   `generar-certificados.sh`, o los de otro dueño); por eso se copia en vez de usarse directamente. Si
   `generar-certificados.sh` regenera el certificado, hace falta recrear este contenedor para que lo recoja
   (`levantar-sistema.sh` ya lo hace, ver `recrear_ldap_si_cert_nuevo`);
-- asegura en `smb.conf` (persiste en el volumen `samba_etc`, montado en `/etc/samba`): `dns forwarder = 10.10.99.11`
-  (bind9/`dns-interno`; `SAMBA_INTERNAL` solo resuelve la zona AD), `tls enabled = yes` y las rutas del certificado,
-  `interfaces = eth0` y `bind interfaces only = yes`, y `ldap server require strong auth = yes` (valor por defecto de
-  Samba: el bind simple solo se acepta por TLS; InvenTree y ERPNext ya usan LDAPS, así que se deja así en vez de
-  bajar la seguridad).
+- asegura en `smb.conf` (persiste en el volumen `samba_etc`, montado en `/etc/samba`): `tls enabled = yes` y las
+  rutas del certificado, `interfaces = eth0` y `bind interfaces only = yes`, y `ldap server require strong auth =
+  yes` (valor por defecto de Samba: el bind simple solo se acepta por TLS; InvenTree y ERPNext ya usan LDAPS, así que
+  se deja así en vez de bajar la seguridad). `dns forwarder` no se asegura aquí: ya la fija `domain provision` (ver
+  arriba), y repetirla con el mismo patrón `grep`/`sed` volvería a exponerse a la duplicidad.
 
-Arranca `samba -F` en segundo plano, siembra (ver abajo) y espera a ese proceso, reenviándole la señal de parada de
-Docker.
+Arranca `samba -F --debug-stdout` en segundo plano (el log va a `docker logs`, no a `/var/log/samba/log.samba`:
+así se vio el error real de credenciales), siembra (ver abajo) y espera a ese proceso, reenviándole la señal de
+parada de Docker. Si `samba` muere mientras se está sembrando, el entrypoint no sigue reintentando la siembra: para
+y deja que el código de salida real de `samba` llegue al contenedor (para que `docker ps`/`docker inspect` lo
+reflejen con claridad en vez de quedarse "sembrando" indefinidamente sobre un proceso ya muerto).
 
 ## `sembrar.sh`
 
