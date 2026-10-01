@@ -32,7 +32,7 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 
 **Primera entrada.** En http://localhost:18080/openvpms, con el usuario `admin` y la clave de `OPENVPMS_ADMIN_PASSWORD`. El `entrypoint.sh` la fija en cada inicialización con `toolbox user --setpassword admin` y rechaza arrancar si no cumple la política de OpenVPMS: mínimo 8 caracteres, con mayúscula, minúscula, número y un carácter especial.
 
-**LDAP: no.** OpenVPMS 2.4.0.1 no trae soporte LDAP: sus usuarios viven en la base MySQL. Ningún usuario LDAP de prueba entra aquí, tampoco `vet.prueba`, aunque exista en `ou=medica`. La evaluación completa está en [ldap.md](ldap.md#6-openvpms-2401-sin-soporte-ldap).
+**LDAP: no.** OpenVPMS 2.4.0.1 no trae soporte LDAP: sus usuarios viven en la base MySQL. Ningún usuario LDAP de prueba entra aquí, tampoco `vet.prueba`, aunque exista en `OU=Medica` y en `GG-Medica`. La evaluación completa está en [directorio-activo.md](directorio-activo.md#openvpms-2401-sin-soporte-ldap).
 
 **Particularidades.**
 
@@ -56,7 +56,7 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 
 **Primera entrada.** En http://localhost:18082 o http://pretix.reservaviva.lan (el panel de administración es `/control/`), con el correo `admin@reservaviva.local` (`PRETIX_ADMIN_EMAIL`) y la clave de `PRETIX_ADMIN_PASSWORD`.
 
-**LDAP: no.** Pretix no trae backend LDAP. El único plugin disponible es de terceros y no verifica el certificado del servidor, así que no se integró. Detalle en [ldap.md](ldap.md#7-pretix-solo-con-un-plugin-de-terceros-que-no-verifica-tls). El usuario `taquilla.prueba` existe en el directorio, pero no sirve para entrar en Pretix.
+**LDAP: no.** Pretix no trae backend LDAP. El único plugin disponible es de terceros y no verifica el certificado del servidor, así que no se integró. Detalle en [directorio-activo.md](directorio-activo.md#pretix-solo-con-un-plugin-de-terceros-que-no-verifica-tls). El usuario `taquilla.prueba` existe en el directorio, pero no sirve para entrar en Pretix.
 
 **Particularidades.**
 
@@ -73,17 +73,17 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 
 | Contenedor | Imagen | Función |
 |---|---|---|
-| `inventree-app` | `inventree/inventree:1.5.5` | Web y API (gunicorn), puerto 8000 publicado en 18083; por nombre, `inventree.reservaviva.lan`. Habla LDAPS con OpenLDAP |
+| `inventree-app` | `inventree/inventree:1.5.5` | Web y API (gunicorn), puerto 8000 publicado en 18083; por nombre, `inventree.reservaviva.lan`. Habla LDAPS con Samba AD |
 | `inventree-worker` | la misma | Tareas en segundo plano: correo, importaciones, informes |
 | `inventree-db` | `postgres:15.19` | Base de datos |
 
 **Primera entrada.** En http://localhost:18083 o http://inventree.reservaviva.lan, con el usuario `admin` y la clave de `INVENTREE_ADMIN_PASSWORD`. InvenTree crea este superusuario al arrancar si no existe. El nombre sale de `INVENTREE_ADMIN_USER`, que `test.env` no define, así que se usa el valor por defecto del compose, `admin`.
 
-**LDAP: sí.** Autentica contra OpenLDAP por LDAPS, verificando la cadena con la CA interna, y busca a los usuarios solo en `ou=operaciones`. Detalle y pruebas en [ldap.md](ldap.md).
+**LDAP: sí.** Autentica contra Samba AD por LDAPS, verificando la cadena con la CA interna, por `sAMAccountName`, y solo entra quien sea miembro directo del grupo `GG-Operaciones`. `inventree-app` espera a que `samba-ad` esté sano. Detalle y pruebas en [directorio-activo.md](directorio-activo.md#4-cómo-autentican-inventree-y-erpnext).
 
-- Probado: `logistica.prueba` entra y `rrhh.prueba` es rechazado (otra OU).
-- `taquilla.prueba` también está en `ou=operaciones`, así que por configuración también entraría. **No verificado.**
-- Las claves de estos usuarios están en `sistema/test.env` (`LDAP_PRUEBA_<UID>_PASSWORD`; tabla en [`servicios/openldap/README.md`](../servicios/openldap/README.md)).
+- Pertenecen a `GG-Operaciones` `logistica.prueba` y `taquilla.prueba`. `logistica.prueba` entra, y `vet.prueba` (`GG-Medica`) es rechazado: es la prueba negativa de `verificar`.
+- `taquilla.prueba` también está en `GG-Operaciones`, así que por configuración también entraría. **No verificado.**
+- Las claves de estos usuarios están en `sistema/test.env` (`LDAP_PRUEBA_<UID>_PASSWORD`; tabla en [directorio-activo.md](directorio-activo.md#3-objetos-del-directorio)).
 - Un usuario LDAP se crea en InvenTree en su primer login, **sin permisos**: el administrador tiene que asignárselos.
 
 **Particularidades.** `inventree-worker` espera a que `inventree-app` esté `healthy` para no competir con él por las migraciones. `INVENTREE_AUTO_UPDATE` aplica las migraciones al arrancar.
@@ -102,7 +102,7 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 | Contenedor | Función |
 |---|---|
 | `erpnext-hr` | nginx, puerto 8080 publicado en 18081. Único punto de entrada web; el proxy le llega por su pata en `vlan99_infra` para `rrhh.reservaviva.lan` |
-| `erpnext-backend` | Aplicación Frappe. Es quien habla LDAPS con OpenLDAP |
+| `erpnext-backend` | Aplicación Frappe. Es quien habla LDAPS con Samba AD |
 | `erpnext-websocket` | Tiempo real (socket.io) |
 | `erpnext-scheduler`, `erpnext-queue-short`, `erpnext-queue-long` | Tareas programadas y colas de trabajo |
 | `erpnext-db` (`mariadb:10.6.28`), `erpnext-redis-cache` y `erpnext-redis-queue` (`redis:7.4.11`) | Base de datos y Redis, en una red privada |
@@ -110,12 +110,13 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 
 **Primera entrada.** En http://localhost:18081 o http://rrhh.reservaviva.lan, con el usuario `Administrator` y la clave de `ERPNEXT_ADMIN_PASSWORD`. El sitio de Frappe se llama `rrhh.reservaviva.local` (identificador interno que conserva el sufijo antiguo) y nginx lo elige por la cabecera `FRAPPE_SITE_NAME_HEADER`, no por el nombre de host, así que funciona con cualquiera. El tiempo real (socket.io) pasa también por el proxy (WebSocket).
 
-**LDAP: sí.** `erpnext-ldap-config` deja configurado "LDAP Settings" de Frappe: LDAPS con la CA interna y búsqueda solo en `ou=rrhh`. Detalle y pruebas en [ldap.md](ldap.md).
+**LDAP: sí.** `erpnext-ldap-config` deja configurado "LDAP Settings" de Frappe como "Active Directory": LDAPS con la CA interna, login por `sAMAccountName` y acceso solo para los miembros directos de `GG-RRHH`. Tanto `erpnext-ldap-config` como `erpnext-backend` esperan a que `samba-ad` esté sano. Detalle y pruebas en [directorio-activo.md](directorio-activo.md#4-cómo-autentican-inventree-y-erpnext).
 
-- Probado por la API: `rrhh.prueba` entra, y `logistica.prueba` y `vet.prueba` son rechazados.
-- La clave de `rrhh.prueba` es `LDAP_PRUEBA_RRHH_PASSWORD` en `sistema/test.env` ([`servicios/openldap/README.md`](../servicios/openldap/README.md)).
+- Probado por la API: `rrhh.prueba` (`GG-RRHH`) entra, y `vet.prueba` (`GG-Medica`) es rechazado.
+- La clave de `rrhh.prueba` es `LDAP_PRUEBA_RRHH_PASSWORD` en `sistema/test.env`.
 - El botón "Login with LDAP" del formulario `/login` no se ha probado en el navegador.
-- El usuario se crea en el primer login y sin permisos útiles: falta asignarle un empleado y sus roles de HR.
+- El usuario se crea en el primer login y sin permisos útiles: falta asignarle un empleado y sus roles de HR. Esto lo hace posible `givenName`/`sn` en la cuenta de AD: `first_name` es obligatorio en el doctype User de Frappe.
+- La base puede conservar un User huérfano `rrhh.prueba@reservaviva.local` del stack anterior (con OpenLDAP): es inofensivo y su limpieza manual es opcional ([directorio-activo.md](directorio-activo.md#quien-venía-del-stack-viejo-limpiar-los-restos)).
 
 **Particularidades.**
 
@@ -129,9 +130,9 @@ Las cuatro aplicaciones comparten cuatro servicios en la VLAN 99. Cada aplicaci�
 
 | Servicio | Contenedor | Carpeta | Uso |
 |---|---|---|---|
-| OpenLDAP (`osixia/openldap:1.5.0`) | `openldap` | [`servicios/openldap/`](../servicios/openldap/) | Directorio `dc=reservaviva,dc=local`, una OU por departamento |
+| Samba AD DC (imagen propia sobre `debian:trixie`, Samba 4.22) | `samba-ad` | [`servicios/samba-ad/`](../servicios/samba-ad/README.md) | Directorio `DC=ad,DC=reservaviva,DC=lan` (realm `AD.RESERVAVIVA.LAN`): LDAPS, Kerberos y DNS de su zona, con una OU y un grupo `GG-*` por departamento |
 | bind9 9.18 | `dns-interno` | [`servicios/bind9/`](../servicios/bind9/) | Zona autoritativa `reservaviva.lan`, con una vista para los contenedores y otra para el anfitrión y la LAN |
 | NTP (`cturra/ntp`) | `ntp-interno` | [`servicios/ntp/`](../servicios/ntp/) | Hora de referencia local (stratum 10) |
 | nginx 1.30 | `proxy-web` | [`servicios/proxy/`](../servicios/proxy/) | Acceso por nombre a las cuatro aplicaciones (puerto 80) |
 
-Sus puertos en el equipo están en [arquitectura.md](arquitectura.md#7-puertos-publicados). Los usuarios de prueba del directorio y en qué aplicación entra cada uno, en [ldap.md](ldap.md#2-el-directorio).
+Sus puertos en el equipo están en [arquitectura.md](arquitectura.md#7-puertos-publicados). Los usuarios de prueba del directorio y en qué aplicación entra cada uno, en [directorio-activo.md](directorio-activo.md#3-objetos-del-directorio).
