@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Revalidacion de la autenticacion LDAPS de ERPNext e InvenTree en el arnes de un host, contra Samba AD DC.
 
-Adaptado de OpenLDAP a Samba AD DC (rama feat/samba-ad-dc). Pendiente de verificar contra el arnes real:
-se ejecuta por primera vez en la Fase 2 (una vez dev tenga `samba-ad` arriba con la siembra completa).
+Adaptado de OpenLDAP a Samba AD DC (rama feat/samba-ad-dc) y verificado contra el arnes real el 30/09/2026
+(cifras en docs/resultados-un-host.md, seccion "Migracion a Samba AD DC").
 Endpoints, credenciales y codigos de respuesta HTTP heredados de la version OpenLDAP salieron de
 docs/prueba-smoke-test-resultados.md §9.3 (retirado; `git show 95e0da4:docs/prueba-smoke-test-resultados.md`).
 
@@ -17,7 +17,7 @@ Casos:
   1. Login con usuario LDAP correcto        -> 200 (ERPNext) / 200 + token (InvenTree)
   2. Contrasena erronea                     -> rechazo (401/403; ERPNext devuelve 417)
   3. ldapsearch por LDAPS con la CA         -> OK con verificacion completa (nombre ldap.reservaviva.lan);
-                                               y FALLA con una CA ajena por "peer cert untrusted"
+                                               y FALLA con una CA ajena por verificacion del certificado ("unable to get local issuer certificate")
   4. Persistencia tras down sin -v + up -d  -> los casos 1-3 dan el mismo resultado
 Las peticiones HTTP se hacen con `docker exec` DENTRO de los contenedores de las apps (con macvlan/bridge
 el host no alcanza esas IP). El ldapsearch (caso 3) se ejecuta con `docker exec` DENTRO de `samba-ad`: es
@@ -25,7 +25,7 @@ quien tiene montada la CA del proyecto en /certs/ca.crt y resuelve ldap.reservav
 (forwarder hacia bind9 para lo que no es su propia zona AD). Hay que ejecutarlo donde `docker` sea el
 cliente nativo (p. ej. dentro de WSL): `docker` como .cmd no lo resuelve subprocess sin shell.
 """
-import argparse, json, os, subprocess, sys, time
+import argparse, json, os, shlex, subprocess, sys, time
 from pathlib import Path
 
 AQUI = Path(__file__).resolve().parent
@@ -109,9 +109,28 @@ def http(contenedor, script, clave, *args):
     return int(cod), resto
 
 
+# CA desechable, generada DENTRO de samba-ad con `cryptography` (la imagen no trae el binario openssl: con
+# `openssl req ... >/dev/null 2>&1` el fallo quedaba mudo y ldapsearch moria por "No such file", no por el certificado).
+CA_AJENA_PY = """python3 - <<'PY' || echo "CA_AJENA_NO_GENERADA" >&2
+import datetime as d
+from cryptography import x509
+from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+k = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+n = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "CA-ajena")])
+t = d.datetime.now(d.timezone.utc)
+c = (x509.CertificateBuilder().subject_name(n).issuer_name(n).public_key(k.public_key()).serial_number(x509.random_serial_number())
+     .not_valid_before(t - d.timedelta(hours=1)).not_valid_after(t + d.timedelta(days=1))
+     .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True).sign(k, hashes.SHA256()))
+open("/tmp/ajena.crt", "wb").write(c.public_bytes(serialization.Encoding.PEM))
+PY
+"""
+
+
 def ldapsearch(usuario, clave, ca="real"):
     """ca='real': CA del laboratorio (debe verificar). ca='ajena': una CA valida pero que no firmo el
-    certificado (debe fallar por 'peer cert untrusted', no por nombre ni por fichero ilegible).
+    certificado (debe fallar por la verificacion del certificado, no por nombre ni por fichero ilegible).
     Bind por UPN (usuario@ad.reservaviva.lan): robusto frente al CN real, que --use-username-as-cn deja
     igual al uid al sembrar pero no conviene asumir aqui. Se ejecuta con `docker exec` DENTRO de
     samba-ad: tiene montada la CA del proyecto en /certs/ca.crt (igual que los demas consumidores) y
@@ -121,17 +140,28 @@ def ldapsearch(usuario, clave, ca="real"):
     if ca == "real":
         pre = f"export LDAPTLS_CACERT={CA_EN_SAMBA_AD}"
     else:
-        pre = ("openssl req -x509 -newkey rsa:2048 -nodes -keyout /dev/null -out /tmp/ajena.crt "
-               "-subj /CN=CA-ajena -days 1 >/dev/null 2>&1; export LDAPTLS_CACERT=/tmp/ajena.crt")
-    cmd = ["docker", "exec", "-i", "-e", "CLAVE_LDAP", "samba-ad", "sh", "-c",
-           f'{pre}; umask 077; printf %s "$CLAVE_LDAP" >/tmp/clave; exec ldapsearch "$@"', "_",
-           "-x", "-LLL", "-d1", "-H", LDAP_URI, "-D", upn, "-y", "/tmp/clave",
-           "-b", BASE, "-s", "sub", f"(sAMAccountName={usuario})", "sAMAccountName"]
-    r = sh(cmd, timeout=120, clave=clave)
-    salida = r.stdout + r.stderr
+        pre = CA_AJENA_PY + "export LDAPTLS_CACERT=/tmp/ajena.crt"
+    args = ["-x", "-LLL", "-d1", "-H", LDAP_URI, "-D", upn, "-y", "/tmp/clave",
+            "-b", BASE, "-s", "sub", f"(sAMAccountName={usuario})", "sAMAccountName"]
+    # El script viaja por stdin (`sh -s`), NO en argv: `docker` es un docker.cmd que reenvia a wsl.exe, y ni cmd.exe
+    # (redirecciones >, rutas /dev/null) ni la conversion de rutas de MSYS deben ver ninguna ruta ni redireccion.
+    # Bytes y LF: con text=True Windows enviaria CRLF y sh leeria el CR como parte de cada comando.
+    script = (pre + '\n' + 'umask 077\n' + 'printf %s "$CLAVE_LDAP" >/tmp/clave\n' +
+              'exec ldapsearch ' + ' '.join(shlex.quote(x) for x in args) + '\n')
+    env = {**os.environ, "CLAVE_LDAP": clave}
+    r = subprocess.run(["docker", "exec", "-i", "-e", "CLAVE_LDAP", "samba-ad", "sh", "-s"], input=script.encode(),
+                       capture_output=True, timeout=120, cwd=AQUI, env=env)
+    salida = r.stdout.decode("utf8", "replace") + r.stderr.decode("utf8", "replace")
     # -d1 es muy verboso: se conservan las lineas utiles (resultado LDAP y errores TLS).
-    utiles = [l for l in salida.splitlines() if l.startswith(("sAMAccountName:", "dn:", "TLS:", "ldap_bind", "ldap_sasl_bind"))]
+    utiles = [l for l in salida.splitlines() if l.startswith(("sAMAccountName:", "dn:", "TLS:", "ldap_bind", "ldap_sasl_bind"))
+              or "No such file" in l]
     return r.returncode, " | ".join(utiles)
+
+
+# Una CA ajena debe fallar por la VERIFICACION del certificado; otros fallos (fichero inexistente, servidor
+# inalcanzable) no prueban nada y cuentan como FAIL.
+VERIFICACION_FALLIDA = ("certificate verify failed", "unable to get local issuer", "self-signed certificate",
+                        "self signed certificate", "peer cert untrusted", "unable to get issuer")
 
 
 def caso1():
@@ -162,7 +192,7 @@ def caso3():
     res.append(("ldapsearch clave erronea", rc == 49, f"rc={rc} (esperado 49 Invalid credentials)"))
     rc, out = ldapsearch(ERP_USER, ERP_PASS, ca="ajena")
     res.append(("ldapsearch con CA ajena debe fallar por certificado no confiable",
-                rc != 0 and "untrusted" in out, f"rc={rc} {out[-100:]}"))
+                rc != 0 and "No such file" not in out and any(m in out for m in VERIFICACION_FALLIDA), f"rc={rc} {out[-100:]}"))
     return res
 
 
