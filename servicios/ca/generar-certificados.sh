@@ -16,8 +16,9 @@
 # DOMINIO_DNS es el dominio DNS del servidor (el SAN es ldap.<DOMINIO_DNS>), NO el DN base del directorio: ese es
 # DC=ad,DC=reservaviva,DC=lan, fijo en servicios/samba-ad/entrypoint.sh (no hay una variable de compose para él,
 # a diferencia de LDAP_DOMAIN de la antigua imagen osixia/openldap). Si el SAN del certificado existente no cubre
-# ldap.<DOMINIO_DNS> (p. ej. uno anterior con ldap.reservaviva.local), se regenera SOLO ldap.crt/ldap.key, firmado por
-# la misma CA; levantar-sistema.sh recrea entonces samba-ad para que lo cargue (un restart no basta, ver allí).
+# ldap.<DOMINIO_DNS>, dc1.ad.reservaviva.lan y samba-ad (p. ej. uno anterior con ldap.reservaviva.local, o anterior a la
+# migración a Samba AD), se regenera SOLO ldap.crt/ldap.key, firmado por la misma CA; levantar-sistema.sh reinicia
+# entonces samba-ad (su entrypoint recoge el certificado en cada arranque) y sus clientes.
 # Como root, además instala ca.crt en el almacén de confianza del host (para que ldapsearch, curl, etc.
 # confíen en ella); --sin-instalar-ca lo omite.
 #
@@ -71,15 +72,15 @@ else
 fi
 
 # --- 2. Certificado LDAPS (lo usa samba-ad) --------------------------------------------------------
-cubre_direcciones() {  # el certificado actual incluye la IP y el nombre esperados
+cubre_direcciones() {  # el certificado actual incluye la IP y los nombres esperados (los de samba-ad incluidos)
   local san
   san="$(openssl x509 -in ldap.crt -noout -ext subjectAltName 2>/dev/null || true)"
-  [[ "${san}" == *"${LDAP_IP}"* && "${san}" == *"ldap.${DOMAIN}"* ]]
+  [[ "${san}" == *"${LDAP_IP}"* && "${san}" == *"ldap.${DOMAIN}"*      && "${san}" == *"DNS:dc1.ad.reservaviva.lan"* && "${san}" == *"DNS:samba-ad"* ]]
 }
 if ${FORZAR} || [ ! -f ldap.key ] || ! vigente ldap.crt \
    || ! openssl verify -CAfile ca.crt ldap.crt >/dev/null 2>&1 || ! cubre_direcciones; then
   if [ -f ldap.crt ] && ! cubre_direcciones; then
-    echo "[certs] El SAN del certificado actual no cubre ldap.${DOMAIN} y ${LDAP_IP}: se regenera (la CA se conserva)."
+    echo "[certs] El SAN del certificado actual no cubre ldap.${DOMAIN}, dc1.ad.reservaviva.lan, samba-ad y ${LDAP_IP}: se regenera (la CA se conserva)."
   fi
   echo "[certs] Generando el certificado LDAPS (ldap.${DOMAIN}, dc1.ad.reservaviva.lan, ${LDAP_IP})..."
   GENERADO_LDAP=true

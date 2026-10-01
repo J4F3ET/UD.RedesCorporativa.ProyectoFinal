@@ -41,8 +41,8 @@ El script es idempotente. Si los certificados existen y son válidos, no toca na
 - **La CA** (y con ella el certificado LDAPS), con `--forzar`, si falta `ca.key` o si a `ca.crt` le quedan menos de
   30 días de vigencia.
 - **Solo el certificado LDAPS**, con `--forzar`, si falta `ldap.key`, si a `ldap.crt` le quedan menos de 30 días, si
-  `ldap.crt` no lo firma la `ca.crt` actual o si su SAN no incluye `ldap.reservaviva.lan` y `10.10.99.10` (no comprueba los SAN
-  `dc1.ad.reservaviva.lan` ni `samba-ad`: un `ldap.crt` anterior a la migración se conserva sin ellos hasta borrarlo a mano). Así se
+  `ldap.crt` no lo firma la `ca.crt` actual o si su SAN no incluye `ldap.reservaviva.lan`, `dc1.ad.reservaviva.lan`, `samba-ad` y `10.10.99.10` (un `ldap.crt`
+  anterior a la migración a Samba AD se regenera solo en el siguiente `arrancar`, con la misma CA). Así se
   regeneró el 27/09/2026, al pasar el dominio de `.local` a `.lan`: solo `ldap.crt`/`ldap.key`, con la misma CA, sin tocar
   a los clientes (que confían en `ca.crt`).
 

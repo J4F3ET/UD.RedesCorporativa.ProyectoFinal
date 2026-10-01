@@ -329,8 +329,8 @@ Cuando `generar-certificados.sh` regenera `ldap.crt`, `samba-ad` necesita **rein
 no tiene esos permisos exactos). `arrancar` lo hace solo cuando `ldap.crt` es más nuevo que el último arranque del contenedor
 y reinicia también `inventree-app`, `erpnext-backend` y `erpnext-hr`. A mano:
 `docker compose --env-file sistema/test.env restart samba-ad`. Los datos del volumen se conservan y el dominio no se
-reprovisiona. Un `ldap.crt` de un clon anterior a la migración se conserva sin los SAN nuevos (`dc1.ad.reservaviva.lan`,
-`samba-ad`); para incorporarlos, borrar `servicios/ca/certs/ldap.crt` y `ldap.key` y ejecutar `preparar`.
+reprovisiona. Un `ldap.crt` anterior a la migración a Samba AD (sin los SAN `dc1.ad.reservaviva.lan` y `samba-ad`) se regenera solo en el
+siguiente `arrancar`, con la misma CA, y eso dispara el reinicio de `samba-ad` y de las aplicaciones; no hace falta ningún paso manual.
 
 ## 8. Trampas conocidas de Windows/WSL
 
