@@ -50,7 +50,7 @@ En cada arranque (haya provisionado o no):
   exactos, y el montaje no se puede chmodear desde el host (queda con los permisos que le dio
   `generar-certificados.sh`, o los de otro dueño); por eso se copia en vez de usarse directamente. Si
   `generar-certificados.sh` regenera el certificado, hace falta **reiniciar** este contenedor (no recrearlo) para que lo
-  recoja (`levantar-sistema.sh` ya lo hace, en la función `recrear_ldap_si_cert_nuevo`, cuyo nombre es histórico);
+  recoja (`levantar-sistema.sh` ya lo hace, en la función `reiniciar_directorio_si_cert_nuevo`);
 - asegura en `smb.conf` (persiste en el volumen `samba_etc`, montado en `/etc/samba`): `tls enabled = yes` y las
   rutas del certificado, `interfaces = eth0` y `bind interfaces only = yes`, y `ldap server require strong auth =
   yes` (valor por defecto de Samba: el bind simple solo se acepta por TLS; InvenTree y ERPNext ya usan LDAPS, así que

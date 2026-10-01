@@ -422,7 +422,7 @@ reiniciar_dns_si_zona_nueva() {
 # (su nginx resuelve la IP del backend solo al arrancar): el mismo problema medido con OpenLDAP el 27/09/2026 (estado
 # de TLS/LDAP por proceso; erpnext-backend puede volver con otra IP en erpnext_internal, red sin IP fija) no depende
 # de la imagen del directorio. Reiniciar es barato y solo ocurre cuando cambia el certificado.
-recrear_ldap_si_cert_nuevo() {
+reiniciar_directorio_si_cert_nuevo() {
   local iniciado t_ldap t_cert c
   iniciado="$(docker inspect --format '{{.State.StartedAt}}' samba-ad 2>/dev/null)" || return 0
   t_ldap="$(date -d "${iniciado}" +%s 2>/dev/null)" || return 0
@@ -668,7 +668,7 @@ accion_arrancar() {
     fallo "docker compose up fallo. Volver a ejecutar el script es seguro: retoma donde quedo."
   fi
   reiniciar_dns_si_zona_nueva
-  recrear_ldap_si_cert_nuevo
+  reiniciar_directorio_si_cert_nuevo
   esperar_sano
   crear_admin_pretix
   paso "Sistema en marcha: los ${n} servicios estan sanos"

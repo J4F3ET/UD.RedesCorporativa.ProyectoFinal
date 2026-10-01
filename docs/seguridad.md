@@ -55,7 +55,7 @@ se reinician. `samba-ad` monta los tres ficheros de solo lectura en `/certs` y s
 exactos, y un montaje de solo lectura no se puede chmodear). Por eso, a diferencia del OpenLDAP anterior (que solo copiaba
 sus certificados en el primer arranque de cada contenedor y había que recrearlo), basta con **reiniciar** `samba-ad`, sin
 recrearlo: `arrancar` lo hace cuando `ldap.crt` es más nuevo que el último arranque del contenedor
-(`recrear_ldap_si_cert_nuevo`, cuyo nombre es histórico), y después reinicia los dos clientes LDAPS, `inventree-app` y
+(`reiniciar_directorio_si_cert_nuevo`), y después reinicia los dos clientes LDAPS, `inventree-app` y
 `erpnext-backend`. Esto último se mantiene del stack anterior: el 27/09/2026, con el directorio ya sirviendo el certificado
 nuevo, InvenTree siguió rechazando el login LDAP (401, sin ningún error en su log) hasta reiniciar `inventree-app`, mientras
 un proceso nuevo dentro del mismo contenedor autenticaba bien. Queda estado TLS/LDAP en los procesos de gunicorn; la causa
