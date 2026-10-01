@@ -4,7 +4,7 @@
 # Provisiona el dominio SOLO la primera vez, con el volumen samba_data (montado en /var/lib/samba) realmente vacio.
 # Con datos ya existentes, no se reprovisiona: solo se repiten los pasos idempotentes (copiar el certificado con los
 # permisos que Samba exige, asegurar smb.conf y /etc/hosts) y se arranca "samba -F". Detalle del diseno:
-# docs/directorio-activo.md (o, mientras se escribe, el plan de migracion en C:\Users\jafet\.claude\plans\).
+# servicios/samba-ad/README.md y docs/directorio-activo.md.
 set -euo pipefail
 
 REALM="AD.RESERVAVIVA.LAN"
@@ -100,7 +100,7 @@ chmod 600 "${TLS_DIR}/ca.crt" "${TLS_DIR}/ldap.crt" "${TLS_DIR}/ldap.key"
 asegurar_directiva() {  # asegurar_directiva "clave = valor"
   grep -qF "$1" "${SMB_CONF}" || sed -i "/^\[global\]/a\\	$1" "${SMB_CONF}"
 }
-# "dns forwarder" NO se asegura aqui: ya la fija "domain provision" con --dns-forwarder (ver arriba). Repetirla aqui
+# "dns forwarder" NO se asegura aqui: ya la fija "domain provision" con --option="dns forwarder=..." (ver arriba). Repetirla aqui
 # con un simple grep -qF no detectaria un valor previo DISTINTO y anadiria una segunda linea duplicada.
 asegurar_directiva "tls enabled = yes"
 # Rutas relativas a la carpeta "private" (aqui: /var/lib/samba/private/tls/...).

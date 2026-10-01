@@ -402,8 +402,8 @@ services:
       INVENTREE_LDAP_ENABLED: "True"
       INVENTREE_LDAP_SERVER_URI: ldaps://ldap.reservaviva.lan:636
       INVENTREE_LDAP_GLOBAL_OPTIONS: '{"OPT_X_TLS_CACERTFILE": "/certs/ca.crt", "OPT_X_TLS_REQUIRE_CERT": "OPT_X_TLS_DEMAND"}'
-      # CN=svc-lectura,OU=Servicios: sembrar.sh crea la cuenta con --use-username-as-cn, asi que el CN coincide con
-      # el uid (samba-ad-provision "Fase 1", ver commit correspondiente).
+      # CN=svc-lectura,OU=Servicios: servicios/samba-ad/sembrar.sh crea la cuenta con --use-username-as-cn, asi que
+      # el CN coincide con el nombre de login (sin esa opcion seria el nombre completo y este DN no valdria).
       INVENTREE_LDAP_BIND_DN: CN=svc-lectura,OU=Servicios,DC=ad,DC=reservaviva,DC=lan
       # La misma clave que ERPNext: una sola cuenta svc-lectura y una sola variable (LDAP_SVC_LECTURA_PASSWORD).
       INVENTREE_LDAP_BIND_PASSWORD: ${LDAP_SVC_LECTURA_PASSWORD:?definir LDAP_SVC_LECTURA_PASSWORD en sistema/test.env}
@@ -847,7 +847,9 @@ services:
     environment:
       # El realm, el dominio, el DN base y la IP son decisiones fijas del proyecto (servicios/samba-ad/entrypoint.sh),
       # no variables de laboratorio. Solo las claves vienen de sistema/test.env: entrypoint.sh provisiona el dominio
-      # (con SAMBA_ADMIN_PASSWORD) solo si no existe sam.ldb; sembrar.sh usa el resto para los usuarios de prueba.
+      # (con SAMBA_ADMIN_PASSWORD) solo la primera vez, con /var/lib/samba/private vacia: la marca de provision completa
+      # es private/.provisionado-reserva-viva (no basta que exista sam.ldb: una provision interrumpida lo deja a medias).
+      # sembrar.sh usa el resto para los usuarios de prueba.
       SAMBA_ADMIN_PASSWORD: ${SAMBA_ADMIN_PASSWORD}
       LDAP_SVC_LECTURA_PASSWORD: ${LDAP_SVC_LECTURA_PASSWORD}
       LDAP_PRUEBA_VET_PASSWORD: ${LDAP_PRUEBA_VET_PASSWORD}
