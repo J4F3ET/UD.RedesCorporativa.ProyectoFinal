@@ -69,7 +69,7 @@ Sin acción se ejecuta `arrancar`. Si PowerShell bloquea el script, usa el `.cmd
 | `verificar` | Ejecuta [`sistema/verificar_arquitectura.py`](../sistema/verificar_arquitectura.py) y guarda un informe. Con `-Rapido` / `--rapido` omite la prueba de persistencia | Completo: un cuarto de hora aproximadamente (incluye `down` + `up -d`). Rápido: bastante menos | No (el completo para y levanta los contenedores sin `-v`) |
 | `detener` | `docker compose stop`: para los contenedores y conserva todo | Segundos | No |
 | `borrar` | `docker compose down -v --remove-orphans`: contenedores, redes **y volúmenes**. Pide escribir `borrar` (o `-Si` / `--si`) | Segundos, pero el siguiente arranque reinicializa todo (el script avisa de unos 30 min) | **Sí, todos** |
-| `borrar-directorio` | Elimina **solo** el contenedor `samba-ad` y sus volúmenes `samba_data` y `samba_etc`. Pide escribir `borrar` (o `--si`). Solo en el `.sh` (ver [El directorio](#directorio-borrar-directorio)) | Segundos; el siguiente `arrancar` reprovisiona el dominio (unos minutos) | Solo el directorio de Samba AD |
+| `borrar-directorio` | Elimina **solo** el contenedor `samba-ad` y sus volúmenes `samba_data` y `samba_etc`. Pide escribir `borrar` (o `-Si` / `--si`). Ver [El directorio](#directorio-borrar-directorio) | Segundos; el siguiente `arrancar` reprovisiona el dominio (unos minutos) | Solo el directorio de Samba AD |
 
 Las cifras medidas están en [`resultados-un-host.md`](resultados-un-host.md). Al terminar, `arrancar` y `estado` muestran las direcciones de acceso. Las contraseñas de laboratorio están en [`sistema/test.env`](../sistema/test.env).
 
@@ -301,9 +301,9 @@ Hay tres operaciones propias. El detalle del servicio está en [`servicios/samba
 
 Para volver a provisionar el dominio desde cero sin tocar los datos de OpenVPMS, Pretix, InvenTree ni ERPNext:
 
-```bash
-./levantar-sistema.sh borrar-directorio        # pide escribir "borrar"; con --si no pregunta
-./levantar-sistema.sh arrancar                  # reprovisiona y siembra
+```text
+.\levantar-sistema.ps1 borrar-directorio      ./levantar-sistema.sh borrar-directorio      # pide escribir "borrar"; con -Si / --si no pregunta
+.\levantar-sistema.ps1 arrancar                ./levantar-sistema.sh arrancar                # reprovisiona y siembra
 ```
 
 Elimina el contenedor `samba-ad` (`docker compose rm -f -s samba-ad`) y los dos volúmenes `reservaviva-smoke_samba_data` y
@@ -311,10 +311,6 @@ Elimina el contenedor `samba-ad` (`docker compose rm -f -s samba-ad`) y los dos 
 interrumpido: el entrypoint se detiene con un error explícito) o para rotar las claves partiendo de cero. **Nunca uses
 `borrar` para esto**: se llevaría los volúmenes de todas las aplicaciones. Se pierden las cuentas creadas a mano con
 `samba-tool`; las sembradas vuelven con `arrancar`.
-
-La acción **solo existe en `levantar-sistema.sh`**: `levantar-sistema.ps1` valida su acción contra una lista cerrada que no
-la incluye. Desde Windows con Docker Engine en WSL se ejecuta como
-`wsl.exe -d <distro> --cd <repo> -- bash ./levantar-sistema.sh borrar-directorio` (o desde una terminal de WSL).
 
 ### Rotación de claves del directorio
 

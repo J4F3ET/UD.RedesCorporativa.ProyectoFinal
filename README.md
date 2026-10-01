@@ -62,7 +62,7 @@ Los usuarios aparecen al terminar el arranque. Las contraseñas de laboratorio, 
 | `estado` | Estado de cada servicio, modo de publicación (local o intranet) y direcciones de acceso |
 | `detener` | Para los contenedores sin borrar datos |
 | `borrar` | Borra contenedores **y datos**. Pide confirmación |
-| `borrar-directorio` | Borra solo el contenedor y los volúmenes de Samba AD, para reprovisionar el dominio (solo en el `.sh`; [`docs/operacion.md`](docs/operacion.md#directorio-borrar-directorio)) |
+| `borrar-directorio` | Borra solo el contenedor y los volúmenes de Samba AD, para reprovisionar el dominio ([`docs/operacion.md`](docs/operacion.md#directorio-borrar-directorio)) |
 
 ## Qué demuestra `verificar`
 
