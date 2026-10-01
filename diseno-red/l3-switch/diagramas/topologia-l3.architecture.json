@@ -258,7 +258,7 @@
     {
       "id": "openldap",
       "type": "security",
-      "label": "OpenLDAP",
+      "label": "Samba AD DC",
       "sublabel": "VLAN99 · 10.10.99.10",
       "tag": "389 + LDAPS 636",
       "pos": [
@@ -457,7 +457,7 @@
       "dot": "violet",
       "title": "VLAN 99 transversal",
       "items": [
-        "OpenLDAP (389 y LDAPS 636), bind9 (53) y NTP (123)",
+        "Samba AD DC (389 y LDAPS 636), bind9 (53) y NTP (123)",
         "LDAPS con la CA interna de generar-certificados.sh"
       ]
     },

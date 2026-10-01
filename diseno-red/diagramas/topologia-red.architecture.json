@@ -368,7 +368,7 @@
     {
       "id": "openldap",
       "type": "security",
-      "label": "OpenLDAP",
+      "label": "Samba AD DC",
       "sublabel": "VLAN99 · 10.10.99.10",
       "tag": "389 + LDAPS 636",
       "pos": [
@@ -601,7 +601,7 @@
       "dot": "violet",
       "title": "VLAN 99 transversal",
       "items": [
-        "OpenLDAP (389 y LDAPS 636), bind9 (53) y NTP (123) sirven a las 4 VLANs de negocio",
+        "Samba AD DC (389 y LDAPS 636), bind9 (53) y NTP (123) sirven a las 4 VLANs de negocio",
         "LDAPS usa una CA interna de scripts/generar-certificados.sh; su ca.crt se copia a PC-1 y PC-2"
       ]
     },
