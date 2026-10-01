@@ -49,8 +49,8 @@ En cada arranque (haya provisionado o no):
   `/var/lib/samba/private/tls/` con `chmod 600`. **Trampa:** Samba rechaza la clave privada si no tiene permisos 0600
   exactos, y el montaje no se puede chmodear desde el host (queda con los permisos que le dio
   `generar-certificados.sh`, o los de otro dueño); por eso se copia en vez de usarse directamente. Si
-  `generar-certificados.sh` regenera el certificado, hace falta recrear este contenedor para que lo recoja
-  (`levantar-sistema.sh` ya lo hace, ver `recrear_ldap_si_cert_nuevo`);
+  `generar-certificados.sh` regenera el certificado, hace falta **reiniciar** este contenedor (no recrearlo) para que lo
+  recoja (`levantar-sistema.sh` ya lo hace, en la función `recrear_ldap_si_cert_nuevo`, cuyo nombre es histórico);
 - asegura en `smb.conf` (persiste en el volumen `samba_etc`, montado en `/etc/samba`): `tls enabled = yes` y las
   rutas del certificado, `interfaces = eth0` y `bind interfaces only = yes`, y `ldap server require strong auth =
   yes` (valor por defecto de Samba: el bind simple solo se acepta por TLS; InvenTree y ERPNext ya usan LDAPS, así que
@@ -105,6 +105,17 @@ en `test.env`, nunca la política del dominio.
 AD no permite búsquedas anónimas salvo al rootDSE (por eso el healthcheck de compose consulta solo eso). Para todo
 lo demás hace falta autenticarse, por UPN (`usuario@ad.reservaviva.lan`) o por el DN completo. Kerberos:
 `kinit vet.prueba@AD.RESERVAVIVA.LAN` (dentro del contenedor `samba-ad`, que tiene `krb5-user`).
+
+## Compose
+
+- **Healthcheck:** `test -f /run/samba-ad-sembrado.ok` y un `ldapsearch` anónimo al rootDSE por `10.10.99.10` (Samba no escucha en
+  loopback). La marca la crea el entrypoint al terminar la siembra de cada arranque: sin ella, un consumidor podría hacer su
+  primer bind con una clave todavía vieja. `inventree-app`, `erpnext-backend` y `erpnext-ldap-config` dependen de
+  `samba-ad: service_healthy`.
+- **Resolver:** `dns: 10.10.99.11` (bind9), que delega `ad.reservaviva.lan` de vuelta a este contenedor.
+- **Volúmenes:** `samba_data` (`/var/lib/samba`) y `samba_etc` (`/etc/samba`). `./levantar-sistema.sh borrar-directorio` borra
+  solo estos dos y el contenedor.
+- **Puertos:** se publican el 389 y el 636 en `${PUBLISH_IP}` (`LDAP_PORT` y `LDAPS_PORT`; 1389 y 1636 en `test.env`).
 
 ## Límites
 
