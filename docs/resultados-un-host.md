@@ -215,6 +215,50 @@ ICS (`SharedAccess`) detenido y deshabilitado, Portmaster cerrado. Mecanismo en 
 
 De 132 a 134 PASS: el bloque 4 añade las dos consultas por el 53 cuando el DNS está detrás del reenviador.
 
+## Migración a Samba AD DC (30/09/2026)
+
+OpenLDAP se sustituyó por `samba-ad` (Samba AD DC, realm `AD.RESERVAVIVA.LAN`, base `DC=ad,DC=reservaviva,DC=lan`, IP 10.10.99.10). InvenTree y ERPNext autentican por LDAPS con `sAMAccountName` y `memberOf`. La corrida final es del 01/10/2026 y se lanzó desde Windows con `levantar-sistema.ps1` (Docker Engine en la distro Ubuntu-24.04 de WSL).
+
+Arranque en frío sobre el directorio vacío:
+
+| Paso | Resultado |
+|---|---|
+| `levantar-sistema.ps1 borrar-directorio -Si` | RC=0. Borró solo `reservaviva-smoke_samba_data` y `reservaviva-smoke_samba_etc`; los 10 volúmenes de las aplicaciones quedaron intactos. Ya no existían el contenedor `openldap` ni los volúmenes `ldap_*` |
+| `levantar-sistema.ps1 arrancar -Forzar` | RC=0 en **712 s** (unos 12 min: incluye reconstruir la imagen de `samba-ad` y provisionar el dominio desde cero), 26/26 sanos y sin pasos manuales. `-Forzar` porque el control de memoria pedía 6,9 GB libres y había 6,3 GB; un primer intento sin `-Forzar`, con 4,5 GB libres, lo rechazó el propio lanzador (varias sesiones de Claude abiertas ocupaban unos 3,1 GB; no era el proyecto) |
+| Certificado LDAPS (`ldap.crt`) | Se regeneró solo. SAN antes: `ldap.reservaviva.lan`, `openldap`, `localhost`, 10.10.99.10, 127.0.0.1. SAN después: `ldap.reservaviva.lan`, `dc1.ad.reservaviva.lan`, `samba-ad`, `localhost`, 10.10.99.10, 127.0.0.1. El `sha256` de `ca.crt` no cambió (`f253a76c…d72a`); el de `ldap.crt` pasó de `f30dcb22…7d60` a `65c81b90…6d12` |
+| `levantar-sistema.ps1 verificar` (completo, con persistencia) | RC=0 en 832 s. **143 PASS, 0 FAIL, 15 INFO**, `VEREDICTO GLOBAL: PASS` (`verificacion-20261001-201605.txt`) |
+| `git status --short` tras la corrida | Limpio: `verificar` ya no deja archivos sueltos en la raíz |
+
+Pruebas nuevas de Active Directory (bloque 5 entero en PASS):
+
+| Prueba | Resultado |
+|---|---|
+| SRV `_ldap._tcp.ad.reservaviva.lan` y `_kerberos._tcp.ad.reservaviva.lan` consultados a bind9 (10.10.99.11) | PASS: la delegación devuelve los puertos 389 y 88 de `samba-ad` |
+| `kinit vet.prueba@AD.RESERVAVIVA.LAN` y `klist` dentro de `samba-ad` | PASS: el TGT es de `vet.prueba` en el realm esperado |
+| `samba-tool group listmembers` de `GG-Medica`, `GG-Operaciones` y `GG-RRHH` | PASS: `{vet.prueba}`, `{logistica.prueba, taquilla.prueba}` y `{rrhh.prueba}` |
+| Prueba negativa: `vet.prueba` (GG-Medica) en ERPNext y en InvenTree | PASS: 417 y 401 (ERPNext exige GG-RRHH; InvenTree, GG-Operaciones) |
+| `ldaplogin.py --persistencia`, casos 3 y 4c: `ldapsearch` con una CA ajena | PASS, ahora por la causa correcta: `unable to get local issuer certificate` (antes fallaba por un archivo inexistente) |
+
+Comprobaciones manuales de `docs/directorio-activo.md`, ejecutadas dentro de `samba-ad`:
+
+- `samba-tool user show vet.prueba`: `userAccountControl` 66048, `givenName` Vet, `sn` Prueba, `mail` `vet.prueba@reservaviva.lan`, DN `CN=vet.prueba,OU=Medica,DC=ad,DC=reservaviva,DC=lan`.
+- rootDSE anónimo: `defaultNamingContext` `DC=ad,DC=reservaviva,DC=lan`. `ldapsearch` por UPN y LDAPS: rc=0.
+- Los ejemplos de administración funcionan tal cual: `user create ana.perez` (en `OU=Operaciones`), `group addmembers`/`listmembers`/`removemembers`, `setpassword` y `setexpiry --noexpiry`. Una clave débil (`abc`) se rechaza con `Constraint violation ... password is too short`. El usuario temporal `ana.perez` se borró al terminar.
+
+Incidencias del día y cómo se resolvieron:
+
+| Incidencia | Resolución |
+|---|---|
+| Faltaba el paquete `samba-ad-provision` en la imagen | Se añadió al Dockerfile de `samba-ad` |
+| Las claves de `test.env` no cumplían la complejidad de AD (p. ej. `Svc-Lectura1` contenía el nombre de la cuenta y `samba-tool` la rechaza) | Se cambiaron los valores; el comentario de `test.env` sobre la rotación se corrigió después: `sembrar.sh` reconcilia las claves en cada arranque |
+| bind9 es autoritativo del padre (`reservaviva.lan`), así que una zona *forward* para `ad.reservaviva.lan` no es el mecanismo correcto | Se pasó de zona *forward* a delegación real de `ad.reservaviva.lan` (NS + glue). Como seguir la delegación exige `recursion yes`, se añadió `zone "."` con `forward only` y sin *forwarders* en la vista interna: todo lo ajeno a `reservaviva.lan` da SERVFAIL por política y no por la topología. Queda un INFO en el informe que lo avisa |
+| Las cuentas no tenían `givenName` ni `sn` y ERPNext fallaba con `MandatoryError first_name` | `sembrar.sh` crea las cuentas con `givenName` y `sn` |
+| El motor de Docker cae si no hay ninguna sesión WSL abierta y se lleva los contenedores | `levantar-sistema.ps1` mantiene viva la sesión (`reservaviva-keepalive`). Si falta, el motor se detiene |
+| La imagen `samba-ad` no trae `openssl`: la prueba de la CA ajena fallaba por "No such file", no por el certificado, y el `>/dev/null 2>&1` ocultaba el error | La CA desechable se genera dentro del contenedor con `python3-cryptography`, el script viaja por stdin y la prueba exige que la salida indique fallo de verificación del certificado (`8b82113`). El diagnóstico inicial (conversión de rutas de MSYS) no era la causa: falla igual dentro de WSL |
+| `ldap.crt` antiguo sin los SAN `dc1.ad.reservaviva.lan` y `samba-ad` | `generar-certificados.sh` lo regenera (solo `ldap.crt` y `ldap.key`, con la misma CA) |
+| `levantar-sistema.ps1` no aceptaba la acción `borrar-directorio` | Se añadió y se probó desde Windows en esta corrida |
+| El umbral de memoria del lanzador (6,9 GB libres) rechazó el arranque con varias sesiones de Claude abiertas | Se cerraron sesiones y se usó `-Forzar`; el umbral no se tocó |
+
 ## Pendientes
 
 | ID | Qué | Tipo |

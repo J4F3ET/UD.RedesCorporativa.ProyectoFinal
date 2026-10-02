@@ -1,10 +1,8 @@
 # Verificación de la arquitectura en un host (`verificar_arquitectura.py`)
 
 Objetivo: demostrar que la topología diseñada **se comporta como está diseñada**, no solo que los contenedores arrancan.
-Estado: **adaptado a Samba AD DC** (rama `feat/samba-ad-dc`, sustituye a OpenLDAP). Los bloques 1-4 y 6 ya estaban
-**ejecutados contra el sistema completo** con OpenLDAP; el bloque 5 (Active Directory) es nuevo. La reejecución
-completa contra `samba-ad` ocurre en la Fase 2 del plan de migración, una vez dev tenga el servicio arriba con la
-siembra completa. Las cifras de cada pasada están en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md).
+Estado: **adaptado a Samba AD DC y verificado** (rama `feat/samba-ad-dc`; sustituyó a OpenLDAP, que solo queda como historia en las filas de abajo). Los bloques 1-4 y 6 se ejecutaron primero contra el sistema con OpenLDAP; el bloque 5 (Active Directory) es nuevo. La reejecución completa contra `samba-ad`, en frío y con persistencia, se hizo el 01/10/2026: **143 PASS, 0 FAIL, 15 INFO** (`resultados/verificacion-20261001-201605.txt`, bloque 5 entero en PASS). 
+Las cifras de cada pasada están en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md).
 
 ## La topología que se prueba
 
@@ -154,4 +152,4 @@ Un destino inalcanzable y un nombre que no resuelve dan resultados parecidos y s
 | Todo lo que toca contenedores (con OpenLDAP): segmentación, DNS, NTP, ldapprobe/probe/ldaplogin | **Verificado** el 26/09/2026 contra los 25 servicios, incluida la persistencia (cifras en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md)); base sobre la que se adapto a Samba AD DC |
 | Acceso por nombre (bloque 4, con OpenLDAP) | **Verificado** el 27/09/2026 contra los 26 servicios, en modo local y en modo intranet con la IP de la distro de WSL (cifras en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md)) |
 | Supuestos: puertos 8080/80/8000/8000 de las apps, `chronyd -Q` con la imagen de cturra, `--network container:<app>` | **Verificado** en esa misma ejecución (los bloques que dependen de ellos dan PASS) |
-| Bloque 5 (Active Directory: SRV, kinit/klist, grupos, prueba negativa) y adaptacion de los bloques 1/2/6 a `samba-ad` | **Pendiente**: escrito y compilado (`python -m py_compile`), probado en `--autotest` (mecanica de SRV) y con un servidor LDAP/BER falso local para `ldapprobe.py`; falta ejecutar contra el `samba-ad` real en la Fase 2 |
+| Bloque 5 (Active Directory: SRV, kinit/klist, grupos, prueba negativa) y adaptacion de los bloques 1/2/6 a `samba-ad` | **Verificado** el 01/10/2026 contra los 26 servicios tras un arranque en frio con el directorio vacio: 143 PASS, 0 FAIL, 15 INFO, incluida la persistencia (`ldaplogin.py --persistencia`) (cifras en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md)) |
