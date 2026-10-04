@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Revalidacion de la autenticacion LDAPS de ERPNext e InvenTree en el arnes de un host.
+"""Revalidacion de la autenticacion LDAPS de ERPNext e InvenTree en el arnes de un host, contra Samba AD DC.
 
-Verificado el 2026-09-26 con `levantar-sistema.sh verificar` (casos 1-4 en PASS). Endpoints, credenciales y codigos
-de respuesta salieron de docs/prueba-smoke-test-resultados.md §9.3 (retirado; `git show 95e0da4:docs/prueba-smoke-test-resultados.md`).
+Adaptado de OpenLDAP a Samba AD DC (rama feat/samba-ad-dc) y verificado contra el arnes real el 30/09/2026
+(cifras en docs/resultados-un-host.md, seccion "Migracion a Samba AD DC").
+Endpoints, credenciales y codigos de respuesta HTTP heredados de la version OpenLDAP salieron de
+docs/prueba-smoke-test-resultados.md §9.3 (retirado; `git show 95e0da4:docs/prueba-smoke-test-resultados.md`).
 
 Requisito: el sistema ya levantado (`levantar-sistema.sh arrancar`, o `docker compose --env-file sistema/test.env up -d`
 desde la raiz del repositorio) y con las apps sanas.
@@ -15,14 +17,15 @@ Casos:
   1. Login con usuario LDAP correcto        -> 200 (ERPNext) / 200 + token (InvenTree)
   2. Contrasena erronea                     -> rechazo (401/403; ERPNext devuelve 417)
   3. ldapsearch por LDAPS con la CA         -> OK con verificacion completa (nombre ldap.reservaviva.lan);
-                                               y FALLA con una CA ajena por "peer cert untrusted"
+                                               y FALLA con una CA ajena por verificacion del certificado ("unable to get local issuer certificate")
   4. Persistencia tras down sin -v + up -d  -> los casos 1-3 dan el mismo resultado
 Las peticiones HTTP se hacen con `docker exec` DENTRO de los contenedores de las apps (con macvlan/bridge
-el host no alcanza esas IP). El ldapsearch corre en un contenedor efimero (imagen de openldap) unido a la
-red del arnes y con el DNS del laboratorio (dns-interno). Hay que ejecutarlo donde `docker` sea el cliente
-nativo (p. ej. dentro de WSL): `docker` como .cmd no lo resuelve subprocess sin shell.
+el host no alcanza esas IP). El ldapsearch (caso 3) se ejecuta con `docker exec` DENTRO de `samba-ad`: es
+quien tiene montada la CA del proyecto en /certs/ca.crt y resuelve ldap.reservaviva.lan con su propio DNS
+(forwarder hacia bind9 para lo que no es su propia zona AD). Hay que ejecutarlo donde `docker` sea el
+cliente nativo (p. ej. dentro de WSL): `docker` como .cmd no lo resuelve subprocess sin shell.
 """
-import argparse, json, os, subprocess, sys, time
+import argparse, json, os, shlex, subprocess, sys, time
 from pathlib import Path
 
 AQUI = Path(__file__).resolve().parent
@@ -31,8 +34,9 @@ ENV_FILE = RAIZ / "sistema" / "test.env"
 # El caso 4 llama a compose desde la raiz y con el fichero de variables: sin --env-file fallarian las variables ":?".
 COMPOSE = ["docker", "compose", "--env-file", "sistema/test.env"]
 SITE = "rrhh.reservaviva.local"   # nombre del SITIO de ERPNext (identificador interno), no el nombre DNS (.lan)
-BASE = "dc=reservaviva,dc=local"
-CA_EN_OPENLDAP = "/container/service/slapd/assets/certs/ca.crt"
+BASE = "DC=ad,DC=reservaviva,DC=lan"
+DOMINIO_UPN = "ad.reservaviva.lan"      # sufijo UPN: usuario@ad.reservaviva.lan
+CA_EN_SAMBA_AD = "/certs/ca.crt"
 
 
 def valor_env(clave):
@@ -46,10 +50,10 @@ def valor_env(clave):
     return valor
 
 
-# Claves de los usuarios de prueba: sistema/test.env es su unica fuente (levantar-sistema.sh preparar genera con ellas
-# los LDIF del directorio). Nunca van en la linea de comandos: se pasan por la variable de entorno CLAVE_LDAP.
-ERP_USER, ERP_PASS, ERP_OU = "rrhh.prueba", valor_env("LDAP_PRUEBA_RRHH_PASSWORD"), "rrhh"
-INV_USER, INV_PASS, INV_OU = "logistica.prueba", valor_env("LDAP_PRUEBA_LOGISTICA_PASSWORD"), "operaciones"
+# Claves de los usuarios de prueba: sistema/test.env es su unica fuente (la siembra de samba-ad los crea con
+# ellas). Nunca van en la linea de comandos: se pasan por la variable de entorno CLAVE_LDAP.
+ERP_USER, ERP_PASS = "rrhh.prueba", valor_env("LDAP_PRUEBA_RRHH_PASSWORD")
+INV_USER, INV_PASS = "logistica.prueba", valor_env("LDAP_PRUEBA_LOGISTICA_PASSWORD")
 MALA = "clave-incorrecta-xyz"
 # Nombre real del despliegue (pc2: INVENTREE_LDAP_SERVER_URI) y presente en el SAN del certificado.
 # NO usar ldaps://localhost: libldap canonicaliza el nombre al hostname del contenedor (p. ej.
@@ -105,33 +109,59 @@ def http(contenedor, script, clave, *args):
     return int(cod), resto
 
 
-def _inspeccionar(contenedor, plantilla):
-    return sh(["docker", "inspect", contenedor, "--format", plantilla], timeout=30).stdout.strip()
+# CA desechable, generada DENTRO de samba-ad con `cryptography` (la imagen no trae el binario openssl: con
+# `openssl req ... >/dev/null 2>&1` el fallo quedaba mudo y ldapsearch moria por "No such file", no por el certificado).
+CA_AJENA_PY = """python3 - <<'PY' || echo "CA_AJENA_NO_GENERADA" >&2
+import datetime as d
+from cryptography import x509
+from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+k = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+n = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "CA-ajena")])
+t = d.datetime.now(d.timezone.utc)
+c = (x509.CertificateBuilder().subject_name(n).issuer_name(n).public_key(k.public_key()).serial_number(x509.random_serial_number())
+     .not_valid_before(t - d.timedelta(hours=1)).not_valid_after(t + d.timedelta(days=1))
+     .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True).sign(k, hashes.SHA256()))
+open("/tmp/ajena.crt", "wb").write(c.public_bytes(serialization.Encoding.PEM))
+PY
+"""
 
 
-def ldapsearch(usuario, ou, clave, ca="real"):
+def ldapsearch(usuario, clave, ca="real"):
     """ca='real': CA del laboratorio (debe verificar). ca='ajena': una CA valida pero que no firmo el
-    certificado (debe fallar por 'peer cert untrusted', no por nombre ni por fichero ilegible)."""
-    dn = f"uid={usuario},ou={ou},{BASE}"
-    imagen = _inspeccionar("openldap", "{{.Config.Image}}")
-    red = _inspeccionar("openldap", "{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}").split()[0]
-    dns = _inspeccionar("dns-interno", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}")
+    certificado (debe fallar por la verificacion del certificado, no por nombre ni por fichero ilegible).
+    Bind por UPN (usuario@ad.reservaviva.lan): robusto frente al CN real, que --use-username-as-cn deja
+    igual al uid al sembrar pero no conviene asumir aqui. Se ejecuta con `docker exec` DENTRO de
+    samba-ad: tiene montada la CA del proyecto en /certs/ca.crt (igual que los demas consumidores) y
+    resuelve ldap.reservaviva.lan con su propio DNS (dns forwarder hacia bind9 para lo que no es su
+    zona AD), sin necesitar --network/--dns/--volumes-from de un contenedor efimero aparte."""
+    upn = f"{usuario}@{DOMINIO_UPN}"
     if ca == "real":
-        pre = f"export LDAPTLS_CACERT={CA_EN_OPENLDAP}"
+        pre = f"export LDAPTLS_CACERT={CA_EN_SAMBA_AD}"
     else:
-        pre = ("openssl req -x509 -newkey rsa:2048 -nodes -keyout /dev/null -out /tmp/ajena.crt "
-               "-subj /CN=CA-ajena -days 1 >/dev/null 2>&1; export LDAPTLS_CACERT=/tmp/ajena.crt")
-    # Contenedor efimero con el DNS del laboratorio: ldap.reservaviva.lan se resuelve como en produccion.
-    # --volumes-from openldap aporta el volumen de certificados (ca.crt).
-    cmd = ["docker", "run", "--rm", "--network", red, "--dns", dns, "--volumes-from", "openldap",
-           "--entrypoint", "", "-e", "LDAPTLS_REQCERT=demand", "-e", "CLAVE_LDAP", imagen, "sh", "-c",
-           f'{pre}; umask 077; printf %s "$CLAVE_LDAP" >/tmp/clave; exec ldapsearch "$@"', "_", "-x", "-LLL", "-d1", "-H", LDAP_URI,
-           "-D", dn, "-y", "/tmp/clave", "-b", dn, "-s", "base", "uid"]
-    r = sh(cmd, timeout=120, clave=clave)
-    salida = r.stdout + r.stderr
+        pre = CA_AJENA_PY + "export LDAPTLS_CACERT=/tmp/ajena.crt"
+    args = ["-x", "-LLL", "-d1", "-H", LDAP_URI, "-D", upn, "-y", "/tmp/clave",
+            "-b", BASE, "-s", "sub", f"(sAMAccountName={usuario})", "sAMAccountName"]
+    # El script viaja por stdin (`sh -s`), NO en argv: `docker` es un docker.cmd que reenvia a wsl.exe, y ni cmd.exe
+    # (redirecciones >, rutas /dev/null) ni la conversion de rutas de MSYS deben ver ninguna ruta ni redireccion.
+    # Bytes y LF: con text=True Windows enviaria CRLF y sh leeria el CR como parte de cada comando.
+    script = (pre + '\n' + 'umask 077\n' + 'printf %s "$CLAVE_LDAP" >/tmp/clave\n' +
+              'exec ldapsearch ' + ' '.join(shlex.quote(x) for x in args) + '\n')
+    env = {**os.environ, "CLAVE_LDAP": clave}
+    r = subprocess.run(["docker", "exec", "-i", "-e", "CLAVE_LDAP", "samba-ad", "sh", "-s"], input=script.encode(),
+                       capture_output=True, timeout=120, cwd=AQUI, env=env)
+    salida = r.stdout.decode("utf8", "replace") + r.stderr.decode("utf8", "replace")
     # -d1 es muy verboso: se conservan las lineas utiles (resultado LDAP y errores TLS).
-    utiles = [l for l in salida.splitlines() if l.startswith(("uid:", "dn:", "TLS:", "ldap_bind", "ldap_sasl_bind"))]
+    utiles = [l for l in salida.splitlines() if l.startswith(("sAMAccountName:", "dn:", "TLS:", "ldap_bind", "ldap_sasl_bind"))
+              or "No such file" in l]
     return r.returncode, " | ".join(utiles)
+
+
+# Una CA ajena debe fallar por la VERIFICACION del certificado; otros fallos (fichero inexistente, servidor
+# inalcanzable) no prueban nada y cuentan como FAIL.
+VERIFICACION_FALLIDA = ("certificate verify failed", "unable to get local issuer", "self-signed certificate",
+                        "self signed certificate", "peer cert untrusted", "unable to get issuer")
 
 
 def caso1():
@@ -154,15 +184,15 @@ def caso2():
 
 def caso3():
     res = []
-    rc, out = ldapsearch(ERP_USER, ERP_OU, ERP_PASS)
-    res.append(("ldapsearch con CA (rrhh.prueba)", rc == 0 and f"uid: {ERP_USER}" in out, f"rc={rc} {out[-80:]}"))
-    rc, out = ldapsearch(INV_USER, INV_OU, INV_PASS)
-    res.append(("ldapsearch con CA (logistica.prueba)", rc == 0 and f"uid: {INV_USER}" in out, f"rc={rc} {out[-80:]}"))
-    rc, out = ldapsearch(ERP_USER, ERP_OU, MALA)
+    rc, out = ldapsearch(ERP_USER, ERP_PASS)
+    res.append(("ldapsearch con CA (rrhh.prueba)", rc == 0 and f"sAMAccountName: {ERP_USER}" in out, f"rc={rc} {out[-80:]}"))
+    rc, out = ldapsearch(INV_USER, INV_PASS)
+    res.append(("ldapsearch con CA (logistica.prueba)", rc == 0 and f"sAMAccountName: {INV_USER}" in out, f"rc={rc} {out[-80:]}"))
+    rc, out = ldapsearch(ERP_USER, MALA)
     res.append(("ldapsearch clave erronea", rc == 49, f"rc={rc} (esperado 49 Invalid credentials)"))
-    rc, out = ldapsearch(ERP_USER, ERP_OU, ERP_PASS, ca="ajena")
+    rc, out = ldapsearch(ERP_USER, ERP_PASS, ca="ajena")
     res.append(("ldapsearch con CA ajena debe fallar por certificado no confiable",
-                rc != 0 and "untrusted" in out, f"rc={rc} {out[-100:]}"))
+                rc != 0 and "No such file" not in out and any(m in out for m in VERIFICACION_FALLIDA), f"rc={rc} {out[-100:]}"))
     return res
 
 
@@ -176,7 +206,7 @@ def ejecutar(titulo, fn):
     return todo
 
 
-def esperar_apps(limite=1500):
+def esperar_apps(limite=600):
     fin = time.time() + limite
     while time.time() < fin:
         s1, _ = http("erpnext-backend", HTTP_ERP, MALA, ERP_USER, SITE)

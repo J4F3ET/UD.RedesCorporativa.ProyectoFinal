@@ -107,7 +107,7 @@
     {
       "id": "ldap",
       "type": "security",
-      "label": "OpenLDAP",
+      "label": "Samba AD DC",
       "sublabel": "10.10.99.10 · 389 y 636",
       "tag": "CA interna",
       "stage": 2,

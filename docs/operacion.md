@@ -64,11 +64,12 @@ Sin acción se ejecuta `arrancar`. Si PowerShell bloquea el script, usa el `.cmd
 | Acción | Qué hace | Cuánto tarda (orientativo) | ¿Borra datos? |
 |---|---|---|---|
 | `arrancar` | Requisitos, memoria, `preparar`, `up -d`, espera a que todo esté sano y crea el administrador de Pretix | Primer arranque: más de media hora con las imágenes ya descargadas, y la primera vez hay que sumar su descarga (varios GB). Con el sistema ya arriba, alrededor de un minuto | No |
-| `preparar` | Solo lo previo: certificados, zonas DNS, LDIF de LDAP, validación del compose e imagen de OpenVPMS. No arranca nada | Segundos, salvo la primera construcción de la imagen | No |
+| `preparar` | Solo lo previo: certificados, zonas DNS, validación del compose e imagen de OpenVPMS. No arranca nada | Segundos, salvo la primera construcción de la imagen | No |
 | `estado` | Tabla de servicios (servicio, estado, detalle), **modo de publicación** (local o intranet, con la IP y el puerto del proxy y del DNS) y direcciones de acceso | De segundos a varios minutos (desde Windows, a través de WSL, es cuando más tarda) | No |
 | `verificar` | Ejecuta [`sistema/verificar_arquitectura.py`](../sistema/verificar_arquitectura.py) y guarda un informe. Con `-Rapido` / `--rapido` omite la prueba de persistencia | Completo: un cuarto de hora aproximadamente (incluye `down` + `up -d`). Rápido: bastante menos | No (el completo para y levanta los contenedores sin `-v`) |
 | `detener` | `docker compose stop`: para los contenedores y conserva todo | Segundos | No |
 | `borrar` | `docker compose down -v --remove-orphans`: contenedores, redes **y volúmenes**. Pide escribir `borrar` (o `-Si` / `--si`) | Segundos, pero el siguiente arranque reinicializa todo (el script avisa de unos 30 min) | **Sí, todos** |
+| `borrar-directorio` | Elimina **solo** el contenedor `samba-ad` y sus volúmenes `samba_data` y `samba_etc`. Pide escribir `borrar` (o `-Si` / `--si`). Ver [El directorio](#directorio-borrar-directorio) | Segundos; el siguiente `arrancar` reprovisiona el dominio (unos minutos) | Solo el directorio de Samba AD |
 
 Las cifras medidas están en [`resultados-un-host.md`](resultados-un-host.md). Al terminar, `arrancar` y `estado` muestran las direcciones de acceso. Las contraseñas de laboratorio están en [`sistema/test.env`](../sistema/test.env).
 
@@ -235,19 +236,18 @@ http://127.0.0.1/`. El acceso directo `http://localhost:1808x` no cambia en ning
 2. **Modo** (`resolver_modo`): local, o intranet con `--intranet`. En modo intranet, además, las comprobaciones previas (`comprobar_intranet`): WSL en mirrored, la IP presente en la distro y los puertos 80 y del DNS libres en ella (el 1053 con Docker Engine en WSL, el 53 en los demás casos; el 53 de Windows lo comprueba antes el `.ps1`). Si algo falla, se detiene sin tocar ningún contenedor.
 3. **Memoria** (`comprobar_memoria`). En Windows, el `.ps1` ya ha comprobado antes la memoria libre del equipo.
 4. **`preparar`**:
-   1. **Certificados** (`preparar_certificados`): ejecuta [`servicios/ca/generar-certificados.sh`](../servicios/ca/generar-certificados.sh) `--sin-instalar-ca`, que solo genera la CA interna y el certificado LDAPS si faltan, van a caducar o su SAN no cubre `ldap.reservaviva.lan`. Después comprueba que `ca.crt`, `ldap.crt` y `ldap.key` existan en `servicios/ca/certs/` como **ficheros no vacíos**.
+   1. **Certificados** (`preparar_certificados`): ejecuta [`servicios/ca/generar-certificados.sh`](../servicios/ca/generar-certificados.sh) `--sin-instalar-ca`, que solo genera la CA interna y el certificado LDAPS (con los SAN de `samba-ad`) si faltan, van a caducar o su SAN no cubre `ldap.reservaviva.lan` y la IP. Después comprueba que `ca.crt`, `ldap.crt` y `ldap.key` existan en `servicios/ca/certs/` como **ficheros no vacíos**.
    2. **Zonas DNS** (`generar_zona`): genera las dos zonas de `reservaviva.lan` (vista interna, con la IP fija de cada contenedor, y vista lan, con la IP del anfitrión del modo elegido) y la ACL de la vista interna, desde las plantillas de `servicios/bind9/zones/`. Si solo cambia el serial, conserva el fichero anterior.
-   3. **LDIF de LDAP** (`generar_ldif`): genera en `servicios/openldap/generado/` (fuera de git) los LDIF del primer arranque del directorio, a partir de las plantillas `servicios/openldap/*.ldif.tpl` y de las claves de `sistema/test.env` (`LDAP_SVC_LECTURA_PASSWORD` y `LDAP_PRUEBA_<UID>_PASSWORD`), que guarda como hash `{SSHA}`. Si falta una de esas variables se detiene con `definir <VARIABLE> en sistema/test.env`. Se regenera en cada `preparar`, pero OpenLDAP solo lo carga con el directorio vacío: en un sistema ya inicializado no cambia nada ([`seguridad.md`](seguridad.md#3-ldap-y-ldaps)).
-   4. **Validación** del compose (`docker compose config -q`).
-   5. **Imagen de OpenVPMS**: se reconstruye siempre (con caché tarda segundos). Sin red, solo acepta la imagen existente si su `entrypoint.sh` e `init-lib.sh` son idénticos a los del repositorio.
+   3. **Validación** del compose (`docker compose config -q`).
+   4. **Imagen de OpenVPMS**: se reconstruye siempre (con caché tarda segundos). Sin red, solo acepta la imagen existente si su `entrypoint.sh` e `init-lib.sh` son idénticos a los del repositorio.
 5. **Publicación en la LAN** (solo en modo intranet, `publicar_intranet`): `up -d` solo de `proxy` y `dns`. Si Docker no puede publicar en la IP de la LAN, explica la causa (puerto 53 ocupado por ICS o Portmaster, IP ausente…), vuelve a publicarlos en `127.0.0.1` y termina con error.
-6. **`up -d`** de los 26 servicios. Antes reinicia los contenedores que un arranque anterior dejó `unhealthy` (`reiniciar_unhealthy`), porque `up -d` no los recrearía y abortaría enseguida. `up -d` respeta los `depends_on` con `service_healthy`: en un primer arranque casi toda la espera ocurre aquí, sin el progreso del paso 7 ni su límite de tiempo. Si `named.conf`, una zona o la ACL son más nuevos que el contenedor `dns-interno`, lo reinicia para que bind9 los lea (`reiniciar_dns_si_zona_nueva`); si el certificado de OpenLDAP es más nuevo que el contenedor `openldap`, lo recrea con los mismos volúmenes y reinicia sus dos clientes LDAPS, `inventree-app` y `erpnext-backend`, y después `erpnext-hr`, cuyo nginx resuelve la IP del backend solo al arrancar (`recrear_ldap_si_cert_nuevo`): la imagen solo copia sus certificados en el primer arranque de cada contenedor, así que reiniciarlo no bastaría, y los procesos de InvenTree siguieron fallando hasta reiniciarlos ([`seguridad.md`](seguridad.md#cuándo-se-regenera-y-cuándo-no)).
+6. **`up -d --remove-orphans`** de los 26 servicios (`--remove-orphans` elimina el contenedor `openldap` de un stack anterior, si lo hay). Antes reinicia los contenedores que un arranque anterior dejó `unhealthy` (`reiniciar_unhealthy`), porque `up -d` no los recrearía y abortaría enseguida. `up -d` respeta los `depends_on` con `service_healthy`: en un primer arranque casi toda la espera ocurre aquí, sin el progreso del paso 7 ni su límite de tiempo. Si `named.conf`, una zona o la ACL son más nuevos que el contenedor `dns-interno`, lo reinicia para que bind9 los lea (`reiniciar_dns_si_zona_nueva`); si el certificado LDAPS es más nuevo que el último arranque de `samba-ad`, lo **reinicia** (no lo recrea: el entrypoint recoge el certificado en cada arranque) y reinicia sus clientes LDAPS, `inventree-app` y `erpnext-backend`, y después `erpnext-hr`, cuyo nginx resuelve la IP del backend solo al arrancar (`reiniciar_directorio_si_cert_nuevo`; [Certificado nuevo](#certificado-nuevo)). Los servicios que usan el directorio (`inventree-app`, `erpnext-backend`, `erpnext-ldap-config`) esperan a que `samba-ad` esté `healthy`, y eso solo ocurre cuando terminó de sembrar.
 7. **Espera a que todo esté sano** (`esperar_sano`). Cada 20 s imprime `[mm:ss] sanos N/26 - esperando: …`. Los tres trabajos de un solo disparo (`erpnext-configurator`, `erpnext-create-site` y `erpnext-ldap-config`) cuentan como sanos cuando terminan con código 0. El límite es de 45 min (`-TimeoutMin` / `--timeout`).
 8. **Administrador de Pretix** (`crear_admin_pretix`): crea el de `PRETIX_ADMIN_EMAIL` y borra el `admin@localhost` que trae la imagen.
 9. **Accesos**: imprime el modo, las URL y los usuarios; en modo intranet, también la IP del DNS para los clientes y el aviso de las claves públicas.
 10. **Reenviador DNS** (solo el `.ps1`, en modo intranet con Docker Engine en WSL): lo arranca o reutiliza y comprueba que responde; en modo local lo para ([Acceso desde la LAN](#acceso-desde-la-lan)).
 
-**Primer arranque y siguientes.** El primero descarga imágenes e inicializa los volúmenes: OpenVPMS crea su esquema y carga los datos base, ERPNext crea su sitio, OpenLDAP carga los LDIF de `generado/`, y Pretix e InvenTree migran. Es el lento. Con los volúmenes ya inicializados, los siguientes solo arrancan los contenedores y tardan unos minutos.
+**Primer arranque y siguientes.** El primero descarga imágenes e inicializa los volúmenes: OpenVPMS crea su esquema y carga los datos base, ERPNext crea su sitio, `samba-ad` construye su imagen, provisiona el dominio y siembra las OU, grupos y cuentas, y Pretix e InvenTree migran. Es el lento. Con los volúmenes ya inicializados, los siguientes solo arrancan los contenedores y tardan unos minutos.
 
 **Si se corta es reanudable.** Volver a ejecutar `arrancar` es seguro y retoma donde quedó: la inicialización de OpenVPMS y la creación del sitio de ERPNext se reanudan, un contenedor que quedó `unhealthy` se reinicia, y los demás pasos son idempotentes. No hace falta `borrar` para "empezar limpio".
 
@@ -255,7 +255,7 @@ http://127.0.0.1/`. El acceso directo `http://localhost:1808x` no cambia en ning
 
 Al reiniciar Windows se apaga la VM de WSL y con ella Docker y los contenedores. Basta con **volver a ejecutar `levantar-sistema.cmd` o `.\levantar-sistema.ps1`**: como los volúmenes ya están inicializados, es un arranque de los "siguientes".
 
-Por qué hay que hacerlo desde Windows con Docker Engine en WSL: si no queda ninguna sesión de WSL abierta, Docker se detiene y se lleva los contenedores. Por eso el `.ps1` deja en segundo plano un proceso llamado **`reservaviva-keepalive`**, que mantiene viva la sesión aunque cierres la ventana:
+Por qué hay que hacerlo desde Windows con Docker Engine en WSL: **Docker corre dentro de WSL, y sin una sesión de WSL abierta el motor se detiene y se lleva los contenedores, `samba-ad` incluido**. Por eso el `.ps1` deja en segundo plano un proceso llamado **`reservaviva-keepalive`**, que mantiene viva la sesión aunque cierres la ventana. Está en [`levantar-sistema.ps1`](../levantar-sistema.ps1): el nombre se define en la línea 44 (`$Marca`), `Abrir-Sesion` lo lanza (l. 100-109, un `sleep infinity` oculto con ese nombre), el script lo invoca en la línea 389 y `Cerrar-Sesion` lo termina (l. 111-116):
 
 - Lo abren `arrancar`, `preparar`, `estado` y `verificar`. Lo cierran `detener` y `borrar` cuando terminan bien.
 - Si arrancas con `./levantar-sistema.sh` desde una terminal de WSL, no hay keepalive: el script avisa de que no cierres esa terminal.
@@ -283,17 +283,56 @@ docker compose --env-file sistema/test.env logs --tail 100 <servicio>
 
 **Un servicio lleva mucho en `starting`.** En el primer arranque es normal: la base de OpenVPMS tiene un `start_period` de 10 min, y el sitio de ERPNext tarda. Mira sus logs. Si avanzan, espera, o relanza con más margen (`.\levantar-sistema.ps1 -TimeoutMin 90` / `./levantar-sistema.sh --timeout 90`). Relanzar no pierde lo hecho.
 
-**Un servicio `unhealthy`.** Lee sus logs y vuelve a ejecutar `arrancar`. Si es una app que depende de LDAP (`inventree-app` o `erpnext-backend`), revisa también `openldap` y los certificados (siguiente punto).
+**Un servicio `unhealthy`.** Lee sus logs y vuelve a ejecutar `arrancar`. Si es una app que depende del directorio (`inventree-app`, `erpnext-backend` o `erpnext-ldap-config`), revisa también `samba-ad` (sus logs van a `docker logs`) y los certificados (siguiente punto). Si `samba-ad` no llega a `healthy`, mira primero su siembra: el healthcheck exige la marca de siembra de ese arranque. Si el entrypoint dice que `private/` tiene datos pero falta la marca de provisión, el volumen quedó a medias: [`borrar-directorio`](#directorio-borrar-directorio).
 
 **Falta `ca.crt` o es un directorio.** Si un fichero de un montaje no existe, Docker crea en su lugar un **directorio vacío**, y LDAPS falla sin avisar. `preparar` lo detecta y aborta con `Falta servicios/ca/certs/<fichero> (o esta vacio)`. Pasa si alguien lanzó `docker compose up` sin `preparar`. Borra ese directorio desde WSL (lo creó Docker como root, así que puede hacer falta `sudo`) y vuelve a ejecutar `preparar` o `arrancar`.
 
 ## 6. Liberar memoria y apagar
 
 - **`detener`** es la forma normal de apagar y de liberar la RAM. Para los contenedores (`stop`), conserva volúmenes y contenedores, y en modo WSL cierra el keepalive y el reenviador DNS. `arrancar` lo vuelve a levantar en minutos.
-- **`borrar`** ejecuta `down -v`: **destruye los volúmenes**, es decir, las bases de datos, el sitio de ERPNext, el directorio LDAP y los datos de Pretix e InvenTree. El siguiente arranque vuelve a inicializarlo todo, como el primero. Úsalo solo si de verdad quieres partir de cero. **No existe un `down -v` "seguro"**, y `-Si` / `--si` quita incluso la confirmación.
+- **`borrar`** ejecuta `down -v`: **destruye los volúmenes**, es decir, las bases de datos, el sitio de ERPNext, el directorio de Samba AD y los datos de Pretix e InvenTree. El siguiente arranque vuelve a inicializarlo todo, como el primero. Úsalo solo si de verdad quieres partir de cero. **No existe un `down -v` "seguro"**, y `-Si` / `--si` quita incluso la confirmación.
 - `docker compose down` **sin** `-v` borra los contenedores pero conserva los datos: es lo que hace la prueba de persistencia de `verificar`.
 
-## 7. Trampas conocidas de Windows/WSL
+## 7. El directorio (Samba AD)
+
+Hay tres operaciones propias. El detalle del servicio está en [`servicios/samba-ad/README.md`](../servicios/samba-ad/README.md) y [`directorio-activo.md`](directorio-activo.md).
+
+### Directorio: `borrar-directorio`
+
+Para volver a provisionar el dominio desde cero sin tocar los datos de OpenVPMS, Pretix, InvenTree ni ERPNext:
+
+```text
+.\levantar-sistema.ps1 borrar-directorio      ./levantar-sistema.sh borrar-directorio      # pide escribir "borrar"; con -Si / --si no pregunta
+.\levantar-sistema.ps1 arrancar                ./levantar-sistema.sh arrancar                # reprovisiona y siembra
+```
+
+Elimina el contenedor `samba-ad` (`docker compose rm -f -s samba-ad`) y los dos volúmenes `reservaviva-smoke_samba_data` y
+`reservaviva-smoke_samba_etc`, y avisa si alguno no existía. Se usa cuando el dominio quedó a medias (un `domain provision`
+interrumpido: el entrypoint se detiene con un error explícito) o para rotar las claves partiendo de cero. **Nunca uses
+`borrar` para esto**: se llevaría los volúmenes de todas las aplicaciones. Se pierden las cuentas creadas a mano con
+`samba-tool`; las sembradas vuelven con `arrancar`.
+
+### Rotación de claves del directorio
+
+Las claves están solo en [`sistema/test.env`](../sistema/test.env). `sembrar.sh` las **reconcilia** en cada arranque del
+contenedor (`samba-tool user setpassword` sobre `Administrator`, `svc-lectura` y las cuatro cuentas de prueba). Pero llegan al
+contenedor por variables de entorno, así que un `docker restart` no las relee: se cambia el valor en `test.env` y se
+ejecuta `arrancar`, que recrea `samba-ad` (su entorno cambió) con los mismos volúmenes. `erpnext-ldap-config` vuelve a escribir
+la clave de `svc-lectura` en "LDAP Settings" en cada `up`, y `inventree-app` la lee del entorno. La clave nueva **debe cumplir
+la complejidad de AD** (si no, `samba-tool` la rechaza y la siembra falla: se cambia la clave, nunca la política).
+Contexto y límites de este camino en [seguridad.md](seguridad.md#cómo-rotar-las-claves). Para partir de cero, `borrar-directorio`.
+
+### Certificado nuevo
+
+Cuando `generar-certificados.sh` regenera `ldap.crt`, `samba-ad` necesita **reiniciarse, no recrearse**: su entrypoint copia
+`ca.crt`, `ldap.crt` y `ldap.key` a `/var/lib/samba/private/tls/` con `chmod 600` en cada arranque (Samba rechaza la clave si
+no tiene esos permisos exactos). `arrancar` lo hace solo cuando `ldap.crt` es más nuevo que el último arranque del contenedor
+y reinicia también `inventree-app`, `erpnext-backend` y `erpnext-hr`. A mano:
+`docker compose --env-file sistema/test.env restart samba-ad`. Los datos del volumen se conservan y el dominio no se
+reprovisiona. Un `ldap.crt` anterior a la migración a Samba AD (sin los SAN `dc1.ad.reservaviva.lan` y `samba-ad`) se regenera solo en el
+siguiente `arrancar`, con la misma CA, y eso dispara el reinicio de `samba-ad` y de las aplicaciones; no hace falta ningún paso manual.
+
+## 8. Trampas conocidas de Windows/WSL
 
 | Síntoma | Causa | Qué hacer |
 |---|---|---|
@@ -306,9 +345,10 @@ docker compose --env-file sistema/test.env logs --tail 100 <servicio>
 | (Si modificas el `.ps1`) cualquier aviso de `wsl.exe` corta el script | PowerShell 5.1 con `$ErrorActionPreference='Stop'` trata el stderr nativo como error | Deja `'Continue'` y comprueba `$LASTEXITCODE` |
 | `grep` no encuentra en un log texto que se ve a simple vista | Salida mezclada UTF-8/UTF-16 (`wsl.exe` escribe UTF-16) | `tr -d '\000'` antes de `grep` |
 | Un cambio en `servicios/openvpms/` no tiene efecto tras `docker compose up -d` | `up -d` no reconstruye una imagen con `build:` | Usa `levantar-sistema` (`preparar` o `arrancar`), que siempre reconstruye `openvpms-app` |
-| `generar-certificados.sh` fallaba con "Operation not permitted" en la segunda ejecución | OpenLDAP (osixia) se apropia de los certificados montados (uid 911) | Ya resuelto: el script solo cambia permisos de lo que genera. Para regenerarlos, `--forzar` |
+| `generar-certificados.sh` fallaba con "Operation not permitted" en la segunda ejecución (histórico, con el OpenLDAP anterior) | Aquella imagen se apropiaba de los certificados montados (uid 911) | Ya resuelto: el script solo cambia permisos de lo que genera. `samba-ad` los monta de solo lectura y los copia. Para regenerarlos, `--forzar` |
 | Un `.sh` falla con `$'\r': command not found` | La copia de trabajo de Windows es CRLF (`core.autocrlf=true`) | `.gitattributes` fuerza LF en `*.sh`, `Dockerfile` y `*.service`. Al editarlos en Windows, conserva LF |
 | El progreso de `arrancar` o `verificar` parece parado en `[00:07]` | `erpnext-ldap-config` se vuelve a ejecutar en cada `up` y hay que esperarlo | Es normal. Espera; el contador sigue cada 20 s |
+| `samba-ad` tarda en estar `healthy` tras un arranque en frío | Hasta que no termina `domain provision` (solo la primera vez) y la siembra, el healthcheck no pasa; y los consumidores esperan a él | Es normal: mira `docker logs samba-ad`. El `start_period` es de 120 s y admite 20 reintentos de 15 s |
 | `estado` no termina y parece colgado | Consultar los 26 servicios a través de `wsl.exe` puede llevar varios minutos | Espera. Si lo lanzas desde otra herramienta con límite de tiempo, dale más margen o ejecútalo en segundo plano |
 | `-Intranet` se detiene con "WSL esta en modo de red 'nat'" | La red NAT de WSL no tiene la IP de la LAN | `sistema\habilitar-intranet-windows.ps1` como administrador y `wsl --shutdown` (sección "Acceso desde la LAN") |
 | Tras volver a arrancar sin `-Intranet`, los otros equipos ya no entran | `arrancar` sin la opción es el modo local: recrea el proxy y el DNS en `127.0.0.1` | Es lo previsto. Para seguir en la LAN, arranca siempre con `-Intranet` |
@@ -322,7 +362,7 @@ docker compose --env-file sistema/test.env logs --tail 100 <servicio>
 | Un nombre `*.reservaviva.lan` responde **502** | La aplicación todavía está arrancando: el proxy no espera a nadie | Espera a que `estado` la muestre sana |
 | Un nombre responde con la página 404 del proxy | El nombre está mal escrito o se entró por la IP | Usa uno de los cuatro nombres de la tabla de "Acceso desde la LAN" |
 
-## 8. Validación
+## 9. Validación
 
 **Ejecutar `verificar`** con el sistema arriba y sano:
 
@@ -331,7 +371,7 @@ docker compose --env-file sistema/test.env logs --tail 100 <servicio>
 .\levantar-sistema.ps1 verificar -Rapido    ./levantar-sistema.sh verificar --rapido
 ```
 
-- **Completo** (por defecto): segmentación, DNS, NTP, acceso por nombre (vista lan del DNS, proxy web con página y estático de cada aplicación, acceso directo por `localhost`) y LDAP/LDAPS, e incluye la prueba de persistencia (caso 4 de `ldaplogin.py`: `down` sin `-v` + `up -d`, y se repiten los logins). Respeta el modo en que esté el sistema: en modo intranet, el `up -d` de la persistencia lo deja en modo intranet.
+- **Completo** (por defecto): segmentación, DNS, NTP, acceso por nombre (vista lan del DNS, proxy web con página y estático de cada aplicación, acceso directo por `localhost`), LDAP/LDAPS y Active Directory (registros SRV por bind9, `kinit`/`klist`, grupos y la prueba negativa de pertenencia), e incluye la prueba de persistencia (caso 4 de `ldaplogin.py`: `down` sin `-v` + `up -d`, y se repiten los logins). Respeta el modo en que esté el sistema: en modo intranet, el `up -d` de la persistencia lo deja en modo intranet.
 - **Rápido**: omite la persistencia y deja **siempre un FAIL deliberado**, "caso 4 … NO EJECUTADO", así que termina con código ≠ 0. Sirve para iterar, no como validación final.
 
 **Resultados.** Cada comprobación imprime `[PASS]`, `[FAIL]` o `[INFO]` con la salida en la que se apoya. `INFO` son hallazgos que hay que leer y no cuentan como fallo, como el tráfico entre apps por la VLAN 99. El resultado es válido solo si `ExecMainStartTimestamp` de Docker es el mismo antes y después; si cambia, repite. El script termina con `Verificacion superada` solo si no hay ningún FAIL. Cómo interpretar cada bloque se explica en [`sistema/verificar_arquitectura.md`](../sistema/verificar_arquitectura.md).

@@ -25,7 +25,7 @@ reflejan lo que de verdad levanta `docker compose up`:
 - **DNS interno con bind9** (`10.10.99.11:53`, zona `reservaviva.local`), que antes no aparecía.
 - **`inventree-worker`** (`10.10.30.12`), el worker de tareas en segundo plano de InvenTree.
 - **LDAPS en el 636 con CA interna**: los certificados los crea `scripts/generar-certificados.sh`
-  (los que trae la imagen `osixia/openldap` usan una CA caducada) y su `ca.crt` se copia a PC-1 y
+  (los que traía la antigua imagen `osixia/openldap`, que el sistema usó antes de Samba AD DC, usaban una CA caducada) y su `ca.crt` se copia a PC-1 y
   PC-2 para que verifiquen la cadena.
 
 Las referencias a código de `topologia-red.architecture.json` están fijadas al commit

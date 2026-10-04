@@ -22,7 +22,7 @@ A todas les pasa el `Host` original (con el puerto, si no es el 80) y las cabece
 
 ## Decisiones
 
-- **Solo en `vlan99_infra`.** Conectado a `vlan10`…`vlan40` sería un router entre departamentos y rompería la segmentación que demuestra `verificar`. En `vlan99_infra` ya están las cuatro aplicaciones, y es la misma red por la que ellas llegan a OpenLDAP, DNS y NTP. `verificar` comprueba que el proxy no tiene ninguna otra red.
+- **Solo en `vlan99_infra`.** Conectado a `vlan10`…`vlan40` sería un router entre departamentos y rompería la segmentación que demuestra `verificar`. En `vlan99_infra` ya están las cuatro aplicaciones, y es la misma red por la que ellas llegan a Samba AD, DNS y NTP. `verificar` comprueba que el proxy no tiene ninguna otra red.
 - **RRHH por `erpnext-hr`, con una pata nueva en `vlan99_infra` (`.25`).** El proxy no puede ir a `erpnext-backend` (ya en `vlan99_infra`), porque gunicorn no sirve `/assets` ni socket.io; tampoco entrar en `vlan40_rrhh` ni en `erpnext_internal` (la red de la base de datos y Redis de ERPNext). La doble conexión de `erpnext-hr` es la opción menos invasiva: es un nginx sin estado, y es la misma doble conexión que ya tienen `openvpms-app`, `pretix-web` e `inventree-app`.
 - **Sin `depends_on`.** Las direcciones son IP literales, así que nginx arranca aunque una aplicación aún no esté lista; esa aplicación responde 502 hasta que lo esté.
 - **Solo HTTP.** Igual que el acceso directo: HTTPS queda fuera del laboratorio ([`../../docs/seguridad.md`](../../docs/seguridad.md)).

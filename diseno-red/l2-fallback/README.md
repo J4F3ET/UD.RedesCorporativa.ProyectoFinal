@@ -407,15 +407,15 @@ Esperado: `200` (Pretix puede dar `302`, también vale).
 LDAP en VLAN 99 (con la cuenta de búsqueda; `-W` pide su clave):
 
 ```
-ldapsearch -x -H ldap://10.10.99.10 -D "cn=svc-lectura,ou=servicios,dc=reservaviva,dc=local" -W -b "dc=reservaviva,dc=local" "(uid=rrhh.prueba)"
+LDAPTLS_CACERT=ca.crt ldapsearch -H ldaps://10.10.99.10 -D "svc-lectura@ad.reservaviva.lan" -W -b "DC=ad,DC=reservaviva,DC=lan" "(sAMAccountName=rrhh.prueba)"
 ```
 
-Esperado: devuelve una entrada `uid=rrhh.prueba`.
+Esperado: devuelve una entrada `sAMAccountName: rrhh.prueba`. Samba AD DC solo admite el bind por LDAPS (`ldaps://`, verificando con `ca.crt`).
 
 DNS:
 
 ```
-dig @10.10.99.11 ldap.reservaviva.local +short
+dig @10.10.99.11 ldap.reservaviva.lan +short
 ```
 
 Esperado: `10.10.99.10`.

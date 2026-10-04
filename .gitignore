@@ -6,11 +6,11 @@ servicios/bind9/zones/db.reservaviva.lan
 servicios/bind9/zones/db.reservaviva.lan.vista-lan
 servicios/bind9/zones/acl-interna.conf
 servicios/bind9/zones/*.tmp
-# LDIF del primer arranque de OpenLDAP, con los hashes de las claves de sistema/test.env (levantar-sistema.sh preparar)
-servicios/openldap/generado/
 
 # Salidas de levantar-sistema.sh verificar
 sistema/resultados/
+# Cache de bytecode de Python (sistema/*.py)
+sistema/__pycache__/
 # PID del reenviador DNS de Windows del modo intranet (levantar-sistema.ps1 -Intranet)
 sistema/.reenviador-dns.pid
 

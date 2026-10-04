@@ -27,7 +27,7 @@ Con 4 áreas de negocio + 1 capa de infraestructura transversal (LDAP/DNS/NTP) y
 |---|---|---|---|---|---|
 | **PC-1** | Servidor Médico | Unidad Médica Veterinaria | OpenVPMS | VLAN 10 | **Access** (una sola VLAN, sin necesidad de trunk) |
 | **PC-2** | Servidor de Operaciones | Taquilla y Boletería + Logística y Almacén | Pretix + InvenTree | VLAN 20, VLAN 30 | **Trunk** (802.1Q, VLANs 20 y 30 permitidas) |
-| **PC-3** | Servidor de Administración e Infraestructura | Recursos Humanos + Infraestructura (todas las áreas) | ERPNext (módulo HR) + OpenLDAP + DNS + NTP | VLAN 40, VLAN 99 | **Trunk** (802.1Q, VLANs 40 y 99 permitidas) |
+| **PC-3** | Servidor de Administración e Infraestructura | Recursos Humanos + Infraestructura (todas las áreas) | ERPNext (módulo HR) + Samba AD DC + DNS + NTP | VLAN 40, VLAN 99 | **Trunk** (802.1Q, VLANs 40 y 99 permitidas) |
 
 Ver el diagrama interactivo en [`diagramas/topologia-red.html`](diagramas/topologia-red.html).
 
@@ -100,7 +100,7 @@ Notas heredadas del handoff que siguen aplicando sin cambios por el split en 3 e
 ## 7. Plan de pruebas de fiabilidad (adaptado a 3 equipos)
 
 1. **Sin Internet:** desde cada PC, verificar ausencia de ruta por defecto a Internet (`ip route`, intento de `ping 8.8.8.8` debe fallar).
-2. **LDAP/DNS/NTP alcanzable desde las 3 VLANs de negocio:** desde PC-1 (VLAN10), PC-2 (VLAN20 y VLAN30) y el propio PC-3 (VLAN40), probar autenticación contra OpenLDAP, resolución DNS y sincronización NTP — todas deben funcionar (fila/columna VLAN99 de la matriz).
+2. **LDAP/DNS/NTP alcanzable desde las 3 VLANs de negocio:** desde PC-1 (VLAN10), PC-2 (VLAN20 y VLAN30) y el propio PC-3 (VLAN40), probar autenticación contra Samba AD DC, resolución DNS y sincronización NTP — todas deben funcionar (fila/columna VLAN99 de la matriz).
 3. **Bloqueo inter-PC:** desde PC-1 (VLAN10) intentar `ping`/`curl` contra Pretix (VLAN20, PC-2) e InvenTree (VLAN30, PC-2) — debe fallar. Repetir en ambos sentidos y contra PC-3 (VLAN40).
 4. **Bloqueo intra-PC vía switch:** desde el contenedor de Pretix (VLAN20) intentar llegar a InvenTree (VLAN30), ambos en PC-2 — debe fallar aunque estén en el mismo hardware, confirmando que el filtrado ocurre en el switch/host-router y no por simple ausencia de ruta local.
 5. **Captura de tráfico:** Wireshark en el puerto trunk de PC-2 o PC-3 durante las pruebas 3 y 4, mostrando las tramas 802.1Q etiquetadas y, si el switch es L3, los intentos denegados.
@@ -111,7 +111,7 @@ Notas heredadas del handoff que siguen aplicando sin cambios por el split en 3 e
 Los `docker-compose.yml` por sí solos **no** son plug-and-play: hace falta que las sub-interfaces VLAN existan antes de que Docker cree las redes `macvlan`, que las contraseñas estén definidas, y que todo eso sobreviva a un reinicio del PC en pleno laboratorio. Para eso cada carpeta de `docker/pcN-*/` trae:
 
 - `.env.example` → copiar a `.env` y definir ahí las contraseñas, el nombre de la tarjeta de red (`IFACE`) y `PERFIL` (`l3` o `l2`, según el switch; ver sección 5) (el `.env` real nunca se commitea, ver `.gitignore`). Es el **único** archivo que hay que editar — nada de tocar YAML ni scripts.
-- `scripts/generar-certificados.sh` → crea la CA interna y el certificado de LDAPS (636) de OpenLDAP y los deja en `docker/pc3-administracion-infra/certs/`, donde el compose los monta. El `deploy.sh` de PC-3 lo ejecuta solo (idempotente); la `ca.crt` resultante se copia a PC-1 y PC-2 para que sus clientes confíen en ella.
+- `scripts/generar-certificados.sh` → crea la CA interna y el certificado de LDAPS (636) de Samba AD DC y los deja en `docker/pc3-administracion-infra/certs/`, donde el compose los monta. El `deploy.sh` de PC-3 lo ejecuta solo (idempotente); la `ca.crt` resultante se copia a PC-1 y PC-2 para que sus clientes confíen en ella.
 - `deploy.sh` → un solo comando que lee ese `.env` y hace, en el orden correcto: validar `PERFIL` → crear las sub-interfaces VLAN con los scripts de `diseno-red/<perfil>/scripts/` → aplicar el firewall (solo PC-3 con `PERFIL=l2`) → `docker compose up -d`. Es **idempotente**: correrlo dos veces no rompe nada.
 
 Los tutoriales paso a paso por PC (`tutoriales/`) se retiraron el 26/09/2026 junto con el despliegue en 3 PCs; se recuperan con `git checkout cceb54c -- tutoriales`.

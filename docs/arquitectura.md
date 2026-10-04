@@ -5,7 +5,7 @@ cómo se hablan entre sí. Es la **referencia de IP, redes y puertos** de la doc
 aquí. Todo sale del [`docker-compose.yml`](../docker-compose.yml) de la raíz y de [`sistema/test.env`](../sistema/test.env);
 si algún día difieren de este documento, manda el código.
 
-Otros documentos: las aplicaciones y su primera entrada en [aplicaciones.md](aplicaciones.md); la CA, LDAPS, cuentas y
+Otros documentos: las aplicaciones y su primera entrada en [aplicaciones.md](aplicaciones.md); la CA, el directorio, LDAPS, cuentas y
 exposición en [seguridad.md](seguridad.md); cómo arrancar, parar y diagnosticar en [operacion.md](operacion.md); las
 cifras medidas (tiempos, memoria, PASS/FAIL) en [resultados-un-host.md](resultados-un-host.md).
 
@@ -21,7 +21,7 @@ agrupados por departamento:
 | Taquilla y Boletería | 20 | Pretix | 5 |
 | Logística y Almacén | 30 | InvenTree | 3 |
 | Recursos Humanos | 40 | ERPNext (HR) | 12 |
-| Infraestructura transversal | 99 | OpenLDAP (LDAPS, CA interna), bind9, NTP, proxy web por nombre | 4 |
+| Infraestructura transversal | 99 | Samba AD DC (Kerberos, LDAPS, CA interna), bind9, NTP, proxy web por nombre | 4 |
 
 Cada VLAN del diseño es una **red bridge de Docker con su misma subred**. Dos bridges no se enrutan entre sí: esa es la
 segmentación. La aplicación de cada departamento está además en `vlan99_infra` para llegar a la infraestructura, y por
@@ -68,7 +68,7 @@ flowchart LR
   end
 
   subgraph V99["vlan99_infra · 10.10.99.0/24"]
-    LDAP["openldap .10<br/>389 / 636 (LDAPS)"]
+    LDAP["samba-ad (dc1) .10<br/>389 / 636 (LDAPS) · Kerberos 88"]
     DNS["dns-interno (bind9) .11<br/>vistas interna y lan"]
     NTP["ntp-interno .12"]
     PRX["proxy-web (nginx) .13"]
@@ -104,6 +104,8 @@ flowchart LR
   NAV -->|"80"| PRX
   CLI -->|"80 (IP de la LAN)"| PRX
   CLI -->|"53 udp+tcp (IP de la LAN; con WSL, vía reenviador de Windows al 1053)"| DNS
+  DNS -.->|"delega ad.reservaviva.lan (vista interna)"| LDAP
+  LDAP -->|"resolver y dns forwarder"| DNS
 ```
 
 En modo local (el de por defecto) el proxy y el DNS se publican en `127.0.0.1`, como todo lo demás; en modo intranet
@@ -121,7 +123,7 @@ equipo; `sistema/test.env` **no las define**, así que rigen los valores por def
 | `vlan20_taquilla` | Taquilla y Boletería (Pretix) | 10.10.20.0/24 | 10.10.20.1 |
 | `vlan30_logistica` | Logística y Almacén (InvenTree) | 10.10.30.0/24 | 10.10.30.1 |
 | `vlan40_rrhh` | Recursos Humanos (ERPNext) | 10.10.40.0/24 | 10.10.40.1 |
-| `vlan99_infra` | Infraestructura: OpenLDAP, DNS, NTP, el proxy web y la segunda interfaz de cada aplicación | 10.10.99.0/24 | 10.10.99.1 |
+| `vlan99_infra` | Infraestructura: Samba AD, DNS, NTP, el proxy web y la segunda interfaz de cada aplicación | 10.10.99.0/24 | 10.10.99.1 |
 | `erpnext_internal` | Red privada de ERPNext (MariaDB, Redis, workers). No es una VLAN del diseño | la asigna Docker | la asigna Docker |
 
 El gateway `.1` es la interfaz del bridge en el equipo anfitrión, no un router entre VLAN.
@@ -155,7 +157,7 @@ Docker en `erpnext_internal`.
 | 20 | `erpnext-queue-short` | RRHH | `erpnext-queue-short` | erpnext_internal | .x | `ghcr.io/frappe/hrms:v15.64.1` | [erpnext](../servicios/erpnext/README.md) |
 | 21 | `erpnext-queue-long` | RRHH | `erpnext-queue-long` | erpnext_internal | .x | `ghcr.io/frappe/hrms:v15.64.1` | [erpnext](../servicios/erpnext/README.md) |
 | 22 | `erpnext-hr` | RRHH | `erpnext-hr` | erpnext_internal, vlan40, vlan99 | .x · 10.10.40.10 · 10.10.99.25 | `ghcr.io/frappe/hrms:v15.64.1` | [erpnext](../servicios/erpnext/README.md) |
-| 23 | `openldap` | Infraestructura | `openldap` | vlan99 | 10.10.99.10 | `osixia/openldap:1.5.0` | [openldap](../servicios/openldap/README.md), [ca](../servicios/ca/README.md) |
+| 23 | `samba-ad` | Infraestructura | `samba-ad` | vlan99 | 10.10.99.10 | construida (`build: ./servicios/samba-ad`, `debian:trixie` + Samba 4.22) | [samba-ad](../servicios/samba-ad/README.md), [ca](../servicios/ca/README.md) |
 | 24 | `dns` | Infraestructura | `dns-interno` | vlan99 | 10.10.99.11 | `internetsystemsconsortium/bind9:9.18` | [bind9](../servicios/bind9/README.md) |
 | 25 | `ntp` | Infraestructura | `ntp-interno` | vlan99 | 10.10.99.12 | `cturra/ntp:latest` | [ntp](../servicios/ntp/README.md) |
 | 26 | `proxy` | Infraestructura | `proxy-web` | vlan99 | 10.10.99.13 | `nginx:1.30.5-alpine` | [proxy](../servicios/proxy/README.md) |
@@ -165,18 +167,18 @@ Docker en `erpnext_internal`.
 `depends_on`: `erpnext-db` sano → `configurator` → `create-site` → `ldap-config`; `erpnext-backend`, `websocket`,
 `scheduler` y las dos colas esperan a que `create-site` termine con éxito.
 
-Otras dependencias de arranque: `openvpms-app` espera a que `openvpms-db` esté sano; `pretix-worker` y `pretix-cron`, a
+Otras dependencias de arranque: `inventree-app`, `erpnext-backend` y `erpnext-ldap-config` esperan a `samba-ad` sano (`service_healthy`), que solo lo está cuando terminó de sembrar el directorio; `openvpms-app` espera a que `openvpms-db` esté sano; `pretix-worker` y `pretix-cron`, a
 `pretix-web` sano (solo `pretix-web` migra la base); `inventree-worker`, a `inventree-app` sano. Los servicios con
-healthcheck son las bases de datos y los Redis, `openvpms-app`, `pretix-web`, `inventree-app`, `erpnext-hr`, `ntp` y
+healthcheck son las bases de datos y los Redis, `samba-ad`, `openvpms-app`, `pretix-web`, `inventree-app`, `erpnext-hr`, `ntp` y
 `proxy-web`. El proxy no depende de ningún servicio: apunta a IP literales y, mientras una aplicación arranca, esa
 aplicación responde 502.
 
 ## 5. Doble conexión: aplicación ↔ vlan99_infra
 
-OpenLDAP, bind9 y NTP viven en `vlan99_infra`, y entre bridges no hay enrutamiento. Por eso el contenedor de cada
+Samba AD, bind9 y NTP viven en `vlan99_infra`, y entre bridges no hay enrutamiento. Por eso el contenedor de cada
 aplicación que necesita la infraestructura tiene **dos interfaces**: una en la VLAN de su departamento y otra en
 `vlan99_infra` con IP fija (`openvpms-app` .24, `pretix-web` .21, `inventree-app` .22, `erpnext-backend` .23). En ERPNext
-la doble conexión para LDAP la tiene `erpnext-backend`, que es quien habla con OpenLDAP. `erpnext-hr` (nginx) tiene
+la doble conexión para LDAP la tiene `erpnext-backend`, que es quien habla con Samba AD. `erpnext-hr` (nginx) tiene
 también una pata en `vlan99_infra` (.25), pero en sentido contrario: es por donde le llega el proxy web, porque es el
 único contenedor de RRHH que sirve la web completa (`/assets`, socket.io y el backend). Los contenedores auxiliares
 (bases de datos, Redis, workers) solo están en su red y no llegan a la infraestructura.
@@ -185,7 +187,7 @@ El **proxy web** (`proxy-web`, .13) está **solo** en `vlan99_infra`. Conectado 
 entre departamentos; así, lo único que añade es una entrada HTTP por nombre a las aplicaciones, por la misma red por la
 que ellas ya llegan a la infraestructura.
 
-OpenVPMS y Pretix no usan LDAP ([ldap.md](ldap.md)), pero conservan la pata en
+OpenVPMS y Pretix no usan LDAP ([directorio-activo.md](directorio-activo.md#9-límites-y-decisiones)), pero conservan la pata en
 `vlan99_infra` para llegar a DNS y NTP, igual que en el diseño.
 
 **Lo que un solo host no aísla:** `vlan99_infra` es un único dominio L2 compartido por las cuatro aplicaciones, así que
@@ -199,16 +201,19 @@ comprobación que lo muestra, en [`verificar_arquitectura.md`](../sistema/verifi
 
 1. El usuario entra en la web de la aplicación (`erpnext-hr` → `erpnext-backend`, o `inventree-app`).
 2. La aplicación abre `ldaps://ldap.reservaviva.lan:636`. El nombre lo resuelve su `extra_hosts` a `10.10.99.10`
-   (`openldap`), y el tráfico sale por su interfaz en `vlan99_infra`.
-3. Verifica el certificado de OpenLDAP con la CA interna montada en `/certs/ca.crt` (desde
-   `servicios/ca/certs/ca.crt`). El nombre coincide con el SAN del certificado.
-4. Hace bind con la cuenta de servicio `cn=svc-lectura,ou=servicios`, busca el `uid` solo en la OU de su departamento
-   (`ou=rrhh` para ERPNext, `ou=operaciones` para InvenTree) y después hace bind con la clave del propio usuario.
+   (`samba-ad`), y el tráfico sale por su interfaz en `vlan99_infra`. No pasa por bind9.
+3. Verifica el certificado del DC con la CA interna montada en `/certs/ca.crt` (desde `servicios/ca/certs/ca.crt`). El
+   nombre coincide con el SAN del certificado. Samba exige TLS para el bind simple (`ldap server require strong auth =
+   yes`), así que no hay vía por el 389 sin cifrar.
+4. Hace bind con la cuenta de servicio `CN=svc-lectura,OU=Servicios,DC=ad,DC=reservaviva,DC=lan`, busca al usuario por
+   `sAMAccountName` en todo el dominio con la condición de ser miembro directo de su grupo (`GG-RRHH` para ERPNext,
+   `GG-Operaciones` para InvenTree) y después hace bind con la clave del propio usuario.
 
-En ERPNext, `erpnext-ldap-config` solo escribe "LDAP Settings" en la base; no se conecta a OpenLDAP y por eso no
-necesita `vlan99_infra`. Detalle y pruebas en
-[ldap.md](ldap.md); cuentas y ACL en
-[seguridad.md](seguridad.md#3-ldap-y-ldaps).
+En ERPNext, `erpnext-ldap-config` solo escribe "LDAP Settings" en la base (como "Active Directory"); no se conecta al DC
+y por eso no necesita `vlan99_infra`. Las tres piezas que usan el directorio (`inventree-app`, `erpnext-backend` y
+`erpnext-ldap-config`) esperan a que `samba-ad` esté sano. Detalle y pruebas en
+[directorio-activo.md](directorio-activo.md#4-cómo-autentican-inventree-y-erpnext); cuentas y política en
+[seguridad.md](seguridad.md#3-directorio-activo-y-ldaps).
 
 ### Resolución de nombres: DNS de Docker frente a bind9
 
@@ -216,12 +221,15 @@ necesita `vlan99_infra`. Detalle y pruebas en
   resuelve los nombres de servicio y de contenedor dentro de cada red compartida. Así se encuentran los componentes de
   ERPNext en `erpnext_internal` (`erpnext-db`, `erpnext-redis-cache`, `erpnext-redis-queue`, `erpnext-backend:8000`,
   `erpnext-websocket:9000`). Pretix, InvenTree y OpenVPMS llegan a su base y a Redis por **IP fija**.
-- **bind9 (`dns-interno`, 10.10.99.11)** es el servidor autoritativo de `reservaviva.lan`, sin recursión
-  ([`named.conf`](../servicios/bind9/named.conf)), con dos vistas (siguiente apartado). Lo consultan la verificación
+- **bind9 (`dns-interno`, 10.10.99.11)** es el servidor autoritativo de `reservaviva.lan`, con dos vistas (siguiente
+  apartado) y recursión solo en la vista interna, limitada a seguir la delegación de `ad.reservaviva.lan`
+  ([`named.conf`](../servicios/bind9/named.conf)). Lo consultan la verificación
   (desde `vlan99_infra`, desde las aplicaciones y desde el anfitrión), el equipo anfitrión por `localhost:1053` y, en modo
   intranet, los equipos de la LAN por el 53 (con Docker Engine en WSL, a través del reenviador de Windows, sección 7).
-  Las aplicaciones no dependen de él.
-- **`extra_hosts`** fija `ldap.reservaviva.lan → 10.10.99.10` en `inventree-app` y `erpnext-backend`, los dos
+  Las aplicaciones no dependen de él. Solo es cliente de bind9 quien está en `vlan99_infra`: los departamentos no llegan
+  a él (segmentación). Samba AD sí lo usa: es su resolver (`dns: 10.10.99.11` en el compose) y a la vez bind9 le delega
+  la zona AD.
+- **`extra_hosts`** fija `ldap.reservaviva.lan → 10.10.99.10` (`samba-ad`) en `inventree-app` y `erpnext-backend`, los dos
   contenedores que hacen LDAPS. Así el nombre coincide con el certificado sin depender de ningún DNS.
 
 ### La zona `reservaviva.lan` y sus dos vistas
@@ -256,15 +264,27 @@ nuevo que el arranque de `dns-interno`, el script reinicia ese contenedor para q
 | Nombre | Vista interna (contenedores) | Contenedor | Vista lan (anfitrión y LAN) |
 |---|---|---|---|
 | `dns.reservaviva.lan` | 10.10.99.11 | `dns-interno` | `IP_ANFITRION` |
-| `ldap.reservaviva.lan` | 10.10.99.10 | `openldap` | no existe (NXDOMAIN) |
+| `ldap.reservaviva.lan` | 10.10.99.10 | `samba-ad` | no existe (NXDOMAIN) |
+| `ad.reservaviva.lan` (delegación) | `NS dc1.ad.reservaviva.lan.` y glue `dc1.ad` → 10.10.99.10; lo resuelve el propio DC | `samba-ad` | no existe (NXDOMAIN) |
 | `ntp.reservaviva.lan` | 10.10.99.12 | `ntp-interno` | no existe (NXDOMAIN) |
 | `openvpms.reservaviva.lan` | 10.10.10.10 | `openvpms-app` | `IP_ANFITRION` (proxy web) |
 | `pretix.reservaviva.lan` | 10.10.20.10 | `pretix-web` | `IP_ANFITRION` (proxy web) |
 | `inventree.reservaviva.lan` | 10.10.30.10 | `inventree-app` | `IP_ANFITRION` (proxy web) |
 | `rrhh.reservaviva.lan` | 10.10.40.10 | `erpnext-hr` (nginx, el que atiende HTTP) | `IP_ANFITRION` (proxy web) |
 
-`ldap` y `ntp` no se anuncian en la vista lan porque OpenLDAP y NTP solo se publican en `127.0.0.1` y en puertos
-desplazados: un nombre que llevara a la IP de la LAN llevaría a un puerto cerrado.
+`ldap` y `ntp` no se anuncian en la vista lan porque Samba AD y NTP solo se publican en `127.0.0.1` y en puertos
+desplazados: un nombre que llevara a la IP de la LAN llevaría a un puerto cerrado. Por la misma razón la vista lan no
+lleva la delegación de `ad.reservaviva.lan`.
+
+### Delegación de `ad.reservaviva.lan` a Samba AD
+
+El directorio vive en el subdominio `ad.reservaviva.lan` y su DNS lo sirve el propio DC (Samba, `SAMBA_INTERNAL`). bind9 no
+lo reenvía con una zona `forward`: como es autoritativo del padre, `reservaviva.lan`, esa zona nunca se consultaría.
+Lo que hay es una **delegación NS con glue** dentro de la zona, solo en la vista interna (`ad IN NS dc1.ad.reservaviva.lan.`
+y `dc1.ad IN A 10.10.99.10`). Para seguirla, esa vista lleva `recursion yes` limitada a `red-interna`, y una zona `"."`
+de reenvío sin reenviadores: todo nombre que no sea de `reservaviva.lan` da `SERVFAIL` por política. Samba reenvía a
+bind9 (`dns forwarder = 10.10.99.11`) lo que no es de su zona. Razones y comprobación en
+[`servicios/bind9/README.md`](../servicios/bind9/README.md) y [directorio-activo.md](directorio-activo.md#2-realm-dns-y-delegación).
 
 `levantar-sistema.sh verificar` comprueba que cada nombre de la vista interna apunta a la IP real del contenedor y que la
 vista lan da la IP del proxy ([`verificar_arquitectura.md`](../sistema/verificar_arquitectura.md), bloques 2 y 4).
@@ -291,12 +311,16 @@ comprueba el `Host`.
 
 El cambio a `reservaviva.lan` afecta a nombres DNS, URL y certificados. Estos otros identificadores **conservan
 `reservaviva.local` a propósito**, porque están guardados en los datos persistentes (volúmenes) y cambiarlos obligaría a
-migrar o reinicializar bases y directorio. No son nombres DNS: nadie los resuelve.
+migrar o reinicializar bases. No son nombres DNS: nadie los resuelve.
+
+El directorio ya no está en la lista: el DN de Samba AD es `DC=ad,DC=reservaviva,DC=lan` y el `mail` de las cuentas de
+prueba termina en `reservaviva.lan`, porque Samba no admite `.local`. Lo que queda con el sufijo antiguo, aparte de los
+de la tabla, es un User huérfano en la base de ERPNext (`rrhh.prueba@reservaviva.local`, del stack anterior con OpenLDAP;
+inofensivo, se borra a mano), descrito en
+[directorio-activo.md](directorio-activo.md#quien-venía-del-stack-viejo-limpiar-los-restos).
 
 | Identificador | Dónde vive | Por qué no cambia |
 |---|---|---|
-| DN base `dc=reservaviva,dc=local` y todas las cuentas (`cn=svc-lectura,ou=servicios,…`) | Directorio de OpenLDAP (volúmenes `ldap_*`); lo deriva la imagen de `LDAP_DOMAIN: reservaviva.local` | Es la raíz del árbol LDAP: cambiarla es reinicializar el directorio y reconfigurar ERPNext e InvenTree |
-| Atributo `mail` de los usuarios de prueba (`vet.prueba@reservaviva.local`…) | Directorio de OpenLDAP; ERPNext e InvenTree lo copian al usuario en su primer login | Los usuarios ya creados en las aplicaciones lo tienen guardado |
 | Sitio de ERPNext `rrhh.reservaviva.local` (`ERPNEXT_SITE`, `FRAPPE_SITE_NAME_HEADER`) | Carpeta `sites/` (volumen `erpnext_sites`) y nombre de la base de MariaDB | Es el nombre interno del sitio de Frappe; nginx lo elige por cabecera, no por el `Host` |
 | Administrador de Pretix `admin@reservaviva.local` (`PRETIX_ADMIN_EMAIL`) | Base de datos de Pretix | Es su usuario de entrada; `crear_admin_pretix` lo busca por ese correo |
 | Correo del administrador de InvenTree `admin@reservaviva.local` (`INVENTREE_ADMIN_EMAIL`) | Base de datos de InvenTree | El superusuario ya existe con ese correo |
@@ -334,14 +358,15 @@ qué requiere Windows: [operacion.md](operacion.md#acceso-desde-la-lan).
 | ERPNext (`erpnext-hr`) | 18081 | 8080 | `PUBLISH_IP` = 127.0.0.1 | `ERPNEXT_PORT` |
 | Pretix (`pretix-web`) | 18082 | 80 | `PUBLISH_IP` = 127.0.0.1 | `PRETIX_PORT` |
 | InvenTree (`inventree-app`) | 18083 | 8000 | `PUBLISH_IP` = 127.0.0.1 | `INVENTREE_PORT` |
-| OpenLDAP, sin cifrar (`openldap`) | 1389 | 389 | `PUBLISH_IP` = 127.0.0.1 | `LDAP_PORT` |
-| OpenLDAP, LDAPS (`openldap`) | 1636 | 636 | `PUBLISH_IP` = 127.0.0.1 | `LDAPS_PORT` |
+| Samba AD, LDAP (`samba-ad`; el bind simple se rechaza: exige TLS) | 1389 | 389 | `PUBLISH_IP` = 127.0.0.1 | `LDAP_PORT` |
+| Samba AD, LDAPS (`samba-ad`) | 1636 | 636 | `PUBLISH_IP` = 127.0.0.1 | `LDAPS_PORT` |
 | bind9 (`dns-interno`) | 1053 udp y tcp (modo intranet: 53 en la IP de la LAN; con WSL, 1053 en la IP de la LAN + reenviador en el 53) | 53 | `DNS_BIND_IP` = 127.0.0.1 | `DNS_PORT` |
 | NTP (`ntp-interno`) | 1123 udp | 123 | `PUBLISH_IP` = 127.0.0.1 | `NTP_PORT` |
 | Proxy web por nombre (`proxy-web`) | 80 (en modo intranet, en la IP de la LAN) | 80 | `INTRANET_IP` = 127.0.0.1 | `HTTP_PORT` |
 
 Ningún otro contenedor publica puertos: `erpnext-backend` (gunicorn, 8000) y las bases de datos solo son alcanzables
-desde sus redes.
+desde sus redes. `samba-ad` **no publica** el 445 (SMB, lo ocupa Windows en el host), el 88 (Kerberos, se prueba dentro de la
+red) ni el 53 (el DNS llega por bind9).
 
 **Si faltara una variable**, el compose usa sus valores por defecto: la dirección `127.0.0.1` (igual que `test.env`; antes
 era `0.0.0.0`, todas las interfaces) y los puertos originales (8080, 8080, 80, 8000, 389, 636, 53 y 123). Con esos valores
@@ -361,14 +386,14 @@ servicios/
   pretix/                  solo README (configuración en el compose)
   inventree/               solo README (configuración en el compose)
   erpnext/                 prueba de erpnext-create-site
-  openldap/                LDIF de ACL, estructura y usuarios de prueba
+  samba-ad/                Dockerfile, entrypoint (provisión) y siembra del directorio
   ca/                      generar-certificados.sh; certs/ (fuera de git)
   bind9/                   named.conf (dos vistas) y plantillas de las dos zonas
   ntp/                     solo README
   proxy/                   plantilla de configuración de nginx (proxy web por nombre)
 sistema/                   test.env (variables), scripts de verificación y habilitar-intranet-windows.ps1
 levantar-sistema.sh        arranque, preparación, estado, verificación (.ps1 y .cmd: lanzadores desde Windows)
-docs/                      documentación (este documento, aplicaciones, seguridad, operación, LDAP, resultados)
+docs/                      documentación (este documento, aplicaciones, seguridad, operación, directorio activo, resultados)
 diseno-red/                anexo: diseño de 3 equipos con VLAN 802.1Q y switch (no se despliega)
 ```
 
@@ -384,6 +409,6 @@ las mismas. Lo que cambia en un host:
   (router-on-a-stick con `nftables`) aplican la matriz de segmentación y permiten el tráfico hacia VLAN 99. Aquí no
   existe ninguno de los dos: el acceso a la infraestructura se consigue con la doble conexión (sección 5), y el `.1` de
   cada red es solo la interfaz del bridge.
-- **Direcciones.** En el diseño, `10.10.99.10` es PC-3 y da LDAP, DNS y NTP a la vez. Aquí cada servicio es un contenedor
+- **Direcciones.** En el diseño, `10.10.99.10` es PC-3 y da LDAP, DNS y NTP a la vez. Aquí `10.10.99.10` es el controlador de dominio `samba-ad`. Aquí cada servicio es un contenedor
   con su propia IP (sección 6, zona).
 - **Una sola CA** montada desde `servicios/ca/certs/`, en lugar de una copia por equipo.

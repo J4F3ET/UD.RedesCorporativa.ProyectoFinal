@@ -1,7 +1,7 @@
 # Seguridad y credenciales
 
 Qué protege el sistema de un host, con qué mecanismos y qué deja sin cubrir. Se dirige a quien clona el repositorio.
-Aquí no se repite la integración LDAP de cada aplicación, que está en [`ldap.md`](ldap.md). Las cifras de las pruebas
+Aquí no se repite la integración LDAP de cada aplicación, que está en [`directorio-activo.md`](directorio-activo.md). Las cifras de las pruebas
 están en [`resultados-un-host.md`](resultados-un-host.md).
 
 ## 1. Alcance y advertencia
@@ -10,8 +10,8 @@ Reserva Viva es un **laboratorio académico**, no un despliegue de producción:
 
 - Todas las contraseñas están en [`../sistema/test.env`](../sistema/test.env). Ese fichero **está versionado en git**,
   así que sus valores están en el historial del repositorio. Son claves **desechables** de laboratorio.
-- `sistema/test.env` es la **única** fuente de claves, también las del directorio LDAP: ningún otro fichero versionado
-  (LDIF, README, scripts) contiene una clave. Los LDIF con los hash se generan en cada `preparar` (sección 3).
+- `sistema/test.env` es la **única** fuente de claves, también las del directorio (Samba AD): ningún otro fichero versionado
+  (README, scripts) contiene una clave. `samba-ad` las recibe por variables de entorno y las aplica al sembrar (sección 3).
 - Hay que **rotar todas las claves** si el repositorio se hace público o si alguien usa este sistema fuera del laboratorio
   (ver la sección 6). Borrar `test.env` en un commit nuevo no basta: el historial conserva los valores.
 
@@ -20,15 +20,15 @@ Reserva Viva es un **laboratorio académico**, no un despliegue de producción:
 ### Qué genera `servicios/ca/generar-certificados.sh`
 
 [`../servicios/ca/generar-certificados.sh`](../servicios/ca/generar-certificados.sh) crea una CA propia del laboratorio y el
-certificado de OpenLDAP. `levantar-sistema.sh` lo ejecuta en cada `preparar` y en cada `arrancar`, siempre con
+certificado LDAPS de Samba AD. `levantar-sistema.sh` lo ejecuta en cada `preparar` y en cada `arrancar`, siempre con
 `--sin-instalar-ca`. Los ficheros quedan en `servicios/ca/certs/`, que está en `.gitignore`: cada clon genera los suyos.
 
 | Fichero | Qué es | Parámetros | Permisos al generarse |
 |---|---|---|---|
 | `ca.crt` | Certificado público de la CA. Es lo que deben confiar los clientes de LDAPS | RSA 4096, SHA-256, 3650 días, `CA:TRUE` (crítica), `keyCertSign, cRLSign`; sujeto `O=Zoologico Reserva Viva, CN=Reserva Viva CA interna` | 644 |
 | `ca.key` | Clave privada de la CA. **No se monta en ningún contenedor** | — | 600 |
-| `ldap.crt` | Certificado de servidor de OpenLDAP, firmado por la CA | RSA 2048, SHA-256, 825 días, `serverAuth`; SAN `DNS:ldap.reservaviva.lan`, `DNS:openldap`, `DNS:localhost`, `IP:10.10.99.10`, `IP:127.0.0.1` | 644 |
-| `ldap.key` | Clave privada de OpenLDAP | — | 600 |
+| `ldap.crt` | Certificado de servidor de `samba-ad`, firmado por la CA | RSA 2048, SHA-256, 825 días, `serverAuth`; SAN `DNS:ldap.reservaviva.lan`, `DNS:dc1.ad.reservaviva.lan`, `DNS:samba-ad`, `DNS:localhost`, `IP:10.10.99.10`, `IP:127.0.0.1` | 644 |
+| `ldap.key` | Clave privada del servidor LDAPS | — | 600 |
 
 El script trabaja con `umask 077`. Opciones: `--forzar` lo regenera todo, y `--sin-instalar-ca` evita instalar `ca.crt` en
 el almacén de confianza del equipo. Sin esa opción, la instalación se hace solo si el script corre como root y existe
@@ -38,38 +38,38 @@ el almacén de confianza del equipo. Sin esa opción, la instalación se hace so
 
 El script es idempotente. Si los certificados existen y son válidos, no toca nada. Regenera en estos casos:
 
-- **La CA** (y con ella el certificado de OpenLDAP), con `--forzar`, si falta `ca.key` o si a `ca.crt` le quedan menos de
+- **La CA** (y con ella el certificado LDAPS), con `--forzar`, si falta `ca.key` o si a `ca.crt` le quedan menos de
   30 días de vigencia.
-- **Solo el certificado de OpenLDAP**, con `--forzar`, si falta `ldap.key`, si a `ldap.crt` le quedan menos de 30 días, si
-  `ldap.crt` no lo firma la `ca.crt` actual o si su SAN no incluye `ldap.reservaviva.lan` y `10.10.99.10`. Así se
+- **Solo el certificado LDAPS**, con `--forzar`, si falta `ldap.key`, si a `ldap.crt` le quedan menos de 30 días, si
+  `ldap.crt` no lo firma la `ca.crt` actual o si su SAN no incluye `ldap.reservaviva.lan`, `dc1.ad.reservaviva.lan`, `samba-ad` y `10.10.99.10` (un `ldap.crt`
+  anterior a la migración a Samba AD se regenera solo en el siguiente `arrancar`, con la misma CA). Así se
   regeneró el 27/09/2026, al pasar el dominio de `.local` a `.lan`: solo `ldap.crt`/`ldap.key`, con la misma CA, sin tocar
   a los clientes (que confían en `ca.crt`).
 
-Los permisos (`chmod`) se aplican **solo a lo generado en esa ejecución**. Al arrancar, la imagen de OpenLDAP
-(`osixia/openldap`) se apropia de los certificados montados (uid 911), y desde entonces el usuario del equipo ya no puede
-cambiarles los permisos. Por la misma razón, el script borra y crea los ficheros de nuevo en vez de sobrescribirlos, y
-OpenLDAP los monta sin `:ro`.
+Los permisos (`chmod`) se aplican **solo a lo generado en esa ejecución**, para no fallar si algún fichero anterior quedó
+con otro dueño. El script borra y crea los ficheros de nuevo en vez de sobrescribirlos.
 
 Si se regeneran con el sistema en marcha, los contenedores que los montan siguen viendo los ficheros anteriores hasta que
-se recrean. Para OpenLDAP, un reinicio **no basta**: con `--copy-service`, la imagen copia sus certificados a
-`/container/run/service` solo en el primer arranque de cada contenedor, y slapd usa esa copia. Se comprobó el 27/09/2026:
-tras regenerar `ldap.crt` y reiniciar `openldap`, seguía sirviendo el certificado antiguo y el login LDAPS de ERPNext e
-InvenTree fallaba. Por eso `arrancar` **recrea** `openldap` (con sus mismos volúmenes) cuando `ldap.crt` es más nuevo que
-el contenedor (`recrear_ldap_si_cert_nuevo`), y después reinicia los dos clientes LDAPS, `inventree-app` y
-`erpnext-backend`: el mismo día, con `openldap` ya sirviendo el certificado nuevo, InvenTree siguió rechazando el login LDAP
-(401, sin ningún error en su log) hasta reiniciar `inventree-app`, mientras un proceso nuevo dentro del mismo contenedor
-autenticaba bien. Queda estado TLS/LDAP en los procesos de gunicorn; la causa exacta no se identificó. Tras el reinicio,
-`ldaplogin.py` pasó. También se reinicia `erpnext-hr`: al reiniciarse, `erpnext-backend` puede cambiar de IP en
-`erpnext_internal` y el nginx de `erpnext-hr` seguía llamando a la antigua (502 en `rrhh`). Si se regenerase la CA, habría que recrear también `inventree-app` y `erpnext-backend` para que
-monten la `ca.crt` nueva, y eso no está automatizado.
+se reinician. `samba-ad` monta los tres ficheros de solo lectura en `/certs` y su entrypoint los **copia** a
+`/var/lib/samba/private/tls/` con `chmod 600` **en cada arranque** (Samba rechaza la clave privada si no tiene permisos 0600
+exactos, y un montaje de solo lectura no se puede chmodear). Por eso, a diferencia del OpenLDAP anterior (que solo copiaba
+sus certificados en el primer arranque de cada contenedor y había que recrearlo), basta con **reiniciar** `samba-ad`, sin
+recrearlo: `arrancar` lo hace cuando `ldap.crt` es más nuevo que el último arranque del contenedor
+(`reiniciar_directorio_si_cert_nuevo`), y después reinicia los dos clientes LDAPS, `inventree-app` y
+`erpnext-backend`. Esto último se mantiene del stack anterior: el 27/09/2026, con el directorio ya sirviendo el certificado
+nuevo, InvenTree siguió rechazando el login LDAP (401, sin ningún error en su log) hasta reiniciar `inventree-app`, mientras
+un proceso nuevo dentro del mismo contenedor autenticaba bien. Queda estado TLS/LDAP en los procesos de gunicorn; la causa
+exacta no se identificó. También se reinicia `erpnext-hr`: al reiniciarse, `erpnext-backend` puede cambiar de IP en
+`erpnext_internal` y el nginx de `erpnext-hr` seguía llamando a la antigua (502 en `rrhh`). Si se regenerase la CA, habría
+que recrear también `inventree-app` y `erpnext-backend` para que monten la `ca.crt` nueva, y eso no está automatizado.
 
 ### Quién monta qué
 
 | Contenedor | Ficheros montados desde `servicios/ca/certs/` | Para qué |
 |---|---|---|
-| `openldap` | `ca.crt`, `ldap.crt`, `ldap.key` | Servir LDAPS en el 636 (`LDAP_TLS: "true"`) |
-| `erpnext-backend` | `ca.crt` → `/certs/ca.crt` (solo lectura) | Verificar el certificado de OpenLDAP |
-| `inventree-app` | `ca.crt` → `/certs/ca.crt` (solo lectura) | Verificar el certificado de OpenLDAP |
+| `samba-ad` | `ca.crt`, `ldap.crt`, `ldap.key` → `/certs/` (solo lectura; el entrypoint los copia con `chmod 600`) | Servir LDAPS en el 636 (`tls enabled = yes`) |
+| `erpnext-backend` | `ca.crt` → `/certs/ca.crt` (solo lectura) | Verificar el certificado del DC |
+| `inventree-app` | `ca.crt` → `/certs/ca.crt` (solo lectura) | Verificar el certificado del DC |
 
 OpenVPMS y Pretix no montan nada, porque no usan LDAP. Todo está definido en el compose único
 [`../docker-compose.yml`](../docker-compose.yml).
@@ -84,66 +84,79 @@ ERPNext e InvenTree no funciona. Para evitarlo, el certificado debe existir ante
 comprobación en `preparar` de `levantar-sistema.sh`. Si ya se arrancó sin él, hay que borrar el directorio vacío que
 creó Docker, volver a ejecutar `preparar` y recrear los contenedores afectados.
 
-## 3. LDAP y LDAPS
+## 3. Directorio activo y LDAPS
 
 ### Qué aplicación usa LDAP
 
-Solo ERPNext e InvenTree, las dos por LDAPS (`ldaps://ldap.reservaviva.lan:636`) y verificando el certificado de
-OpenLDAP con la CA interna; OpenVPMS y Pretix no usan LDAP. Cómo lo configura cada aplicación, qué se comprueba y por
-qué las otras dos no se integran: [`ldap.md`](ldap.md). El nombre `ldap.reservaviva.lan` se fija con `extra_hosts`
+Solo ERPNext e InvenTree, las dos por LDAPS (`ldaps://ldap.reservaviva.lan:636`) y verificando el certificado del DC con la
+CA interna; OpenVPMS y Pretix no usan LDAP. Cómo lo configura cada aplicación, qué se comprueba y por qué las otras dos no
+se integran: [`directorio-activo.md`](directorio-activo.md). El nombre `ldap.reservaviva.lan` se fija con `extra_hosts`
 para que coincida con el SAN del certificado sin depender del DNS.
 
-OpenLDAP tiene `LDAP_TLS_VERIFY_CLIENT: never`: no pide certificado a los clientes. También escucha en **389 sin
-cifrar**, pero las dos aplicaciones integradas usan solo el 636.
+### Controles del directorio
 
-### Árbol del directorio (DIT)
+- **Solo LDAPS para el bind simple.** Samba lleva `ldap server require strong auth = yes` (el valor por defecto, que cierra
+  [CVE-2016-2112](https://www.samba.org/samba/security/CVE-2016-2112.html)): un bind simple por el 389 sin cifrar se rechaza
+  con "Strong(er) authentication required". Las dos aplicaciones ya usan el 636, así que no se relajó. El 389 sigue
+  publicado en `127.0.0.1:1389`, pero no admite credenciales; AD tampoco admite consultas anónimas salvo al rootDSE.
+- **Complejidad de contraseñas de AD.** Toda clave del dominio debe cumplirla (longitud mínima, tres de cuatro categorías y no
+  contener el nombre de la cuenta). Dos claves de `test.env` no la cumplían y se cambió **la clave, no la política**. Con ello,
+  `samba-tool` rechaza cualquier clave nueva débil.
+- **`privileged: true`.** Samba guarda las ACL de AD en atributos extendidos `security.*` del sistema de ficheros y el
+  contenedor sin privilegios no puede escribirlas. Es la mayor concesión de este servicio: un contenedor privilegiado tiene
+  acceso casi total al kernel del host. Se acepta en el laboratorio; en producción habría que acotar las capacidades
+  necesarias en lugar de `privileged`.
+- **Puertos acotados.** Solo se publican el 389 y el 636, en `127.0.0.1`. No se publican el 445 (SMB; además lo ocupa Windows),
+  el 88 (Kerberos) ni el 53. Con `interfaces = eth0` y `bind interfaces only = yes`, Samba solo escucha en su interfaz de
+  `vlan99_infra`.
+- **Recursión limitada en bind9.** Para seguir la delegación de `ad.reservaviva.lan` hizo falta `recursion yes` en la vista
+  interna, limitada con `allow-recursion { red-interna; }` (las `options` globales y la vista `lan` siguen en `recursion no`).
+  Para que esa recursión no se convierta en un resolvedor de Internet, la vista lleva una zona `"."` de reenvío **sin
+  reenviadores** (`forward only; forwarders { };`): todo nombre que no sea de `reservaviva.lan` da `SERVFAIL` por política,
+  aunque `vlan99_infra` llegara a tener salida. Detalle en [`servicios/bind9/README.md`](../servicios/bind9/README.md).
+- **Cuentas de laboratorio sin caducidad.** Las cuatro cuentas de prueba y `svc-lectura` llevan `--noexpiry` (UAC `66048`)
+  en cada arranque, para que un login de prueba no falle por caducidad a los 41 días. La política del dominio (`maxPwdAge`)
+  no se toca, y `Administrator` sí caduca. Con claves públicas en git, en producción esto no se admitiría.
 
-Base `dc=reservaviva,dc=local`, definido en la plantilla
-[`10-estructura.ldif.tpl`](../servicios/openldap/10-estructura.ldif.tpl):
+### Árbol del directorio
+
+Base `DC=ad,DC=reservaviva,DC=lan`, que crea [`sembrar.sh`](../servicios/samba-ad/sembrar.sh):
 
 ```
-dc=reservaviva,dc=local
-├── ou=medica        Veterinaria y Clínica (VLAN 10)
-├── ou=operaciones   Taquilla y Logística (VLAN 20 y 30)
-├── ou=rrhh          Recursos Humanos (VLAN 40)
-└── ou=servicios     cuentas de servicio
-    └── cn=svc-lectura
+DC=ad,DC=reservaviva,DC=lan
+├── OU=Medica         vet.prueba        (GG-Medica)
+├── OU=Operaciones    logistica.prueba, taquilla.prueba  (GG-Operaciones)
+├── OU=RRHH           rrhh.prueba       (GG-RRHH)
+├── OU=Servicios      svc-lectura       (cuenta de búsqueda)
+└── OU=Grupos         GG-Medica, GG-Operaciones, GG-RRHH
 ```
 
-Los LDIF se cargan **solo en el primer arranque, con el volumen `ldap_data` vacío**. Cambiar el LDIF no modifica un
-directorio que ya existe.
+El dominio se provisiona **solo la primera vez**, con `private/` vacía (marca `private/.provisionado-reserva-viva`); la siembra
+se repite en cada arranque y es idempotente. Cambiar `sembrar.sh` añade lo que falte, pero no borra nada del dominio ya
+creado. Si el volumen queda a medias (un `domain provision` interrumpido), el entrypoint se detiene con un error explícito:
+la solución es `./levantar-sistema.sh borrar-directorio` ([operacion.md](operacion.md#directorio-borrar-directorio)).
 
-**Cómo se generan los LDIF.** Las plantillas versionadas `servicios/openldap/*.ldif.tpl` no llevan claves, sino
-marcadores `${SSHA_<CUENTA>}`. `levantar-sistema.sh preparar` (también dentro de `arrancar`) los sustituye por el hash
-`{SSHA}` (SHA-1 con 8 bytes de sal aleatoria, calculado con `openssl`; la clave no pasa por la línea de comandos de ningún
-proceso) de la variable correspondiente de `test.env`, y escribe el resultado en `servicios/openldap/generado/`, que está
-ignorada por git y es la carpeta que el compose monta como bootstrap de la imagen. Si falta una variable, `preparar`
-se detiene con `definir <VARIABLE> en sistema/test.env`. El README y las plantillas no llegan al contenedor.
+### Cuentas con privilegios en el directorio
 
-### Cuentas con privilegios en el directorio y sus ACL
-
-Solo hay **una** cuenta de servicio para las búsquedas (bind), y la comparten las dos aplicaciones. La regla está en
-[`05-acl-servicio.ldif`](../servicios/openldap/05-acl-servicio.ldif) y sustituye la regla `{2}` de la configuración:
+Solo hay **una** cuenta de servicio para las búsquedas (bind), y la comparten las dos aplicaciones:
 
 | Cuenta | Qué puede hacer | Quién la usa |
 |---|---|---|
-| `cn=admin,dc=reservaviva,dc=local` | Escribir en todo el directorio | Administración manual. La crea la imagen con `LDAP_ADMIN_PASSWORD` |
-| `cn=svc-lectura,ou=servicios,dc=reservaviva,dc=local` | Leer todo el directorio **excepto `userPassword`** (según el comentario del LDIF, la regla `{1}` de la imagen le impide leer las claves y solo le permite autenticarse con ellas) | ERPNext e InvenTree, para buscar al usuario antes de autenticarlo |
-| Cada usuario (`self`) | Leer su propia entrada | — |
-| Resto, incluido el acceso anónimo | Nada, según la regla `{2}` | — |
+| `Administrator` | Administrar el dominio (`samba-tool`, `ldapmodify`). La crea `domain provision` con `SAMBA_ADMIN_PASSWORD` | Administración manual y `sembrar.sh` (`ldapmodify` de `givenName`/`sn`). No está en ningún grupo `GG-*` |
+| `svc-lectura` (`CN=svc-lectura,OU=Servicios,DC=ad,DC=reservaviva,DC=lan`) | Buscar usuarios para autenticarlos. No tiene ninguna ACL a medida: lee con los permisos por defecto de un usuario del dominio | ERPNext e InvenTree |
+| Cada usuario | Hacer bind con su propia clave | Las aplicaciones, al autenticarlo |
 
-Las reglas `{0}` y `{1}` vienen de la imagen `osixia/openldap` y no están en el repositorio. Su contenido exacto está
-**no verificado** aquí.
+La ACL a medida de slapd (`05-acl-servicio.ldif`) desapareció con OpenLDAP: en AD, los permisos de lectura de los objetos son
+los del dominio, y lo que decide quién entra en cada aplicación es el **grupo** (`memberOf`), no una regla del servidor.
 
-Cada aplicación busca **solo en la OU de su departamento**: ERPNext en `ou=rrhh` e InvenTree en `ou=operaciones`. Por
-eso un usuario de otro departamento no entra. La búsqueda no filtra por grupos, porque el directorio no define ninguno.
+Cada aplicación busca en **toda la base del dominio** y exige la pertenencia **directa** a su grupo: `GG-RRHH` en ERPNext y
+`GG-Operaciones` en InvenTree. Por eso `vet.prueba` (`GG-Medica`) no entra en ninguna, y la prueba negativa de `verificar` lo
+comprueba. Quedó resuelto el pendiente de grupos LDAP; sigue pendiente la cuenta de servicio por aplicación (sección 6).
 
 ### Usuarios de prueba
 
-Definidos en la plantilla [`20-usuarios-prueba.ldif.tpl`](../servicios/openldap/20-usuarios-prueba.ldif.tpl); en el
-directorio sus claves quedan como hash SSHA. Están organizados por OU, no por grupos. Qué usuario entra en qué aplicación está en
-[`ldap.md`](ldap.md#2-el-directorio). Los usuarios LDAP se crean en la aplicación al primer login y **sin permisos**: se
-los asigna un administrador.
+Qué usuario entra en qué aplicación está en [`directorio-activo.md`](directorio-activo.md#3-objetos-del-directorio). Los
+usuarios LDAP se crean en la aplicación al primer login y **sin permisos**: se los asigna un administrador.
 
 **Dónde están las claves:**
 
@@ -151,16 +164,17 @@ Todas en [`../sistema/test.env`](../sistema/test.env), y solo ahí:
 
 | Cuenta | Variable |
 |---|---|
-| `cn=svc-lectura,ou=servicios` (la usan InvenTree y ERPNext para buscar) | `LDAP_SVC_LECTURA_PASSWORD` |
+| `svc-lectura` (la usan InvenTree y ERPNext para buscar) | `LDAP_SVC_LECTURA_PASSWORD` |
 | `vet.prueba` | `LDAP_PRUEBA_VET_PASSWORD` |
 | `logistica.prueba` | `LDAP_PRUEBA_LOGISTICA_PASSWORD` |
 | `taquilla.prueba` | `LDAP_PRUEBA_TAQUILLA_PASSWORD` |
 | `rrhh.prueba` | `LDAP_PRUEBA_RRHH_PASSWORD` |
-| `cn=admin` (administrador del directorio) | `LDAP_ADMIN_PASSWORD` (la aplica la propia imagen) |
+| `Administrator` (administrador del dominio) | `SAMBA_ADMIN_PASSWORD` (antes `LDAP_ADMIN_PASSWORD`) |
 
-La misma variable alimenta el hash del LDIF de `svc-lectura` y la configuración de las dos aplicaciones
-(`docker-compose.yml`), así que no pueden desincronizarse en un primer arranque. `sistema/ldaplogin.py` lee las de
-`rrhh.prueba` y `logistica.prueba` del mismo fichero.
+La misma variable alimenta la siembra de `svc-lectura` y la configuración de las dos aplicaciones (`docker-compose.yml`), así
+que no pueden desincronizarse. En cada arranque, `sembrar.sh` **reconcilia** la clave real de cada cuenta con la de
+`test.env` (`samba-tool user setpassword`), incluida la de `Administrator`. `sistema/ldaplogin.py` lee las de `rrhh.prueba`
+y `logistica.prueba` del mismo fichero.
 
 ## 4. Credenciales iniciales por aplicación
 
@@ -172,7 +186,7 @@ Solo los nombres de usuario y la variable que guarda cada clave. Los valores est
 | Pretix | el valor de `PRETIX_ADMIN_EMAIL` (`admin@reservaviva.local`) | `PRETIX_ADMIN_PASSWORD` | La crea `levantar-sistema.sh` si no existe (ver abajo) |
 | InvenTree | `INVENTREE_ADMIN_USER` (`admin` por defecto; `test.env` no lo define) | `INVENTREE_ADMIN_PASSWORD` | La imagen crea el superusuario solo si no existe |
 | ERPNext | `Administrator` | `ERPNEXT_ADMIN_PASSWORD` | Una vez, al crear el sitio (`erpnext-create-site`) |
-| OpenLDAP | `cn=admin,dc=reservaviva,dc=local` | `LDAP_ADMIN_PASSWORD` | Con el volumen `ldap_data` vacío |
+| Samba AD | `Administrator` (realm `AD.RESERVAVIVA.LAN`) | `SAMBA_ADMIN_PASSWORD` | Al provisionar el dominio, con `private/` vacía; después, `sembrar.sh` la reconcilia en cada arranque |
 | Bases de datos | usuarios internos de MySQL, MariaDB y PostgreSQL | `OPENVPMS_DB_ROOT_PASSWORD`, `OPENVPMS_DB_PASSWORD`, `PRETIX_DB_PASSWORD`, `INVENTREE_DB_PASSWORD`, `ERPNEXT_DB_ROOT_PASSWORD` | Al inicializar cada volumen de datos |
 
 El entrypoint de OpenVPMS rechaza una clave de administrador que no tenga al menos 8 caracteres con mayúscula, minúscula,
@@ -195,8 +209,8 @@ intentos, el arranque termina con error.
 
 En **modo local** (el de por defecto) todos los puertos se publican en `127.0.0.1` (`PUBLISH_IP`, `DNS_BIND_IP` e
 `INTRANET_IP` en `sistema/test.env`). **Solo se accede desde el propio equipo**, no desde la red local. La lista de puertos
-está en [`arquitectura.md`, "Puertos publicados"](arquitectura.md#7-puertos-publicados); OpenLDAP publica también el
-puerto sin cifrar.
+está en [`arquitectura.md`, "Puertos publicados"](arquitectura.md#7-puertos-publicados); Samba AD publica también el
+389, que solo admite el bind si es seguro (sección 3).
 
 Si alguna de esas variables faltara en `test.env`, el compose publica igualmente en `127.0.0.1`: todos los `ports:` del
 `docker-compose.yml` único usan `${PUBLISH_IP:-127.0.0.1}`, `${DNS_BIND_IP:-127.0.0.1}` o `${INTRANET_IP:-127.0.0.1}`
@@ -208,14 +222,16 @@ El **modo intranet** (`levantar-sistema --intranet`) publica **solo dos puertos*
 web (80/tcp), que da acceso a las cuatro aplicaciones por su nombre, y el DNS (53/udp y tcp). Con Docker Engine en WSL,
 el 53 lo atiende un reenviador de Windows (`sistema/reenviador-dns.ps1`, sin privilegios de administrador) que pasa las
 consultas tal cual a bind9, publicado en `<IP de la LAN>:1053`. Para el 1053 no se crea ninguna regla de entrada: los
-clientes solo deben usar el 53 (no se ha medido desde otro equipo si el 1053 queda filtrado). OpenLDAP, NTP y el acceso
+clientes solo deben usar el 53 (no se ha medido desde otro equipo si el 1053 queda filtrado). Samba AD, NTP y el acceso
 directo 1808x siguen en `127.0.0.1`. Es **opcional y no persistente** (un `arrancar` sin la opción vuelve al modo local)
 por una razón concreta: las contraseñas de laboratorio están **públicas en git**. Con el modo intranet activo, cualquier
 equipo de la misma red puede entrar como administrador en OpenVPMS, Pretix, InvenTree y ERPNext, y todo viaja por HTTP
 sin cifrar. Solo debe usarse en una red de laboratorio, y lo razonable es volver al modo local al terminar.
 
-El DNS expuesto no amplía la superficie: es autoritativo solo de `reservaviva.lan` y no hace recursión, así que no sirve
-como resolvedor abierto ni para ataques de amplificación. A la LAN no le anuncia `ldap` ni `ntp`, y a un cliente de la
+El DNS expuesto no amplía la superficie: es autoritativo solo de `reservaviva.lan` y a la LAN (vista `lan`) no le hace
+recursión, así que no sirve como resolvedor abierto ni para ataques de amplificación. La recursión de la vista interna
+(que sigue la delegación a Samba AD) solo atiende a `red-interna` y no resuelve nada fuera de `reservaviva.lan`. A la LAN no
+le anuncia `ldap` ni `ntp`, ni la zona `ad.reservaviva.lan`, y a un cliente de la
 LAN nunca le da una IP de contenedor (vista `lan`, [arquitectura.md](arquitectura.md#la-zona-reservavivalan-y-sus-dos-vistas)).
 
 **Alcance de las reglas de cortafuegos** que crea `sistema/habilitar-intranet-windows.ps1` (y que `-Deshacer` quita):
@@ -233,14 +249,18 @@ dentro de WSL queda en las interfaces de Windows, aunque sin las reglas de entra
 
 Cada VLAN es una **red bridge de Docker** con la subred de su VLAN (10.10.10/24, .20, .30, .40 y .99). Dos bridges no se
 enrutan entre sí. Cada aplicación está en la red de su departamento y además en `vlan99_infra` con IP fija, para llegar a
-OpenLDAP, DNS y NTP. Las direcciones están en [`arquitectura.md`](arquitectura.md).
+Samba AD, DNS y NTP. Las direcciones están en [`arquitectura.md`](arquitectura.md).
 
 `levantar-sistema.sh verificar` ([`../sistema/verificar_arquitectura.md`](../sistema/verificar_arquitectura.md)) comprueba:
 
 - Un cliente que solo está en la VLAN de un departamento no alcanza otro departamento ni `vlan99_infra`.
-- Una aplicación alcanza `openldap` (389 y 636) y no alcanza otros departamentos.
-- bind9 responde con autoridad a su zona y rechaza (`REFUSED`) los nombres externos, porque no hace recursión.
-- Los logins LDAPS funcionan con la CA interna y fallan con una CA ajena o con una clave errónea.
+- Una aplicación alcanza `samba-ad` (389 y 636) y no alcanza otros departamentos.
+- bind9 responde con autoridad a su zona y no resuelve nombres externos: la vista `lan` los rechaza (`REFUSED`) y la interna
+  no da respuesta (`SERVFAIL`, por la zona `"."` sin reenviadores).
+- La delegación de `ad.reservaviva.lan` se sigue desde `vlan99_infra` (registros SRV de `_ldap._tcp` y `_kerberos._tcp`) y la
+  vista `lan` no la resuelve.
+- Los logins LDAPS funcionan con la CA interna y fallan con una CA ajena o con una clave errónea, y un usuario de otro
+  grupo (`vet.prueba`) no entra.
 
 ### Qué no aísla un solo host (limitación conocida)
 
@@ -265,16 +285,20 @@ OpenLDAP, DNS y NTP. Las direcciones están en [`arquitectura.md`](arquitectura.
 Cambiar `sistema/test.env` **no basta** en un sistema ya inicializado. Casi todas las claves se aplican una sola vez: al
 crear el volumen, el sitio o el usuario (tabla de la sección 4). Hay dos caminos:
 
-- **Laboratorio desechable:** cambiar los valores de `test.env` y reinicializar con `levantar-sistema.sh borrar`; el
-  siguiente `arrancar` genera los LDIF con los hash nuevos. **Esto borra todos los datos**: bases de datos, sitio de
-  ERPNext y directorio LDAP. Si solo cambian claves de LDAP, basta con reinicializar el directorio: parar y quitar
-  `openldap`, borrar sus dos volúmenes (`ldap_data` y `ldap_config`) y `arrancar` (procedimiento probado en
-  [`resultados-un-host.md`](resultados-un-host.md)).
-- **Conservando los datos:**
-  1. Cambiar cada clave dentro de su servicio: en la aplicación, en la base de datos, o con `ldappasswd` en el directorio.
+- **Laboratorio desechable:** cambiar los valores de `test.env` y reinicializar con `levantar-sistema.sh borrar`
+  (**borra todos los datos**: bases de datos, sitio de ERPNext y directorio). Si solo cambian claves del directorio, basta con
+  `levantar-sistema.sh borrar-directorio`, que borra solo el contenedor `samba-ad` y sus volúmenes (`samba_data` y
+  `samba_etc`), y un `arrancar`, que reprovisiona el dominio con las claves nuevas.
+- **Conservando los datos, claves del directorio:** cambiar el valor en `test.env` y ejecutar `arrancar`. Las claves llegan a
+  `samba-ad` por variables de entorno, y un simple `docker restart` **no las relee**; `arrancar` (`up -d`) recrea el
+  contenedor porque su entorno cambió, con los mismos volúmenes. En cada arranque, `sembrar.sh` ejecuta `samba-tool user
+  setpassword` con el valor de `test.env` sobre `Administrator`, `svc-lectura` y las cuatro cuentas de prueba, sin tocar nada
+  más de las cuentas. La clave de `svc-lectura` también está en la configuración de las aplicaciones: `erpnext-ldap-config` la
+  vuelve a escribir en cada `up` e `inventree-app` la lee del entorno. Este camino **no se ha ejecutado** como procedimiento
+  de rotación. Una cuenta creada a mano con `samba-tool` (no sembrada) se cambia con `samba-tool user setpassword`.
+- **Conservando los datos, el resto de claves:**
+  1. Cambiar cada clave dentro de su servicio: en la aplicación o en la base de datos.
   2. Poner el mismo valor en `test.env`, para que los arranques siguientes y `verificar` sigan funcionando.
-  3. Para `svc-lectura`, actualizar a la vez la entrada del directorio y `LDAP_SVC_LECTURA_PASSWORD`, y recrear
-     `erpnext-ldap-config` e `inventree-app`.
 
   Ningún script automatiza este camino y **no se ha probado**.
 
@@ -285,11 +309,14 @@ después: siguen en el historial de git.
 
 - Sacar los secretos del repositorio: un `test.env` fuera de git o los *secrets* de Docker. Hoy `erpnext-create-site` recibe
   las claves por la línea de comandos (pendiente anotado en [`resultados-un-host.md`](resultados-un-host.md)).
-- Reglas de filtrado dentro de `vlan99_infra` para que cada aplicación solo alcance OpenLDAP, DNS y NTP, y no a las demás
+- Reglas de filtrado dentro de `vlan99_infra` para que cada aplicación solo alcance Samba AD, DNS y NTP, y no a las demás
   aplicaciones.
-- Quitar la publicación del 389 sin cifrar si nadie la necesita.
-- Usuarios de prueba borrados, grupos LDAP y mapeo de roles en cada aplicación, y una cuenta de servicio por aplicación en
-  lugar de una compartida.
+- Quitar la publicación del 389 si nadie la necesita (hoy solo admite bind seguro, pero sigue abierto).
+- Usuarios de prueba borrados, mapeo de roles en cada aplicación y una cuenta de servicio por aplicación en lugar de una
+  compartida (**los grupos ya están resueltos**: el acceso lo decide `GG-RRHH` o `GG-Operaciones`). Cuentas de laboratorio sin
+  la excepción de no caducar.
+- Sustituir `privileged: true` de `samba-ad` por las capacidades concretas que necesite, y valorar un segundo controlador de
+  dominio.
 - Custodia de `ca.key` fuera del equipo que sirve los servicios, y un procedimiento de renovación de certificados con la
   recreación de los contenedores.
 - HTTPS en las cuatro aplicaciones: hoy se sirven por HTTP, en 127.0.0.1 y, en modo intranet, en la LAN por el proxy web.

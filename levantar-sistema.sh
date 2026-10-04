@@ -8,16 +8,19 @@
 #
 # Acciones:
 #   arrancar   (por defecto) prepara todo, levanta los 26 servicios y espera a que esten sanos
-#   preparar   solo lo previo: certificados, zonas DNS, LDIF de LDAP, validacion del compose e imagen de OpenVPMS
+#   preparar   solo lo previo: certificados, zonas DNS, validacion del compose e imagen de OpenVPMS
 #   estado     estado de cada servicio, modo de publicacion (local o intranet) y direcciones de acceso
 #   verificar  ejecuta sistema/verificar_arquitectura.py contra el sistema levantado (respeta el modo en que este)
 #   detener    para los contenedores sin borrar nada; "arrancar" los vuelve a levantar en minutos
 #   borrar     elimina contenedores Y VOLUMENES (todos los datos del laboratorio). Pide confirmacion
+#   borrar-directorio   elimina SOLO el contenedor y los volumenes de samba-ad (samba_data, samba_etc): para volver a
+#                        provisionar el dominio sin tocar los datos de OpenVPMS, Pretix, InvenTree ni ERPNext. Pide
+#                        confirmacion, salvo con --si
 # Opciones:
 #   --forzar        no abortar por falta de memoria
 #   --timeout MIN   espera maxima a que todo quede sano tras el arranque (por defecto 45)
 #   --rapido        (verificar) omite la prueba de persistencia de LDAP (down + up -d); ese caso queda como no verificado
-#   --si            (borrar) no pedir confirmacion
+#   --si            (borrar, borrar-directorio) no pedir confirmacion
 #   --intranet      (arrancar/preparar) publica el proxy web (80) y el DNS en la IP de la LAN, para que otros
 #                   equipos entren por nombre (*.reservaviva.lan). El DNS va al 53, salvo con Docker Engine en WSL: ahi
 #                   va al 1053 y levantar-sistema.ps1 deja un reenviador de Windows en el 53. Sin esta opcion,
@@ -53,7 +56,7 @@ SI=false
 INTRANET=false
 IP_PEDIDA=""
 
-uso() { sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+uso() { sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 es_ipv4() { [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] && \
             [ "${BASH_REMATCH[1]}" -le 255 ] && [ "${BASH_REMATCH[2]}" -le 255 ] && \
@@ -61,7 +64,7 @@ es_ipv4() { [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ 
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    arrancar|preparar|estado|verificar|detener|borrar) ACCION="$1" ;;
+    arrancar|preparar|estado|verificar|detener|borrar|borrar-directorio) ACCION="$1" ;;
     ayuda|-h|--help) uso; exit 0 ;;
     --forzar) FORZAR=true ;;
     --rapido) RAPIDO=true ;;
@@ -324,14 +327,14 @@ comprobar_memoria() {
 # --- Preparacion ----------------------------------------------------------------------------------------------------
 
 preparar_certificados() {
-  paso "Certificados LDAPS (CA interna + OpenLDAP)"
+  paso "Certificados LDAPS (CA interna + Samba AD)"
   # Idempotente: si existen, son validos y cubren las direcciones, no toca nada. No instala la CA en el host.
   bash "${RAIZ}/servicios/ca/generar-certificados.sh" --sin-instalar-ca | sed 's/^/    /'
   # Si falta un fichero de un bind mount, Docker crea un DIRECTORIO vacio en su lugar y LDAPS falla sin avisar.
   local f
   for f in ca.crt ldap.crt ldap.key; do
     if [ ! -f "${RAIZ}/servicios/ca/certs/${f}" ] || [ ! -s "${RAIZ}/servicios/ca/certs/${f}" ]; then
-      fallo "Falta servicios/ca/certs/${f} (o esta vacio): openldap, inventree-app y erpnext-backend lo montan. Revisa la salida de servicios/ca/generar-certificados.sh."
+      fallo "Falta servicios/ca/certs/${f} (o esta vacio): samba-ad, inventree-app y erpnext-backend lo montan. Revisa la salida de servicios/ca/generar-certificados.sh."
     fi
   done
 }
@@ -390,62 +393,6 @@ generar_zona() {
   info "${r} ACL de la vista interna: ${nets[*]} (sin los .1)"
 }
 
-# Hash {SSHA} de OpenLDAP: base64(sha1(clave + sal) + sal). Con openssl, que ya es requisito, para no depender de python ni
-# de la imagen de openldap (que en un primer arranque aun no esta descargada). La clave nunca va en la linea de comandos
-# de ningun proceso: printf es un builtin de bash y openssl la lee por la tuberia.
-hash_ssha() {
-  local clave="$1" tmp h
-  tmp="$(mktemp -d)"
-  openssl rand 8 >"${tmp}/sal"
-  { printf '%s' "${clave}"; cat "${tmp}/sal"; } | openssl dgst -sha1 -binary >"${tmp}/dig"
-  h="$(cat "${tmp}/dig" "${tmp}/sal" | openssl base64 -A)"
-  rm -rf "${tmp}"
-  [ "${#h}" -eq 40 ] || fallo "No se pudo calcular el hash SSHA con openssl."
-  printf '{SSHA}%s' "${h}"
-}
-
-# LDIF del primer arranque de OpenLDAP. sistema/test.env es la UNICA fuente de las claves del directorio: las plantillas
-# servicios/openldap/*.ldif.tpl (versionadas, sin claves) llevan marcadores ${SSHA_<CUENTA>} y aqui se sustituyen por el
-# hash de la variable de test.env correspondiente. El resultado va a servicios/openldap/generado/ (ignorado por git), que
-# es la carpeta que el compose monta como bootstrap "custom" de la imagen. La imagen solo la carga con el directorio
-# vacio (volumenes ldap_data y ldap_config), asi que regenerarla en cada "preparar" no cambia un directorio existente.
-generar_ldif() {
-  paso "LDIF del primer arranque de OpenLDAP (claves de sistema/test.env)"
-  local dir="${RAIZ}/servicios/openldap" out="${RAIZ}/servicios/openldap/generado"
-  local par marca var clave f base
-  local -a sust=()
-  for par in SVC_LECTURA:LDAP_SVC_LECTURA_PASSWORD VET:LDAP_PRUEBA_VET_PASSWORD \
-             LOGISTICA:LDAP_PRUEBA_LOGISTICA_PASSWORD TAQUILLA:LDAP_PRUEBA_TAQUILLA_PASSWORD \
-             RRHH:LDAP_PRUEBA_RRHH_PASSWORD; do
-    marca="SSHA_${par%%:*}"; var="${par#*:}"
-    clave="$(valor_env "${var}" "")"
-    [ -n "${clave}" ] || fallo "Falta la clave de LDAP ${var}: definir ${var} en sistema/test.env (ver docs/seguridad.md)."
-    # El hash usa base64 (A-Z a-z 0-9 + / =): "|" como separador de sed no puede aparecer en el.
-    sust+=(-e "s|\${${marca}}|$(hash_ssha "${clave}")|g")
-  done
-  # Se escribe DENTRO de la carpeta existente (no se reemplaza la carpeta): un bind mount apunta a la carpeta, y si se
-  # borrara y se creara de nuevo, un contenedor ya creado seguiria viendo la vieja.
-  mkdir -p "${out}"
-  rm -f "${out}"/*.tmp
-  tr -d '\r' <"${dir}/05-acl-servicio.ldif" >"${out}/05-acl-servicio.ldif.tmp"
-  for f in "${dir}"/*.ldif.tpl; do
-    base="$(basename "${f}" .tpl)"
-    { printf '# GENERADO por levantar-sistema.sh preparar desde servicios/openldap/%s.tpl: no editar.\n' "${base}"
-      tr -d '\r' <"${f}" | sed "${sust[@]}"; } >"${out}/${base}.tmp"
-  done
-  if grep -q '\${[A-Z0-9_]*}' "${out}"/*.tmp; then
-    rm -f "${out}"/*.tmp; fallo "Quedan marcadores sin sustituir en servicios/openldap/*.ldif.tpl."
-  fi
-  for f in "${out}"/*.tmp; do mv -f "${f}" "${f%.tmp}"; done
-  # Un .ldif que ya no tenga plantilla se cargaria igual en el proximo primer arranque: se quita.
-  for f in "${out}"/*.ldif; do
-    base="$(basename "${f}")"
-    [ "${base}" = "05-acl-servicio.ldif" ] || [ -f "${dir}/${base}.tpl" ] || rm -f "${f}"
-  done
-  info "Generados en servicios/openldap/generado/: $(cd "${out}" && ls *.ldif | tr '\n' ' ')"
-  info "(OpenLDAP solo los carga con el directorio vacio; con datos ya existentes no cambian nada)"
-}
-
 # bind9 lee su configuracion y las zonas al arrancar y no vigila los ficheros. Si alguno (named.conf, las dos zonas o la
 # ACL) es mas nuevo que el arranque de dns-interno (p. ej. tras cambiar una plantilla o el modo de publicacion), se
 # reinicia solo ese contenedor: unos segundos, sin tocar datos.
@@ -463,28 +410,26 @@ reiniciar_dns_si_zona_nueva() {
   done
 }
 
-# OpenLDAP lee su certificado al arrancar, pero NO del montaje: con --copy-service la imagen (osixia) copia
-# /container/service a /container/run/service solo en el PRIMER arranque del contenedor, y slapd usa esa copia. Un
-# "restart" conserva la copia vieja (comprobado: tras regenerar ldap.crt con el SAN ldap.reservaviva.lan y reiniciar,
-# slapd seguia sirviendo el certificado con ldap.reservaviva.local y LDAPS fallaba en ERPNext e InvenTree). Por eso, si
-# generar-certificados.sh lo acaba de regenerar (el certificado es mas nuevo que el contenedor), se RECREA openldap. Los
-# datos estan en los volumenes ldap_data y ldap_config, que se conservan; con slapd.d no vacio no se vuelven a cargar
-# los LDIF. No toca la CA.
-# Despues se reinician los dos clientes LDAPS (inventree-app y erpnext-backend). Medido el 27/09/2026: tras el cambio de
-# certificado, los workers de gunicorn de InvenTree siguieron rechazando el login LDAP (401, sin ningun error en el log)
-# hasta reiniciar inventree-app, mientras un proceso nuevo dentro del mismo contenedor autenticaba bien: queda estado de
-# TLS/LDAP por proceso. La causa exacta no se identifico; reiniciar es barato y solo ocurre cuando cambia el certificado.
-# Tras erpnext-backend se reinicia tambien erpnext-hr: su nginx resuelve la IP del backend solo al arrancar, y el
-# backend puede volver con otra IP en erpnext_internal (red sin IP fija). Medido el 27/09/2026: el backend paso de
-# 10.201.0.10 a 10.201.0.9, erpnext-hr siguio llamando a la vieja ("No route to host") y rrhh respondia 502.
-recrear_ldap_si_cert_nuevo() {
-  local creado t_ldap t_cert c
-  creado="$(docker inspect --format '{{.Created}}' openldap 2>/dev/null)" || return 0
-  t_ldap="$(date -d "${creado}" +%s 2>/dev/null)" || return 0
+# samba-ad SI copia su certificado en cada arranque del contenedor (servicios/samba-ad/entrypoint.sh: el paso que
+# copia ca.crt/ldap.crt/ldap.key a /var/lib/samba/private/tls con chmod 600 no esta dentro del "if no existe sam.ldb",
+# se repite siempre), a diferencia de OpenLDAP/osixia, que solo lo copiaba en el PRIMER arranque del contenedor y
+# necesitaba recrearlo entero. Por eso aqui basta con REINICIAR samba-ad (no hace falta --force-recreate) cuando
+# generar-certificados.sh lo acaba de regenerar (el certificado es mas nuevo que el ultimo arranque del contenedor);
+# los datos del volumen samba_data se conservan y no se reprovisiona el dominio.
+# Se compara contra StartedAt (no Created, que no cambia con un restart) para no reiniciar en cada "arrancar" una vez
+# que ya se recogio el certificado nuevo, igual que reiniciar_dns_si_zona_nueva mas arriba.
+# Despues se reinician los dos clientes LDAPS (inventree-app y erpnext-backend) y, tras erpnext-backend, erpnext-hr
+# (su nginx resuelve la IP del backend solo al arrancar): el mismo problema medido con OpenLDAP el 27/09/2026 (estado
+# de TLS/LDAP por proceso; erpnext-backend puede volver con otra IP en erpnext_internal, red sin IP fija) no depende
+# de la imagen del directorio. Reiniciar es barato y solo ocurre cuando cambia el certificado.
+reiniciar_directorio_si_cert_nuevo() {
+  local iniciado t_ldap t_cert c
+  iniciado="$(docker inspect --format '{{.State.StartedAt}}' samba-ad 2>/dev/null)" || return 0
+  t_ldap="$(date -d "${iniciado}" +%s 2>/dev/null)" || return 0
   t_cert="$(stat -c %Y "${RAIZ}/servicios/ca/certs/ldap.crt" 2>/dev/null)" || return 0
   if [ "${t_cert}" -gt "${t_ldap}" ]; then
-    paso "El certificado de OpenLDAP es mas nuevo que el contenedor openldap: se recrea para que lo cargue (datos conservados)"
-    dc up -d --no-deps --force-recreate openldap
+    paso "El certificado LDAPS es mas nuevo que el ultimo arranque de samba-ad: se reinicia para que lo recoja (datos conservados)"
+    dc restart samba-ad
     for c in inventree-app erpnext-backend erpnext-hr; do
       [ "$(docker inspect --format '{{.State.Running}}' "${c}" 2>/dev/null)" = "true" ] && dc restart "${c}"
     done
@@ -529,7 +474,6 @@ preparar() {
   cd "${RAIZ}"
   preparar_certificados
   generar_zona
-  generar_ldif
   validar_compose
   preparar_imagen_openvpms
 }
@@ -715,12 +659,16 @@ accion_arrancar() {
   ${INTRANET} && publicar_intranet
   local n; n="$(dc config --services | grep -c .)"
   paso "Levantando los ${n} servicios en modo ${MODO} (la primera vez descarga varios GB de imagenes)"
-  if ! dc up -d; then
+  # --remove-orphans: quien venia de un stack con "openldap" (servicio ya borrado del compose, sustituido por
+  # samba-ad) se encuentra ese contenedor huerfano en cada "arrancar", con el aviso de Docker pero sin fallar.
+  # Este flag SOLO borra contenedores que ya no estan en el compose actual; nunca toca volumenes (ldap_data y
+  # ldap_config de quien venia del stack viejo siguen intactos y hay que borrarlos a mano si ya no hacen falta).
+  if ! dc up -d --remove-orphans; then
     diagnostico
     fallo "docker compose up fallo. Volver a ejecutar el script es seguro: retoma donde quedo."
   fi
   reiniciar_dns_si_zona_nueva
-  recrear_ldap_si_cert_nuevo
+  reiniciar_directorio_si_cert_nuevo
   esperar_sano
   crear_admin_pretix
   paso "Sistema en marcha: los ${n} servicios estan sanos"
@@ -785,7 +733,7 @@ accion_detener() {
 accion_borrar() {
   cd "${RAIZ}"
   if ! ${SI}; then
-    printf '\nEsto BORRA los contenedores y TODOS los datos (bases de datos, sitio de ERPNext, directorio LDAP).\n'
+    printf '\nEsto BORRA los contenedores y TODOS los datos (bases de datos, sitio de ERPNext, directorio AD).\n'
     printf 'El siguiente arranque volvera a inicializarlo todo (~40 min). Escribe "borrar" para confirmar: '
     local r; read -r r
     [ "${r}" = "borrar" ] || { echo "Cancelado."; exit 0; }
@@ -794,11 +742,42 @@ accion_borrar() {
   dc down -v --remove-orphans
 }
 
+# Borra SOLO el contenedor samba-ad y sus dos volumenes (samba_data, samba_etc): para reprovisionar el dominio de AD
+# sin tocar los datos de OpenVPMS, Pretix, InvenTree ni ERPNext. NUNCA usar "borrar" (dc down -v) completo para esto:
+# se llevaria por delante TODOS los volumenes del laboratorio (docs del plan de migracion, "trampas").
+# Los nombres de volumen que crea Compose son "<name: de docker-compose.yml>_<clave del volumen>"; PROYECTO ya
+# guarda ese "name:" (reservaviva-smoke).
+accion_borrar_directorio() {
+  cd "${RAIZ}"
+  local v1="${PROYECTO}_samba_data" v2="${PROYECTO}_samba_etc"
+  if ! ${SI}; then
+    printf '\nEsto borra el contenedor samba-ad y SUS volumenes (%s, %s): el dominio de AD se reprovisiona desde cero\n' "${v1}" "${v2}"
+    printf 'en el siguiente arranque (usuarios y claves de sistema/test.env). NO toca OpenVPMS, Pretix, InvenTree ni\n'
+    printf 'ERPNext. Escribe "borrar" para confirmar: '
+    local r; read -r r
+    [ "${r}" = "borrar" ] || { echo "Cancelado."; exit 0; }
+  fi
+  paso "Eliminando el contenedor samba-ad"
+  dc rm -f -s samba-ad
+  paso "Eliminando los volumenes ${v1} y ${v2}"
+  local v ok=true
+  for v in "${v1}" "${v2}"; do
+    if docker volume inspect "${v}" >/dev/null 2>&1; then
+      docker volume rm "${v}" | sed 's/^/    /' || ok=false
+    else
+      info "${v} no existe (ya se habia borrado)."
+    fi
+  done
+  ${ok} || fallo "No se pudo borrar algun volumen. Revisa 'docker volume ls' y quien lo usa (docker ps -a --filter volume=<nombre>)."
+  info "Listo. El siguiente '$0 arrancar' reprovisiona el dominio de AD desde cero."
+}
+
 case "${ACCION}" in
-  arrancar)  accion_arrancar ;;
-  preparar)  accion_preparar ;;
-  estado)    accion_estado ;;
-  verificar) accion_verificar ;;
-  detener)   accion_detener ;;
-  borrar)    accion_borrar ;;
+  arrancar)          accion_arrancar ;;
+  preparar)          accion_preparar ;;
+  estado)            accion_estado ;;
+  verificar)         accion_verificar ;;
+  detener)           accion_detener ;;
+  borrar)            accion_borrar ;;
+  borrar-directorio) accion_borrar_directorio ;;
 esac

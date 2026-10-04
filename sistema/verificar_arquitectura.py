@@ -16,7 +16,8 @@ Uso (desde esta carpeta):
 
 Bloques: 1 segmentacion (prueba negativa) | 2 DNS (bind9 consultado de verdad, vista interna) | 3 NTP |
 4 acceso por nombre (vista lan del DNS, proxy web con HTML + estatico, acceso directo por localhost) |
-5 consolidacion (ldapprobe.py, probe.py, ldaplogin.py, sin duplicarlos).
+5 Active Directory (SRV de _ldap/_kerberos via bind9, kinit/klist, grupos, prueba negativa de membresia) |
+6 consolidacion (ldapprobe.py, probe.py, ldaplogin.py, sin duplicarlos).
 Cada comprobacion da PASS / FAIL / INFO con la salida literal en la que se apoya. Sale con 0 SOLO si no hay ningun FAIL.
 INFO no cuenta: son hallazgos que hay que leer, no fallos del guion.
 
@@ -45,7 +46,7 @@ CONSULTA_DNS = f"ldap.{DOMINIO}"
 # generada con `docker inspect`. rrhh -> erpnext-hr: es el nginx de ERPNext, el unico contenedor de RRHH que atiende HTTP
 # a los usuarios (escucha en 8080 y es el que publica ERPNEXT_PORT en el host); erpnext-backend (gunicorn, 8000) no
 # publica nada y solo se le llega a traves de ese nginx. Comprobado con docker inspect el 26/09/2026.
-ZONA_ESPERADA = {"dns": ("dns-interno", 99), "ldap": ("openldap", 99), "ntp": ("ntp-interno", 99),
+ZONA_ESPERADA = {"dns": ("dns-interno", 99), "ldap": ("samba-ad", 99), "ntp": ("ntp-interno", 99),
                  "openvpms": ("openvpms-app", 10), "pretix": ("pretix-web", 20), "inventree": ("inventree-app", 30),
                  "rrhh": ("erpnext-hr", 40)}
 # Acceso por nombre a traves del proxy web (proxy-web, solo en vlan99_infra). Por aplicacion: contenedor e IP en vlan99 a
@@ -56,9 +57,14 @@ WEB = {"openvpms": ("openvpms-app", "/openvpms/login", "OPENVPMS_PORT", 8080),
        "pretix": ("pretix-web", "/control/login", "PRETIX_PORT", 80),
        "inventree": ("inventree-app", "/web/", "INVENTREE_PORT", 8000),
        "rrhh": ("erpnext-hr", "/login", "ERPNEXT_PORT", 8080)}
-# La vista lan solo anuncia las aplicaciones y el DNS; ldap y ntp no se publican a la LAN (NXDOMAIN a proposito).
+# La vista lan solo anuncia las aplicaciones y el DNS; ldap, ntp y la zona AD no se publican a la LAN (NXDOMAIN a proposito).
 LAN_SI = ["openvpms", "pretix", "inventree", "rrhh", "dns"]
-LAN_NO = ["ldap", "ntp"]
+LAN_NO = ["ldap", "ntp", "ad"]
+# Samba AD DC: realm, dominio de la zona AD (reenviada por bind9) y grupos por departamento con sus usuarios de prueba.
+REALM_AD = "AD.RESERVAVIVA.LAN"
+DOMINIO_AD = f"ad.{DOMINIO}"
+GRUPOS_AD = {"GG-Medica": ["vet.prueba"], "GG-Operaciones": ["logistica.prueba", "taquilla.prueba"],
+             "GG-RRHH": ["rrhh.prueba"]}
 
 
 # ------------------------------------------------------------------------------------------------
@@ -109,9 +115,9 @@ def rutas():
     return out
 
 
-def dns_paquete(nombre, ident=0x1234):
+def dns_paquete(nombre, tipo=1, ident=0x1234):
     q = b"".join(bytes([len(p)]) + p.encode() for p in nombre.rstrip(".").split(".")) + b"\0"
-    return struct.pack(">HHHHHH", ident, 0x0100, 1, 0, 0, 0) + q + struct.pack(">HH", 1, 1)
+    return struct.pack(">HHHHHH", ident, 0x0100, 1, 0, 0, 0) + q + struct.pack(">HH", tipo, 1)
 
 
 def _salta_nombre(b, i):
@@ -124,28 +130,52 @@ def _salta_nombre(b, i):
         i += 1 + n
 
 
+def _lee_nombre(b, i):
+    """Lee un nombre DNS con punteros de compresion (RFC 1035 4.1.4). Devuelve (texto, indice tras el nombre
+    EN EL MENSAJE ORIGINAL, sin seguir el salto). Se usa para decodificar el 'target' de un registro SRV."""
+    partes, j, salto = [], i, None
+    while True:
+        n = b[j]
+        if n == 0:
+            j += 1
+            break
+        if n & 0xC0 == 0xC0:
+            destino = ((n & 0x3F) << 8) | b[j + 1]
+            if salto is None:
+                salto = j + 2
+            j = destino
+            continue
+        partes.append(b[j + 1:j + 1 + n].decode("ascii", "replace"))
+        j += 1 + n
+    return ".".join(partes), (salto if salto is not None else j)
+
+
 def dns_parse(b):
     ident, flags, qd, an, _, _ = struct.unpack(">HHHHHH", b[:12])
     i = 12
     for _ in range(qd):
         i = _salta_nombre(b, i) + 4
-    resp = []
+    resp, registros_srv = [], []
     for _ in range(an):
         i = _salta_nombre(b, i)
         tipo, _, _, rdl = struct.unpack(">HHIH", b[i:i + 10])
         i += 10
         if tipo == 1 and rdl == 4:
             resp.append(socket.inet_ntoa(b[i:i + 4]))
+        elif tipo == 33 and rdl >= 6:   # SRV: prioridad(2) peso(2) puerto(2) + nombre destino
+            prioridad, peso, puerto_srv = struct.unpack(">HHH", b[i:i + 6])
+            destino, _ = _lee_nombre(b, i + 6)
+            registros_srv.append({"prioridad": prioridad, "peso": peso, "puerto": puerto_srv, "destino": destino})
         i += rdl
     return {"rcode": flags & 0xF, "aa": bool(flags & 0x400), "ra": bool(flags & 0x80), "qr": bool(flags & 0x8000),
-            "respuestas": resp, "ident": ident}
+            "respuestas": resp, "registros_srv": registros_srv, "ident": ident}
 
 
-def dns_consulta(servidor, nombre, timeout=3.0, puerto=53):
+def dns_consulta(servidor, nombre, timeout=3.0, puerto=53, tipo=1):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.settimeout(timeout)
     try:
-        s.sendto(dns_paquete(nombre), (servidor, puerto))
+        s.sendto(dns_paquete(nombre, tipo), (servidor, puerto))
         d, _ = s.recvfrom(2048)
         r = dns_parse(d)
         return r if r["ident"] == 0x1234 else {"error": f"ident distinto {r['ident']:#x}"}
@@ -157,13 +187,13 @@ def dns_consulta(servidor, nombre, timeout=3.0, puerto=53):
         s.close()
 
 
-def dns_consulta_tcp(servidor, nombre, timeout=5.0, puerto=53):
+def dns_consulta_tcp(servidor, nombre, timeout=5.0, puerto=53, tipo=1):
     """Consulta DNS por TCP (RFC 1035 4.2.2: prefijo de 2 bytes con la longitud). Mismo resultado que dns_consulta."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(timeout)
     try:
         s.connect((servidor, puerto))
-        q = dns_paquete(nombre)
+        q = dns_paquete(nombre, tipo)
         s.sendall(struct.pack(">H", len(q)) + q)
         b = b""
         while len(b) < 2 or len(b) < 2 + struct.unpack(">H", b[:2])[0]:
@@ -214,8 +244,9 @@ def sonda(spec):
         est, det, seg = tcp_estado(ip, port)
         res["tcp"].append({"et": et, "ip": ip, "port": port, "estado": est, "detalle": det, "seg": seg,
                            "origen": origen_para(ip)})
-    for et, srv, nombre in spec.get("dns", []):
-        res["dns"].append({"et": et, "srv": srv, "nombre": nombre, **dns_consulta(srv, nombre)})
+    for item in spec.get("dns", []):
+        et, srv, nombre, *resto = item   # resto opcional: [tipo] (1=A por defecto, 33=SRV)
+        res["dns"].append({"et": et, "srv": srv, "nombre": nombre, **dns_consulta(srv, nombre, tipo=(resto[0] if resto else 1))})
     for et, srv in spec.get("ntp", []):
         res["ntp"].append({"et": et, "srv": srv, **sntp_consulta(srv)})
     print(json.dumps(res))
@@ -314,7 +345,7 @@ def estado_docker():
 def bloque_prereq():
     imprime("\n== Prerrequisitos")
     ips, ok = {}, True
-    for c in ["openldap", "dns-interno", "ntp-interno"] + [a for a, _ in APPS.values()]:
+    for c in ["samba-ad", "dns-interno", "ntp-interno"] + [a for a, _ in APPS.values()]:
         redes = redes_de(c)
         if redes is None:
             reg(f"contenedor {c} existe", "FAIL", "docker inspect fallo: el arnes no esta levantado o el nombre es otro")
@@ -323,9 +354,9 @@ def bloque_prereq():
         ips[c] = redes
     if not ok:
         return None
-    pref = next((k[:-len(RED[99])] for k in ips["openldap"] if k.endswith(RED[99])), None)
+    pref = next((k[:-len(RED[99])] for k in ips["samba-ad"] if k.endswith(RED[99])), None)
     if pref is None:
-        reg("openldap esta en vlan99_infra", "FAIL", f"redes de openldap: {list(ips['openldap'])}")
+        reg("samba-ad esta en vlan99_infra", "FAIL", f"redes de samba-ad: {list(ips['samba-ad'])}")
         return None
     por_depto = {}
     for nombre, redes in ips.items():
@@ -340,28 +371,28 @@ def bloque_prereq():
         return None
     reg("las 4 apps estan en su VLAN y en vlan99_infra con IP", "PASS",
         "\n".join(f"{a}: vlan{d}={por_depto[a][d]} vlan99={por_depto[a][99]}" for d, (a, _) in APPS.items())
-        + f"\nopenldap={por_depto['openldap'][99]} dns-interno={por_depto['dns-interno'][99]} ntp-interno={por_depto['ntp-interno'][99]}")
+        + f"\nsamba-ad={por_depto['samba-ad'][99]} dns-interno={por_depto['dns-interno'][99]} ntp-interno={por_depto['ntp-interno'][99]}")
     return {"ips": por_depto, "pref": pref, "img_py": imagen_de("pretix-web"), "img_ntp": imagen_de("ntp-interno")}
 
 
 def bloque_medicion(ctx, script):
     """Todos los contenedores efimeros de sondeo, juntos, para poder cruzar controles despues."""
     ips, pref, img = ctx["ips"], ctx["pref"], ctx["img_py"]
-    ldap = ips["openldap"][99]
+    ldap = ips["samba-ad"][99]
     dns_ip, ntp_ip = ips["dns-interno"][99], ips["ntp-interno"][99]
     m = {"dept": {}, "dual": {}}
     m["infra"] = vantage(pref + RED[99], {
-        "tcp": [("openldap:389", ldap, 389), ("openldap:636", ldap, 636)],
+        "tcp": [("samba-ad:389", ldap, 389), ("samba-ad:636", ldap, 636)],
         "dns": [("zona", dns_ip, CONSULTA_DNS)], "ntp": [("ntp", ntp_ip)]}, img, script)
     for d, (app, port) in APPS.items():
         tcp = [(f"control {app}@vlan{d}", ips[app][d], port)]
         for e, (app_e, port_e) in APPS.items():
             if e != d:
                 tcp += [(f"{app_e}@vlan{e}", ips[app_e][e], port_e), (f"{app_e}@vlan99", ips[app_e][99], port_e)]
-        tcp += [("openldap:389", ldap, 389), ("openldap:636", ldap, 636)]
+        tcp += [("samba-ad:389", ldap, 389), ("samba-ad:636", ldap, 636)]
         m["dept"][d] = vantage(pref + RED[d], {"tcp": tcp, "dns": [("dns", dns_ip, CONSULTA_DNS)],
                                                "ntp": [("ntp", ntp_ip)]}, img, script)
-        tcp = [("openldap:389", ldap, 389), ("openldap:636", ldap, 636)]
+        tcp = [("samba-ad:389", ldap, 389), ("samba-ad:636", ldap, 636)]
         for e, (app_e, port_e) in APPS.items():
             if e != d:
                 tcp += [(f"{app_e}@vlan{e}", ips[app_e][e], port_e), (f"{app_e}@vlan99", ips[app_e][99], port_e)]
@@ -392,7 +423,7 @@ def bloque_segmentacion(ctx, m):
         for t in r["tcp"]:
             if t["et"].startswith("control"):
                 continue
-            if t["et"].startswith("openldap"):
+            if t["et"].startswith("samba-ad"):
                 infra_ok = any(x["estado"] == "ABIERTO" and x["et"] == t["et"] for x in m["infra"].get("tcp", []))
                 v, why = juzga_negativo(t["estado"], ctl_ok[d], infra_ok)
                 nombre = f"vlan{d} (solo departamento) -> {t['et']} debe FALLAR (no esta dual-homed)"
@@ -408,12 +439,12 @@ def bloque_segmentacion(ctx, m):
         if "error" in r:
             reg(f"{app} (dual-homed): contenedor de sondeo", "FAIL", cuerpo_error(r))
             continue
-        for t in tcp_de(r, "openldap"):
+        for t in tcp_de(r, "samba-ad"):
             reg(f"{app} -> {t['et']} debe FUNCIONAR (cruce previsto hacia infraestructura)",
                 "PASS" if t["estado"] == "ABIERTO" else "FAIL", linea_tcp(t))
-        ctl_dual = all(t["estado"] == "ABIERTO" for t in tcp_de(r, "openldap"))
+        ctl_dual = all(t["estado"] == "ABIERTO" for t in tcp_de(r, "samba-ad"))
         for t in r["tcp"]:
-            if t["et"].startswith("openldap"):
+            if t["et"].startswith("samba-ad"):
                 continue
             app_t, e = t["et"].split("@vlan")
             e = int(e)
@@ -435,25 +466,49 @@ def bloque_dns(ctx, m, zonas):
     if zonas is None:
         reg(f"zona {DOMINIO} (vista interna) generada", "FAIL", f"falta {ZONA}. Generarla con: levantar-sistema.sh preparar.")
         return
-    nombres = [(f"{h}.{DOMINIO}", ip) for h, ip in zonas.items()]
-    inf = vantage(ctx["pref"] + RED[99], {"dns": [(h, dns_ip, h) for h, _ in nombres] + [
+    # "." en la clave de la zona = glue de una delegacion (p. ej. "dc1.ad" -> dc1.ad.reservaviva.lan, el glue de
+    # "ad IN NS dc1.ad.reservaviva.lan." que bind9 delega a samba-ad): esa direccion es correcta pero NO la sirve
+    # bind9 con autoridad (aa=0), la resuelve por recursion hacia el propio DC. Los nombres de servicio (dns, ldap,
+    # ntp, las 4 apps) son etiquetas planas y siguen siendo autoritativos (aa=1) como siempre.
+    nombres = [(f"{h}.{DOMINIO}", ip, "." in h) for h, ip in zonas.items()]
+    inf = vantage(ctx["pref"] + RED[99], {"dns": [(h, dns_ip, h) for h, _, _ in nombres] + [
         ("inexistente", dns_ip, f"no-existe-xyz.{DOMINIO}"), ("externo", dns_ip, "example.com")]},
         ctx["img_py"], SCRIPT)
     if "error" in inf:
         reg("contenedor de sondeo en vlan99", "FAIL", cuerpo_error(inf))
         return
     por = {d["et"]: d for d in inf["dns"]}
-    for h, ip in nombres:
+    for h, ip, delegado in nombres:
         d = por[h]
-        ok = "error" not in d and d["rcode"] == 0 and d["aa"] and d["respuestas"] == [ip]
-        reg(f"{h} -> {ip} (autoritativo, igual que la zona)", "PASS" if ok else "FAIL",
-            f"servidor={dns_ip} respuesta={ {k: v for k, v in d.items() if k not in ('et', 'srv')} }")
+        if delegado:
+            ok = "error" not in d and d["rcode"] == 0 and not d["aa"] and d["respuestas"] == [ip]
+            reg(f"{h} -> {ip} (glue de delegacion: NO autoritativo aqui, se resuelve por recursion hacia samba-ad)",
+                "PASS" if ok else "FAIL", f"servidor={dns_ip} respuesta={ {k: v for k, v in d.items() if k not in ('et', 'srv')} }")
+        else:
+            ok = "error" not in d and d["rcode"] == 0 and d["aa"] and d["respuestas"] == [ip]
+            reg(f"{h} -> {ip} (autoritativo, igual que la zona)", "PASS" if ok else "FAIL",
+                f"servidor={dns_ip} respuesta={ {k: v for k, v in d.items() if k not in ('et', 'srv')} }")
     d = por["inexistente"]
     reg("nombre inexistente -> NXDOMAIN autoritativo (distingue 'nombre desconocido' de 'sin respuesta')",
         "PASS" if "error" not in d and d["rcode"] == 3 and d["aa"] else "FAIL", f"respuesta={d}")
     d = por["externo"]
-    reg("example.com -> REFUSED (sin recursion: la zona interna no sale a Internet)",
-        "PASS" if "error" not in d and d["rcode"] == 5 else "FAIL", f"respuesta={d}")
+    # DESVIACION DEL PLAN (ver servicios/bind9/named.conf, vista "interna"): la delegacion real de ad.reservaviva.lan
+    # obliga a "recursion yes" para TODA la vista "interna" (BIND no permite acotar la recursion a una sola zona
+    # dentro de una vista); antes, con la zona "type forward" del plan original, alcanzaba con recursion solo para
+    # ese subdominio. El efecto practico hoy es que un cliente de red-interna YA NO recibe un REFUSED explicito para
+    # example.com, sino SERVFAIL: bind9 intenta recursionar de verdad y falla porque vlan99_infra no tiene salida a
+    # Internet. La propiedad de seguridad ("nunca se devuelve una IP real de Internet") se sigue cumpliendo, pero
+    # ahora depende de que esta VLAN no tenga salida, no de una politica explicita de bind9.
+    ok = "error" not in d and d["rcode"] in (2, 5) and not d["respuestas"]
+    reg("example.com: sin resolucion real hacia Internet (SERVFAIL o REFUSED, sin respuestas)",
+        "PASS" if ok else "FAIL", f"respuesta={d}")
+    if ok and d.get("rcode") == 2:
+        reg("aviso: ya no es REFUSED sino SERVFAIL (recursion ahora es global para la vista 'interna', no solo "
+            "para ad.reservaviva.lan)", "INFO",
+            f"respuesta={d}\nRiesgo latente para pm/dev: si vlan99_infra alguna vez tuviera salida real a Internet, "
+            "esta vista SI recursionaria de verdad para cualquier cliente de red-interna (BIND no admite acotar la "
+            "recursion por zona dentro de una vista). Valorar una RPZ u otro control explicito si eso preocupa; hoy "
+            "el aislamiento es incidental (falta de ruta), no una politica de bind9.")
     # Cada nombre de la zona debe resolver a la IP real (docker inspect) del contenedor que da ese servicio.
     for h, (cont, d_) in ZONA_ESPERADA.items():
         real = ip_real(ctx, cont, d_) or f"(sin IP en vlan{d_})"
@@ -463,7 +518,7 @@ def bloque_dns(ctx, m, zonas):
         else:
             reg(nombre, "PASS" if zonas[h] == real else "FAIL", f"la zona dice {zonas[h]}, el contenedor real esta en {real}")
     imprime("  -- los clientes solo de departamento NO deben alcanzar el DNS interno (UDP; control = la consulta de arriba)")
-    ctl = all(por[h]["rcode"] == 0 for h, _ in nombres if "error" not in por[h]) and "error" not in por[nombres[0][0]]
+    ctl = all(por[h]["rcode"] == 0 for h, _, _ in nombres if "error" not in por[h]) and "error" not in por[nombres[0][0]]
     for d_, (app, _) in APPS.items():
         r = m["dept"][d_]
         x = (r.get("dns") or [{}])[0]
@@ -515,14 +570,81 @@ def bloque_ntp(ctx, m):
             f"respuesta={ {k: v for k, v in z.items() if k not in ('et',)} }")
 
 
+def bloque_ad(ctx, script):
+    imprime("\n== 5. Active Directory: SRV via bind9 (reenvio), Kerberos, grupos y prueba negativa de membresia")
+    dns_ip = ctx["ips"]["dns-interno"][99]
+
+    # (a) SRV _ldap._tcp y _kerberos._tcp de la zona AD, consultados a bind9 desde vlan99 (una VLAN interna):
+    # demuestra que la zona "type forward" de bind9 reenvia de verdad hacia samba-ad.
+    r = vantage(ctx["pref"] + RED[99], {"dns": [
+        ("srv_ldap", dns_ip, f"_ldap._tcp.{DOMINIO_AD}", 33),
+        ("srv_kerberos", dns_ip, f"_kerberos._tcp.{DOMINIO_AD}", 33)]}, ctx["img_py"], script)
+    if "error" in r:
+        reg("contenedor de sondeo en vlan99 (SRV de AD)", "FAIL", cuerpo_error(r))
+    else:
+        por = {d["et"]: d for d in r["dns"]}
+        for et, puerto_esp, nombre in (("srv_ldap", 389, f"_ldap._tcp.{DOMINIO_AD}"),
+                                        ("srv_kerberos", 88, f"_kerberos._tcp.{DOMINIO_AD}")):
+            d = por.get(et, {"error": "sin respuesta en la sonda"})
+            srv = d.get("registros_srv") or []
+            ok = "error" not in d and d.get("rcode") == 0 and any(s["puerto"] == puerto_esp for s in srv)
+            reg(f"bind9 (10.10.99.11) reenvia SRV {nombre} -> puerto {puerto_esp} (samba-ad)",
+                "PASS" if ok else "FAIL", f"respuesta={ {k: v for k, v in d.items() if k not in ('et',)} }")
+
+    # (b) Kerberos: kinit real dentro de samba-ad. La clave va SIEMPRE por stdin, nunca en argv (visible en
+    # 'docker top'/ps de cualquiera con acceso al demonio).
+    clave_vet = valor_env("LDAP_PRUEBA_VET_PASSWORD", "")
+    if not clave_vet:
+        reg(f"kinit vet.prueba@{REALM_AD} (clave por stdin)", "FAIL", "falta LDAP_PRUEBA_VET_PASSWORD en sistema/test.env")
+    else:
+        rk = sh(["docker", "exec", "-i", "samba-ad", "kinit", f"vet.prueba@{REALM_AD}"], entrada=clave_vet + "\n", timeout=30)
+        ok_kinit = rk.returncode == 0
+        reg(f"kinit vet.prueba@{REALM_AD} dentro de samba-ad", "PASS" if ok_kinit else "FAIL",
+            f"rc={rk.returncode}\n{(rk.stdout + rk.stderr).strip()[-300:]}")
+        if ok_kinit:
+            rl = sh(["docker", "exec", "samba-ad", "klist"], timeout=30)
+            ok_klist = rl.returncode == 0 and "vet.prueba" in rl.stdout and REALM_AD in rl.stdout
+            reg("klist: el ticket TGT obtenido es de vet.prueba en el realm esperado", "PASS" if ok_klist else "FAIL",
+                (rl.stdout + rl.stderr).strip()[-300:])
+        else:
+            reg("klist (omitido: kinit fallo, no hay TGT que comprobar)", "FAIL", "ver el resultado de kinit arriba")
+
+    # (c) Grupos: samba-tool group listmembers debe devolver exactamente los usuarios de prueba esperados.
+    for grupo, miembros in GRUPOS_AD.items():
+        rg = sh(["docker", "exec", "samba-ad", "samba-tool", "group", "listmembers", grupo], timeout=30)
+        listados = sorted(l.strip() for l in rg.stdout.splitlines() if l.strip())
+        ok = rg.returncode == 0 and listados == sorted(miembros)
+        reg(f"samba-tool group listmembers {grupo} == {{{', '.join(sorted(miembros))}}}",
+            "PASS" if ok else "FAIL", f"rc={rg.returncode} listados={listados}\n{rg.stderr.strip()[-200:]}")
+
+    # (d) Prueba NEGATIVA de grupos: vet.prueba (solo GG-Medica) no debe poder entrar en InvenTree (exige
+    # GG-Operaciones) ni en ERPNext (exige GG-RRHH), porque el filtro LDAP de cada app exige 'memberOf' del
+    # grupo correspondiente. Se reutiliza ldaplogin.py (mismo mecanismo que Caso 1/2, HTTP dentro de las apps);
+    # import diferido: solo se ejecuta aqui, en el orquestador, NUNCA dentro de una sonda efimera (--sonda).
+    if str(AQUI) not in sys.path:
+        sys.path.insert(0, str(AQUI))
+    import ldaplogin
+    if not clave_vet:
+        reg("prueba negativa: vet.prueba no entra en ERPNext ni InvenTree", "FAIL", "falta LDAP_PRUEBA_VET_PASSWORD")
+    else:
+        s, t = ldaplogin.http("erpnext-backend", ldaplogin.HTTP_ERP, clave_vet, "vet.prueba", ldaplogin.SITE)
+        ok = s in (401, 403, 417)
+        reg("prueba negativa: vet.prueba (GG-Medica) NO puede entrar en ERPNext (exige GG-RRHH)",
+            "PASS" if ok else "FAIL", f"status={s} (esperado 401/403/417) {t[:120]}")
+        s, t = ldaplogin.http("inventree-app", ldaplogin.HTTP_INV, clave_vet, "vet.prueba")
+        ok = s in (401, 403)
+        reg("prueba negativa: vet.prueba (GG-Medica) NO puede entrar en InvenTree (exige GG-Operaciones)",
+            "PASS" if ok else "FAIL", f"status={s} (esperado 401/403) {t[:120]}")
+
+
 def bloque_consolidado(ctx, persistencia):
-    imprime("\n== 5. Consolidacion: se INVOCAN los scripts existentes, sin duplicarlos")
+    imprime("\n== 6. Consolidacion: se INVOCAN los scripts existentes, sin duplicarlos")
     img = ctx["img_py"]
     r = sh(["docker", "run", "--rm", "-i", "--pull=never", "--label", ETIQUETA, "--network", ctx["pref"] + RED[99],
             "--entrypoint", "python3", img, "-"], entrada=(AQUI / "ldapprobe.py").read_text(encoding="utf8"), timeout=120)
     txt = (r.stdout + r.stderr).strip()
-    reg("ldapprobe.py: bind LDAP anonimo crudo a 10.10.99.10:389 desde vlan99",
-        "PASS" if "respuesta LDAP BindResponse" in txt else "FAIL", txt[-300:])
+    reg("ldapprobe.py: bind LDAP anonimo + busqueda rootDSE a 10.10.99.10:389 desde vlan99 (samba-ad)",
+        "PASS" if "SONDA LDAP (samba-ad): PASS" in txt else "FAIL", txt[-300:])
     urls = {10: "http://{ip}:8080/", 20: "http://{ip}:80/control/login/", 30: "http://{ip}:8000/", 40: "http://{ip}:8000/"}
     for d, (app, _) in APPS.items():
         ip = ctx["ips"][app][d]
@@ -745,6 +867,7 @@ def main():
         bloque_dns(ctx, m, zona())
         bloque_ntp(ctx, m)
         bloque_nombres(ctx)
+        bloque_ad(ctx, SCRIPT)
         bloque_consolidado(ctx, not a.sin_persistencia)
     fin = estado_docker()
     imprime(f"\ndocker.service DESPUES: {fin}")
@@ -771,6 +894,20 @@ def _respuesta_dns(consulta, rcode, ips, aa=True):
     r = struct.pack(">HHHHHH", ident, flags, 1, len(ips), 0, 0) + q
     for ip in ips:   # puntero de compresion 0xC00C al nombre de la pregunta
         r += b"\xc0\x0c" + struct.pack(">HHIH", 1, 1, 300, 4) + socket.inet_aton(ip)
+    return r
+
+
+def _respuesta_srv(consulta, registros):
+    """registros: lista de (prioridad, peso, puerto, destino). El destino se codifica sin compresion (mas
+    simple de generar en la prueba); _lee_nombre debe leerlo igual que uno comprimido."""
+    ident = struct.unpack(">H", consulta[:2])[0]
+    q = consulta[12:]
+    flags = 0x8000 | 0x0400
+    r = struct.pack(">HHHHHH", ident, flags, 1, len(registros), 0, 0) + q
+    for prio, peso, puerto, destino in registros:
+        nombre = b"".join(bytes([len(p)]) + p.encode() for p in destino.rstrip(".").split(".")) + b"\0"
+        cuerpo = struct.pack(">HHH", prio, peso, puerto) + nombre
+        r += b"\xc0\x0c" + struct.pack(">HHIH", 33, 1, 300, len(cuerpo)) + cuerpo
     return r
 
 
@@ -841,6 +978,19 @@ def autotest():
     r = dns_consulta_tcp("127.0.0.1", f"pretix.{DOMINIO}", 2, tp)
     chk("dns tcp: respuesta con prefijo de longitud se lee igual que por UDP", r.get("rcode") == 0 and r["respuestas"] == ["192.0.2.7"], f"{r}")
     t.close()
+    # SRV (tipo 33): usado por el bloque 5 (AD) para _ldap._tcp/_kerberos._tcp. Un solo registro, nombre destino
+    # sin compresion (el propio parser sabe leer nombres comprimidos o no: ver _lee_nombre).
+    us = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); us.bind(("127.0.0.1", 0)); usp = us.getsockname()[1]
+
+    def servidor_srv():
+        d, dire = us.recvfrom(2048)
+        us.sendto(_respuesta_srv(d, [(0, 100, 389, "dc1.ad.reservaviva.lan")]), dire)
+    threading.Thread(target=servidor_srv, daemon=True).start()
+    r = dns_consulta("127.0.0.1", f"_ldap._tcp.ad.{DOMINIO}", 2, usp, tipo=33)
+    chk("dns: registro SRV (tipo 33) decodifica prioridad/peso/puerto/destino",
+        r.get("rcode") == 0 and r.get("registros_srv") == [{"prioridad": 0, "peso": 100, "puerto": 389,
+                                                              "destino": "dc1.ad.reservaviva.lan"}], f"{r}")
+    us.close()
     chk("estatico_de: ruta relativa se resuelve contra la pagina",
         estatico_de('<link href="css/a.css">', "/openvpms/login") == "/openvpms/css/a.css")
     chk("estatico_de: se ignoran recursos de otros sitios",

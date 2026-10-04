@@ -5,6 +5,7 @@
 #   .\levantar-sistema.ps1 verificar        # segmentacion, DNS, NTP y LDAP
 #   .\levantar-sistema.ps1 detener          # para todo sin borrar datos
 #   .\levantar-sistema.ps1 borrar           # borra contenedores Y datos (pide confirmacion)
+#   .\levantar-sistema.ps1 borrar-directorio  # borra solo el contenedor y los volumenes de samba-ad (pide confirmacion)
 #   .\levantar-sistema.ps1 -Intranet        # modo intranet: proxy web (80) y DNS (53) en la IP de la LAN
 #                                           # (con WSL, el 53 lo atiende sistema\reenviador-dns.ps1: ver mas abajo)
 #   Opciones: -Distro <nombre WSL>  -Forzar  -Rapido  -Si  -TimeoutMin <min>  -Intranet  -IP <X.X.X.X>
@@ -26,7 +27,7 @@
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('arrancar', 'preparar', 'estado', 'verificar', 'detener', 'borrar', 'ayuda')]
+    [ValidateSet('arrancar', 'preparar', 'estado', 'verificar', 'detener', 'borrar', 'borrar-directorio', 'ayuda')]
     [string]$Accion = 'arrancar',
     [string]$Distro = '',
     [switch]$Forzar,
@@ -49,7 +50,7 @@ function Paso([string]$t) { Write-Host ''; Write-Host "==> $t" }
 function Info([string]$t) { Write-Host "    $t" }
 function Fallo([string]$t) { Write-Host ''; Write-Host "ERROR: $t" -ForegroundColor Red; exit 1 }
 
-if ($Accion -eq 'ayuda') { Get-Content -LiteralPath $PSCommandPath -TotalCount 25 | ForEach-Object { $_ -replace '^# ?', '' }; exit 0 }
+if ($Accion -eq 'ayuda') { Get-Content -LiteralPath $PSCommandPath -TotalCount 26 | ForEach-Object { $_ -replace '^# ?', '' }; exit 0 }
 
 # Argumentos para levantar-sistema.sh
 $ArgsSh = @($Accion)
