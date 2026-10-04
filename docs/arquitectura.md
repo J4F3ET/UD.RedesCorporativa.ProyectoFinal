@@ -263,15 +263,16 @@ contenedor para que bind9 los lea.
 | `rrhh.reservaviva.lan` | `HOST_IP` | proxy web → `erpnext-hr` (nginx, el que atiende HTTP) |
 | `ad.reservaviva.lan` (delegación) | `NS dc1.ad.reservaviva.lan.` y glue `dc1.ad` → 10.10.99.10; lo resuelve el propio DC | `samba-ad` |
 
-Un nombre que no existe en la zona da NXDOMAIN; uno de fuera de `reservaviva.lan` da REFUSED o SERVFAIL, nunca una IP real.
+Un nombre que no existe en la zona da NXDOMAIN; uno de fuera de `reservaviva.lan` da NXDOMAIN a los contenedores y REFUSED al anfitrión y a la LAN, nunca una IP real.
 
 ### Delegación de `ad.reservaviva.lan` a Samba AD
 
 El directorio vive en el subdominio `ad.reservaviva.lan` y su DNS lo sirve el propio DC (Samba, `SAMBA_INTERNAL`). bind9 no
 lo reenvía con una zona `forward`: como es autoritativo del padre, `reservaviva.lan`, esa zona nunca se consultaría.
 Lo que hay es una **delegación NS con glue** dentro de la zona (`ad IN NS dc1.ad.reservaviva.lan.` y
-`dc1.ad IN A 10.10.99.10`). Para seguirla, bind9 lleva `recursion yes` limitada a los contenedores de la red, y una zona
-`"."` de reenvío sin reenviadores: todo nombre que no sea de `reservaviva.lan` da `SERVFAIL` por política. Samba reenvía a
+`dc1.ad IN A 10.10.99.10`). Para seguirla, bind9 lleva `recursion yes` limitada a los contenedores de la red, y una raíz
+`"."` autoritativa y vacía (`zones/db.raiz-vacia`): todo nombre que no sea de `reservaviva.lan` da NXDOMAIN por política, tenga o no salida el host.
+(Una zona `"."` de reenvío con `forwarders { }` no sirve: BIND desactiva el reenvío y recursiona con sus root hints.) Samba reenvía a
 bind9 (`dns forwarder = 10.10.99.11`) lo que no es de su zona. Razones y comprobación en
 [`servicios/bind9/README.md`](../servicios/bind9/README.md) y [directorio-activo.md](directorio-activo.md#2-realm-dns-y-delegación).
 

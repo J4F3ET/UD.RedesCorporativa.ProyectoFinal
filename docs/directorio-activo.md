@@ -44,7 +44,7 @@ ad          IN NS   dc1.ad.reservaviva.lan.
 dc1.ad      IN A    10.10.99.10          ; el glue (IP fija del DC)
 ```
 
-Para seguir esa delegación, bind9 lleva `recursion yes` limitada a los contenedores de la red (`allow-recursion`, la subred sin el gateway `.1`; el anfitrión y la LAN no tienen recursión), y para que la recursión no sirva nada más, una zona `"."` de reenvío **sin reenviadores**: cualquier nombre que no sea de `reservaviva.lan` (ni de su delegación) da `SERVFAIL` por política, tenga o no salida la red. Detalle y razones en [`servicios/bind9/README.md`](../servicios/bind9/README.md).
+Para seguir esa delegación, bind9 lleva `recursion yes` limitada a los contenedores de la red (`allow-recursion`, la subred sin el gateway `.1`; el anfitrión y la LAN no tienen recursión), y para que la recursión no sirva nada más, una raíz `"."` **autoritativa y vacía** (`zones/db.raiz-vacia`): cualquier nombre que no sea de `reservaviva.lan` (ni de su delegación) da NXDOMAIN a los contenedores por política, tenga o no salida la red. Detalle y razones en [`servicios/bind9/README.md`](../servicios/bind9/README.md).
 
 Cuatro cosas más que conviene tener claras:
 

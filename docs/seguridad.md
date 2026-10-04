@@ -113,8 +113,10 @@ se integran: [`directorio-activo.md`](directorio-activo.md). El nombre `ldap.res
 - **Recursión limitada en bind9.** Para seguir la delegación de `ad.reservaviva.lan` hizo falta `recursion yes`, limitada
   a los contenedores de la red `reservaviva` (ACL de la subred **sin el gateway `.1`**, que es el origen de las consultas del
   anfitrión y de la LAN). Fuera de esa ACL, `recursion no`. Para que la recursión no se convierta en un resolvedor de
-  Internet, hay una zona `"."` de reenvío **sin reenviadores** (`forward only; forwarders { };`): todo nombre que no sea de
-  `reservaviva.lan` da `SERVFAIL` por política. Detalle en [`servicios/bind9/README.md`](../servicios/bind9/README.md).
+  Internet, hay una raíz `"."` **autoritativa y vacía** (`zones/db.raiz-vacia`, con `allow-query { red-interna; }`): todo nombre que
+  no sea de `reservaviva.lan` da NXDOMAIN a los contenedores, tenga o no salida el host, y REFUSED al anfitrión y a la LAN. Una zona
+  `"."` de reenvío con `forwarders { }` **no** lo evita (BIND recursiona con sus root hints; se midió el 04/10/2026: `example.com`
+  resolvía a IP reales). Detalle en [`servicios/bind9/README.md`](../servicios/bind9/README.md).
 - **Cuentas de laboratorio sin caducidad.** Las cuatro cuentas de prueba y `svc-lectura` llevan `--noexpiry` (UAC `66048`)
   en cada arranque, para que un login de prueba no falle por caducidad a los 41 días. La política del dominio (`maxPwdAge`)
   no se toca, y `Administrator` sí caduca. Con claves públicas en git, en producción esto no se admitiría.
@@ -273,7 +275,7 @@ dentro de WSL queda en las interfaces de Windows, aunque sin las reglas de entra
 
 - Cada servicio publicado está abierto en `HOST_IP:puerto`, desde el host y desde un contenedor de la red.
 - Las bases de datos y los Redis no tienen puertos publicados y sus puertos están cerrados en `HOST_IP`.
-- bind9 responde con autoridad a su zona y no resuelve nombres externos (`REFUSED` o `SERVFAIL`).
+- bind9 responde con autoridad a su zona y no resuelve nombres externos (NXDOMAIN para los contenedores, `REFUSED` para el anfitrión y la LAN).
 - La delegación de `ad.reservaviva.lan` se sigue desde un contenedor de la red (registros SRV de `_ldap._tcp` y
   `_kerberos._tcp`).
 - Los logins LDAPS funcionan con la CA interna y fallan con una CA ajena o con una clave errónea, y un usuario de otro

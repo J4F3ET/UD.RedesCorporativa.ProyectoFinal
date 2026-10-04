@@ -69,7 +69,7 @@ ya local, referencia con digest) con `--pull=never`, y la de `ntp-interno`; llev
    dar `HOST_IP`, de forma autoritativa y coincidiendo con `servicios/bind9/zones/db.reservaviva.lan`. Además: un nombre
    inexistente da NXDOMAIN autoritativo; `example.com` desde el anfitrión da REFUSED (el anfitrión y la LAN no tienen
    recursión); la delegación `ad.reservaviva.lan` (`dc1.ad`) se resuelve desde un contenedor consultando a `dns-interno`
-   por su IP fija; `example.com` desde un contenedor no resuelve (SERVFAIL o REFUSED, sin respuestas). Con Docker Engine en
+   por su IP fija; `example.com` desde un contenedor da NXDOMAIN de la raíz vacía, sin respuestas ni IP reales de Internet. Con Docker Engine en
    WSL, cuando `DNS_PORT` ≠ 53, se consulta además `pretix` por `HOST_IP:53`, por UDP y TCP: es la ruta del reenviador de
    Windows (`sistema/reenviador-dns.ps1`).
    La consulta con recursión se hace a la IP fija de `dns-interno` y no a `HOST_IP:DNS_PORT` porque, por el puerto
@@ -120,13 +120,19 @@ Un puerto cerrado y un destino mudo dan resultados parecidos y significan cosas 
 ## Hallazgos (leer los `INFO`; observados en las pasadas de [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md))
 
 - **Los contenedores tienen recursión en bind9.** La delegación real de `ad.reservaviva.lan` exige `recursion yes`; BIND no
-  permite acotarla a una zona. Que `example.com` no resuelva depende de la zona `.` vacía, no de la red (esta red tiene
-  salida a Internet). El anfitrión y la LAN no tienen recursión.
+  permite acotarla a una zona. Lo que impide resolver Internet es la raíz `.` autoritativa y vacía (`zones/db.raiz-vacia`), no
+  la falta de salida (esta red tiene salida). Una zona `.` de reenvío con `forwarders { }` no valía: el 04/10/2026
+  `example.com` resolvía a IP reales. El anfitrión y la LAN no tienen recursión (REFUSED).
 - **H21 (resuelto): la zona ya no hereda las IP del diseño de 3 equipos.** Hoy `levantar-sistema.sh` genera la zona con
   `HOST_IP` y los 7 nombres deben dar PASS.
 - **H11**: `/opt/startup.sh` de la imagen NTP escribe `server 127.127.1.1` **y** `local stratum 10`. `127.127.1.1` es notación de
   ntpd para el reloj local; chrony lo trata como un servidor normal e inalcanzable. Lo que sirve hora es `local stratum 10`,
   así que el stratum publicado debe ser 10. El guion lo comprueba (`chronyc tracking`) y muestra `chronyc sources`.
+
+- **UDP del anfitrión hacia su propia IP, bajo WSL (limitación del punto de vista).** Con Docker Engine en WSL, el UDP que el
+  propio anfitrión manda a `HOST_IP` (DNS y NTP) no llega, mientras que el TCP, el UDP desde un contenedor y el UDP desde Windows
+  (otro origen, como un equipo de la LAN) sí responden (medido el 04/10/2026). Esas comprobaciones salen como `INFO` bajo WSL y
+  siguen siendo `FAIL` en cualquier otro sistema; el REFUSED y el NXDOMAIN del anfitrión se piden por TCP.
 
 ## Qué NO puede demostrar un solo host
 
