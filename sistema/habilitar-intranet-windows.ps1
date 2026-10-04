@@ -1,4 +1,4 @@
-# habilitar-intranet-windows.ps1 - Prepara Windows para el modo intranet de Reserva Viva (acceso desde otros equipos).
+# habilitar-intranet-windows.ps1 - Prepara Windows para que otros equipos de la LAN lleguen a Reserva Viva (HOST_IP).
 #
 # Ejecutar UNA vez, en PowerShell COMO ADMINISTRADOR, desde la raiz del repositorio:
 #   powershell -ExecutionPolicy Bypass -File .\sistema\habilitar-intranet-windows.ps1              # aplicar
@@ -10,14 +10,16 @@
 #   1. .wslconfig: copia de seguridad y networkingMode=mirrored en [wsl2], sin tocar el resto ni los comentarios. Con la
 #      red NAT de WSL, la distro (y Docker dentro) tiene una IP 172.x que los demas equipos no alcanzan; en modo mirrored
 #      la distro comparte las interfaces de Windows y Docker puede publicar en la IP de la LAN.
-#   2. Cortafuegos de Windows: reglas de ENTRADA para 80/tcp (proxy web) y 53/udp+tcp (DNS), solo desde la subred local
-#      y en todos los perfiles (la Wi-Fi de este equipo esta en perfil Publico).
+#   2. Cortafuegos de Windows: reglas de ENTRADA para todo lo que el sistema publica en HOST_IP: 80/tcp (proxy web),
+#      53/udp+tcp (DNS, lo atiende el reenviador de Windows), las cuatro aplicaciones (18080-18083/tcp), LDAP y LDAPS
+#      (1389 y 1636/tcp) y NTP (1123/udp; los puertos salen de sistema\test.env), solo desde la subred local y en todos
+#      los perfiles (la Wi-Fi de este equipo esta en perfil Publico).
 #   3. Cortafuegos de Hyper-V para la VM de WSL (en modo mirrored es el que filtra lo que entra a WSL): las mismas reglas.
 #   4. Informa de quien ocupa el puerto 53 en Windows (ICS / Portmaster) y de los pasos para Portmaster. NO detiene
 #      servicios ni cambia Portmaster: solo muestra los comandos.
 # Que NO hace: no ejecuta "wsl --shutdown" (pararia los contenedores; lo decides tu), no toca test.env ni el sistema.
 #
-# Despues: wsl --shutdown, y .\levantar-sistema.ps1 -Intranet -Forzar. Pasos y pruebas: docs\operacion.md,
+# Despues: wsl --shutdown, y .\levantar-sistema.ps1 -Forzar. Pasos y pruebas: docs\operacion.md,
 # "Acceso desde la LAN". Riesgo (claves de laboratorio publicas en git): docs\seguridad.md.
 #
 # Solo ASCII a proposito: PowerShell 5.1 lee mal UTF-8 sin BOM.
@@ -115,7 +117,7 @@ function Aplicar-Mirrored {
     $nuevas = @(
         "$MarcaWsl $anterior",
         '# Red en modo espejo: la distro comparte las interfaces de Windows y los demas equipos de la LAN llegan a los',
-        '# contenedores (Reserva Viva, modo intranet). Lo puso sistema\habilitar-intranet-windows.ps1; -Deshacer lo quita.',
+        '# contenedores (Reserva Viva, acceso desde la LAN). Lo puso sistema\habilitar-intranet-windows.ps1; -Deshacer lo quita.',
         'networkingMode=mirrored'
     )
     if ($w.LineaModo -ge 0) {
@@ -156,14 +158,35 @@ function Deshacer-Mirrored {
 
 # --- Cortafuegos -----------------------------------------------------------------------------------------------------
 
+# Lee un puerto de sistema\test.env (el mismo fichero que usa el lanzador); si falta, el valor por defecto.
+function Puerto-Env([string]$Clave, [string]$Defecto) {
+    $f = Join-Path (Split-Path -Parent $PSScriptRoot) 'sistema\test.env'
+    if (Test-Path -LiteralPath $f) {
+        foreach ($l in Get-Content -LiteralPath $f) {
+            if ($l -match ('^' + [regex]::Escape($Clave) + '=(\d+)\s*$')) { return $Matches[1] }
+        }
+    }
+    return $Defecto
+}
+$pOvp = Puerto-Env 'OPENVPMS_PORT' '18080'; $pErp = Puerto-Env 'ERPNEXT_PORT' '18081'
+$pPtx = Puerto-Env 'PRETIX_PORT' '18082';   $pInv = Puerto-Env 'INVENTREE_PORT' '18083'
+$pLdap = Puerto-Env 'LDAP_PORT' '1389';     $pLdaps = Puerto-Env 'LDAPS_PORT' '1636'
+$pNtp = Puerto-Env 'NTP_PORT' '1123';       $pHttp = Puerto-Env 'HTTP_PORT' '80'
 $Reglas = @(
-    @{ Nombre = "$Prefijo-HTTP-TCP-80"; Protocolo = 'TCP'; Puerto = '80'; Texto = 'proxy web (TCP 80)' },
+    @{ Nombre = "$Prefijo-HTTP-TCP-80"; Protocolo = 'TCP'; Puerto = $pHttp; Texto = "proxy web (TCP $pHttp)" },
     @{ Nombre = "$Prefijo-DNS-UDP-53"; Protocolo = 'UDP'; Puerto = '53'; Texto = 'DNS (UDP 53)' },
-    @{ Nombre = "$Prefijo-DNS-TCP-53"; Protocolo = 'TCP'; Puerto = '53'; Texto = 'DNS (TCP 53)' }
+    @{ Nombre = "$Prefijo-DNS-TCP-53"; Protocolo = 'TCP'; Puerto = '53'; Texto = 'DNS (TCP 53)' },
+    @{ Nombre = "$Prefijo-OPENVPMS-TCP"; Protocolo = 'TCP'; Puerto = $pOvp; Texto = "OpenVPMS (TCP $pOvp)" },
+    @{ Nombre = "$Prefijo-ERPNEXT-TCP"; Protocolo = 'TCP'; Puerto = $pErp; Texto = "ERPNext (TCP $pErp)" },
+    @{ Nombre = "$Prefijo-PRETIX-TCP"; Protocolo = 'TCP'; Puerto = $pPtx; Texto = "Pretix (TCP $pPtx)" },
+    @{ Nombre = "$Prefijo-INVENTREE-TCP"; Protocolo = 'TCP'; Puerto = $pInv; Texto = "InvenTree (TCP $pInv)" },
+    @{ Nombre = "$Prefijo-LDAP-TCP"; Protocolo = 'TCP'; Puerto = $pLdap; Texto = "LDAP (TCP $pLdap)" },
+    @{ Nombre = "$Prefijo-LDAPS-TCP"; Protocolo = 'TCP'; Puerto = $pLdaps; Texto = "LDAPS (TCP $pLdaps)" },
+    @{ Nombre = "$Prefijo-NTP-UDP"; Protocolo = 'UDP'; Puerto = $pNtp; Texto = "NTP (UDP $pNtp)" }
 )
 
 function Aplicar-Cortafuegos([string]$Subred) {
-    Paso "Cortafuegos de Windows: entrada a 80/tcp y 53/udp+tcp solo desde $Subred (todos los perfiles)"
+    Paso "Cortafuegos de Windows: entrada a $(($Reglas | ForEach-Object { "$($_.Puerto)/$($_.Protocolo.ToLower())" }) -join ', ') solo desde $Subred (todos los perfiles)"
     foreach ($r in $Reglas) {
         Get-NetFirewallRule -Name $r.Nombre -ErrorAction SilentlyContinue | Remove-NetFirewallRule
         New-NetFirewallRule -Name $r.Nombre -DisplayName "Reserva Viva - $($r.Texto)" -Group $Grupo -Direction Inbound `
@@ -221,7 +244,7 @@ function Informar-Puertos([string]$Ip) {
         Aviso 'El servicio SharedAccess ("Conexion compartida a Internet", ICS) escucha en 0.0.0.0:53/udp. Con WSL en modo'
         Aviso 'mirrored puede impedir que Docker publique el DNS en el 53. Lo usan la "Zona con cobertura inalambrica movil"'
         Aviso 'y el conmutador "Default Switch" de Hyper-V; tras pasar WSL a mirrored, WSL ya no lo necesita. Si el DNS no'
-        Aviso 'puede publicarse, puedes pararlo mientras uses el modo intranet (este script NO lo hace):'
+        Aviso 'puede publicarse, puedes pararlo mientras uses el sistema (este script NO lo hace):'
         Info '    Stop-Service SharedAccess            # hasta el proximo reinicio'
         Info '    Set-Service SharedAccess -StartupType Manual   # opcional: que no arranque solo al iniciar Windows'
         Info '  Para volver: Set-Service SharedAccess -StartupType Automatic; Start-Service SharedAccess'
@@ -249,7 +272,7 @@ function Informar-Puertos([string]$Ip) {
 $build = [Environment]::OSVersion.Version.Build
 Paso 'Comprobando el equipo'
 Info "Windows build $build (el modo mirrored de WSL necesita Windows 11 22H2, build 22621, o posterior)"
-if ($build -lt 22621) { Fallo 'Este Windows no admite networkingMode=mirrored. El modo intranet no es posible aqui sin Docker Desktop.' }
+if ($build -lt 22621) { Fallo 'Este Windows no admite networkingMode=mirrored. Publicar en la LAN no es posible aqui sin Docker Desktop.' }
 
 $dir = $null
 if ($IP) {
@@ -296,12 +319,12 @@ if ($Deshacer) {
     $cambio = Deshacer-Mirrored
     Write-Host ''
     if ($cambio) { Aviso 'Para que WSL vuelva a la red anterior: wsl --shutdown (PARA los contenedores) y .\levantar-sistema.ps1 -Forzar' }
-    Info 'Listo. Arranca en modo local: .\levantar-sistema.ps1 -Forzar'
+    Info 'Listo. Arranca con: .\levantar-sistema.ps1 -Forzar'
     exit 0
 }
 
 Write-Host ''
-Aviso 'El modo intranet expone a la LAN las cuatro aplicaciones con claves de laboratorio PUBLICAS en git (sistema\test.env).'
+Aviso 'Esto deja el sistema accesible desde la LAN: las cuatro aplicaciones, LDAP, DNS y NTP, con claves de laboratorio PUBLICAS en git (sistema\test.env).'
 Aviso 'Usalo solo en una red de laboratorio. Las reglas se limitan a la subred local, pero cualquiera en ella puede entrar.'
 Aviso 'networkingMode=mirrored cambia la red de TODA la distro de WSL, no solo de Docker. Segun los comentarios de tu .wslconfig,'
 Aviso 'con Tailscale en Windows el DNS de la distro ya dio problemas (por eso dnsTunneling=false y resolv.conf estatico):'
@@ -319,9 +342,9 @@ Informar-Puertos $IP
 Paso 'Siguientes pasos'
 if ($cambio -or ("$red" -ne 'mirrored')) {
     Info '1. wsl --shutdown        (PARA la VM de WSL y todos los contenedores; los datos se conservan)'
-    Info '2. .\levantar-sistema.ps1 -Intranet -Forzar'
+    Info '2. .\levantar-sistema.ps1 -Forzar   (o con -IP X.X.X.X / -Intranet si este equipo no tiene la IP de sistema\test.env)'
 } else {
-    Info '1. .\levantar-sistema.ps1 -Intranet -Forzar'
+    Info '1. .\levantar-sistema.ps1 -Forzar   (o con -IP X.X.X.X / -Intranet si este equipo no tiene la IP de sistema\test.env)'
 }
 Info "Despues, desde OTRO equipo de la LAN: nslookup pretix.reservaviva.lan $IP  y abrir http://pretix.reservaviva.lan"
 Info 'Lista completa de pruebas: docs\operacion.md, "Acceso desde la LAN". Para volver atras: este script con -Deshacer.'
