@@ -2,6 +2,8 @@
 
 Documento vigente con las cifras medidas. Sustituye a las actas históricas (`docs/prueba-smoke-test-resultados.md` y `docs/auditoria-coherencia-documental.md`), retiradas el 26/09/2026. Se pueden leer con `git show 95e0da4:<ruta>`.
 
+> **Nota (04/10/2026):** las secciones fechadas hasta el 01/10/2026 son **anteriores a la eliminación de las VLAN**: se midieron con una red por departamento, IP fijas y `vlan99_infra`, y se conservan tal cual como registro. Lo que hoy hace `verificar` está en [`../sistema/verificar_arquitectura.md`](../sistema/verificar_arquitectura.md) y la pasada con el compose nuevo, en la sección del 04/10/2026 de este documento.
+
 **Entorno de medida:** Windows 11 con 13,9 GB de RAM y Docker Engine 29.8.1 / Compose 5.5.1 dentro de WSL (`Ubuntu-24.04`), sin Docker Desktop. La VM de WSL tiene 8 GB de techo. Proyecto compose `reservaviva-smoke`.
 
 ## Arranque (`levantar-sistema.ps1 -Forzar`, 26/09/2026)
@@ -134,7 +136,7 @@ Desde el 26/09 21:59 hay 99 PASS y no 92: la comprobación "los nombres dns/ntp/
 
 En todas las pasadas válidas, `ExecMainStartTimestamp` de `docker.service` es el mismo antes y después: el demonio no se reinició durante la prueba.
 
-Qué cubre cada bloque (detalle en [`../sistema/verificar_arquitectura.md`](../sistema/verificar_arquitectura.md)):
+Qué cubría cada bloque en estas pasadas, con el diseño anterior de una red por departamento (lo que comprueba hoy `verificar` está en [`../sistema/verificar_arquitectura.md`](../sistema/verificar_arquitectura.md)):
 
 - **Prerrequisitos:** las 4 apps en su VLAN y en la 99, y OpenLDAP, DNS y NTP en la 99, cada uno con la IP fija de [`arquitectura.md`](arquitectura.md#4-servicios).
 - **Segmentación:** controles positivos, negativos entre departamentos, y alcance de LDAP solo desde las apps dual-homed.
@@ -258,6 +260,42 @@ Incidencias del día y cómo se resolvieron:
 | `ldap.crt` antiguo sin los SAN `dc1.ad.reservaviva.lan` y `samba-ad` | `generar-certificados.sh` lo regenera (solo `ldap.crt` y `ldap.key`, con la misma CA) |
 | `levantar-sistema.ps1` no aceptaba la acción `borrar-directorio` | Se añadió y se probó desde Windows en esta corrida |
 | El umbral de memoria del lanzador (6,9 GB libres) rechazó el arranque con varias sesiones de Claude abiertas | Se cerraron sesiones y se usó `-Forzar`; el umbral no se tocó |
+
+## Eliminación de las VLAN: una IP y un puerto por servicio (04/10/2026)
+
+Cambio: las cinco redes que emulaban VLAN, las variables `NET_*` y las IP fijas desaparecen (quedan `samba-ad` 10.10.99.10 y `dns-interno` 10.10.99.11); una sola red `reservaviva` más `erpnext_internal`; todo se publica en `HOST_IP` con un puerto por servicio. Las pasadas de arriba son anteriores. Entorno: el equipo de medida tiene la IP `192.168.1.12` (no la `192.168.1.26` de `test.env`), así que se arrancó con `--ip 192.168.1.12`; Docker Engine en WSL con red `mirrored`.
+
+**Arranque (cifras de la sesión que levantó el compose, no medidas aquí):** `arrancar --ip 192.168.1.12` sobre los volúmenes existentes, RC=0 en 208 s, 26/26 sanos; `docker network ls` muestra solo `reservaviva-smoke_reservaviva` y `reservaviva-smoke_erpnext_internal`.
+
+**`verificar --rapido`** (sin la prueba de persistencia; el informe de cada pasada está en `sistema/resultados/`):
+
+| Pasada | Resultado |
+|---|---|
+| 16:58, primera con el verificador nuevo (`verificacion-20261004-165841.txt`) | 101 PASS, **15 FAIL**, 3 INFO. 11 FAIL eran UDP del anfitrión (WSL) hacia su propia IP; 2 eran el reenviador del 53; 1 el marcador del caso 4; y 1 era un defecto real de bind9 (siguiente fila) |
+| 17:03, UDP local bajo WSL como INFO (`verificacion-20261004-170316.txt`) | 101 PASS, **4 FAIL**, 13 INFO. El FAIL nuevo: `example.com` consultado desde un contenedor a `dns-interno` resolvía a IP reales (`104.20.23.154`, `172.66.147.243`) |
+| 17:11, con la raíz vacía de bind9 (`verificacion-20261004-171119.txt`) | 102 PASS, **3 FAIL**, 13 INFO. Los 3 FAIL: los dos del reenviador DNS de Windows (`pretix.reservaviva.lan` por `192.168.1.12:53`, UDP con timeout y TCP "connection refused"), que aún no se había arrancado, y el marcador del caso 4 |
+| 17:33, tras `habilitar-intranet-windows.ps1`, con Portmaster activo (`verificacion-20261004-173317.txt`) | 102 PASS, **3 FAIL**, 13 INFO. Los mismos 3: Portmaster seguía con el 53/udp y el reenviador no pudo arrancar |
+| 17:43, con Portmaster detenido y el reenviador en marcha (`verificacion-20261004-174302.txt`) | **104 PASS, 1 FAIL, 13 INFO**. Los dos del reenviador pasan, por UDP y por TCP |
+
+El único FAIL de la última pasada es el marcador "caso 4 no ejecutado" de `--rapido` (la persistencia se midió aparte, más abajo); por él el veredicto global de la pasada sigue siendo FAIL. Los 13 INFO: `chronyc sources`, Pretix por `HOST_IP:puerto` (400, limitación conocida) y 11 comprobaciones UDP del anfitrión bajo WSL (DNS y NTP en el bloque 1, los 7 nombres de la zona, NXDOMAIN y el SNTP del bloque 3).
+
+**Hallazgos de esta pasada:**
+- **bind9 recursionaba hacia Internet desde los contenedores.** La zona `"."` de reenvío con `forwarders { }` no bloquea nada: BIND desactiva el reenvío y recursiona con sus root hints. El SERVFAIL que se veía antes era solo falta de salida a Internet. Estaba ya desde la rama de Samba, no por quitar las VLAN. Corregido con una raíz autoritativa y vacía (`servicios/bind9/zones/db.raiz-vacia`, `allow-query { red-interna; }`). Medido tras reiniciar solo `dns-interno`, desde un contenedor a `10.10.99.11`: `example.com` → NXDOMAIN, `dc1.ad.reservaviva.lan` → 10.10.99.10, `_ldap._tcp.ad.reservaviva.lan` → `dc1.ad` puerto 389, `pretix.reservaviva.lan` → 192.168.1.12; desde el anfitrión por TCP a `192.168.1.12:1053`: `example.com` → REFUSED, `pretix` → 192.168.1.12. `samba-ad` siguió `healthy`, y el bloque de AD (kinit, klist, grupos) en PASS.
+- **UDP del anfitrión hacia su propia IP, bajo WSL.** Docker Engine en WSL no lo entrega (DNS `:1053` y NTP `:1123`). Desde un contenedor responde, por TCP responde, y desde Windows (otro origen, como un equipo de la LAN) responde: DNS 54 bytes y NTP 48 bytes. Es una limitación del punto de vista, no del servicio.
+
+**Persistencia (`ldaplogin.py --persistencia`, ejecutado aparte, con `HOST_IP=192.168.1.12` y `DNS_PORT=1053` exportados):** `VEREDICTO GLOBAL: PASS`, RC=0. Casos 1 a 3 en PASS (login LDAP de `rrhh.prueba` en ERPNext y `logistica.prueba` en InvenTree, clave errónea 417 y 401, `ldapsearch` por LDAPS con la CA rc=0, clave errónea rc=49, CA ajena rc=255). Caso 4: `down` sin `-v` y `up -d` con rc=0 ambos, y los casos 4a, 4b y 4c en PASS. Después, 23 contenedores en marcha (los 26 servicios menos los 3 trabajos de un solo disparo) y `proxy-web` seguía publicado en `192.168.1.12:80`. No se midió una pasada única de `verificar` completo: la persistencia se partió en una ejecución aparte por el límite de 10 minutos de la herramienta.
+
+**Lanzador de Windows, cortafuegos y reenviador DNS (misma tarde):**
+- `.\levantar-sistema.ps1 -IP 192.168.1.12`, primera ejecución: detectó `networkingMode = mirrored` y Docker Engine en WSL, reconstruyó la imagen de OpenVPMS y dejó 26/26 sanos, pero terminó con RC=1 porque el reenviador no pudo arrancar: el 53/udp de Windows lo tenía `portmaster-core` (servicio `PortmasterCore`) en `::`. El lanzador lo detectó y lo dijo. Comprobado aparte abriendo un socket a mano: `192.168.1.12:53/udp` daba "acceso a un socket no permitido" y `53/tcp` estaba libre. `SharedAccess` (ICS) estaba detenido y deshabilitado.
+- `sistema\habilitar-intranet-windows.ps1` (como administrador, lo ejecutó el usuario): creó las reglas de cortafuegos del proxy (TCP 80), DNS (UDP y TCP 53), las cuatro aplicaciones (TCP 18080 a 18083), LDAP (1389), LDAPS (1636) y NTP (UDP 1123). No libera el 53: solo indica los pasos.
+- Con `PortmasterCore` detenido (`Stop-Service PortmasterCore`), segunda ejecución del `.ps1`: RC=0, reenviador lanzado en segundo plano y comprobado por el propio lanzador (`pretix.reservaviva.lan` → `192.168.1.12` por UDP a `192.168.1.12:53`). Es la pasada de las 17:43 de la tabla.
+
+**No probado:**
+- `-Intranet` / `--intranet` (autodetección de la IP de la LAN) y el rechazo de `127.*` como `HOST_IP`. Del `.ps1` solo se ejecutó `arrancar` con `-IP`.
+- Que las reglas de cortafuegos dejen pasar de verdad a otro equipo: se comprobó que existen, no su efecto.
+- El acceso desde otro equipo de la LAN (solo se probó desde el anfitrión, desde contenedores y desde Windows con UDP a mano).
+- La regeneración de `ldap.crt` al cambiar `HOST_IP`.
+- `docker compose` fuera de WSL (Docker Desktop o Linux nativo): ahí el UDP del anfitrión sería FAIL, no INFO.
 
 ## Pendientes
 

@@ -1,12 +1,12 @@
 # Proxy web por nombre de Reserva Viva (contenedor proxy-web). Es una PLANTILLA: el entrypoint de la imagen oficial de
-# nginx sustituye ${NET_INFRA} (los tres primeros octetos de vlan99_infra, 10.10.99 por defecto) y la escribe en
-# /etc/nginx/conf.d/default.conf. Detalle y decisiones en README.md de esta carpeta.
+# nginx sustituye ${HOST_IP} y los puertos de las aplicaciones (NGINX_ENVSUBST_FILTER en docker-compose.yml) y la escribe
+# en /etc/nginx/conf.d/default.conf. Detalle y decisiones en README.md de esta carpeta.
 #
-# Un server por nombre. Cada uno llega a su aplicacion por la IP que esta tiene en vlan99_infra, la unica red del proxy:
-#   openvpms.reservaviva.lan   -> openvpms-app ${NET_INFRA}.24:8080 (Tomcat; "/" redirige a /openvpms/)
-#   pretix.reservaviva.lan     -> pretix-web   ${NET_INFRA}.21:80   (nginx + gunicorn de la imagen)
-#   inventree.reservaviva.lan  -> inventree-app ${NET_INFRA}.22:8000 (gunicorn + whitenoise)
-#   rrhh.reservaviva.lan       -> erpnext-hr   ${NET_INFRA}.25:8080 (nginx de ERPNext: /assets, socket.io y backend)
+# Un server por nombre. Cada uno llega a su aplicacion por la IP del equipo y el puerto en el que esta publicada:
+#   openvpms.reservaviva.lan   -> ${HOST_IP}:${OPENVPMS_PORT} (Tomcat; "/" redirige a /openvpms/)
+#   pretix.reservaviva.lan     -> ${HOST_IP}:${PRETIX_PORT} (nginx + gunicorn de la imagen)
+#   inventree.reservaviva.lan  -> ${HOST_IP}:${INVENTREE_PORT} (gunicorn + whitenoise)
+#   rrhh.reservaviva.lan       -> ${HOST_IP}:${ERPNEXT_PORT} (nginx de ERPNext: /assets, socket.io y backend)
 # Cualquier otro nombre (o una IP) cae en el default_server, que responde 404 con un texto que lo explica.
 
 # WebSocket (socket.io de ERPNext): la cabecera Connection solo pasa a "upgrade" si el cliente lo pidio.
@@ -63,7 +63,7 @@ server {
     }
 
     location / {
-        proxy_pass http://${NET_INFRA}.24:8080;
+        proxy_pass http://${HOST_IP}:${OPENVPMS_PORT};
     }
 }
 
@@ -72,7 +72,7 @@ server {
     server_name pretix.reservaviva.lan;
 
     location / {
-        proxy_pass http://${NET_INFRA}.21:80;
+        proxy_pass http://${HOST_IP}:${PRETIX_PORT};
     }
 }
 
@@ -81,7 +81,7 @@ server {
     server_name inventree.reservaviva.lan;
 
     location / {
-        proxy_pass http://${NET_INFRA}.22:8000;
+        proxy_pass http://${HOST_IP}:${INVENTREE_PORT};
     }
 }
 
@@ -90,6 +90,6 @@ server {
     server_name rrhh.reservaviva.lan;
 
     location / {
-        proxy_pass http://${NET_INFRA}.25:8080;
+        proxy_pass http://${HOST_IP}:${ERPNEXT_PORT};
     }
 }

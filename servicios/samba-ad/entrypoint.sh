@@ -9,7 +9,7 @@ set -euo pipefail
 
 REALM="AD.RESERVAVIVA.LAN"
 DOMINIO="RESERVAVIVA"
-HOST_IP="10.10.99.10"      # la misma IP que tenia openldap en vlan99_infra: el DC se registra a si mismo en su DNS
+DC_IP="10.10.99.10"        # IP fija de samba-ad en la red del sistema (compose: NET_INTERNA .10): el DC se registra a si mismo en su DNS
                             # con la IP que ve aqui, nunca con 127.0.0.1 (si no, los clientes no lo alcanzarian).
 DNS_FORWARDER="10.10.99.11"  # bind9 (dns-interno): resuelve todo lo que no sea la zona AD (SAMBA_INTERNAL).
 FQDN="dc1.ad.reservaviva.lan"
@@ -64,7 +64,7 @@ else
     --dns-backend=SAMBA_INTERNAL \
     --option="dns forwarder=${DNS_FORWARDER}" \
     --use-rfc2307 \
-    --host-ip="${HOST_IP}" \
+    --host-ip="${DC_IP}" \
     --adminpass="${SAMBA_ADMIN_PASSWORD}"
   touch "${MARCA_PROVISION}"
   log "Dominio provisionado."
@@ -78,7 +78,7 @@ fi
 
 # /etc/hosts tampoco persiste entre arranques: Docker lo regenera cada vez.
 if ! grep -q "${FQDN}" /etc/hosts; then
-  printf '%s\t%s dc1\n' "${HOST_IP}" "${FQDN}" >> /etc/hosts
+  printf '%s\t%s dc1\n' "${DC_IP}" "${FQDN}" >> /etc/hosts
 fi
 
 # --- Certificado TLS -------------------------------------------------------------------------------------------------

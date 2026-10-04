@@ -1,0 +1,11 @@
+; Raiz "." VACIA y autoritativa (ver named.conf): todo nombre fuera de reservaviva.lan recibe NXDOMAIN, sin recursion real.
+; Fichero ESTATICO (no se genera). Solo SOA y NS (+ la direccion del propio NS, que named-checkzone exige).
+$TTL 300
+@       IN SOA  dns.reservaviva.lan. admin.reservaviva.lan. (
+                1          ; serial
+                3600       ; refresh
+                600        ; retry
+                86400      ; expire
+                300 )      ; negative TTL
+        IN NS   ns.
+ns      IN A    127.0.0.1   ; el NS tiene que tener direccion dentro de la zona (named-checkzone lo exige); nadie lo consulta

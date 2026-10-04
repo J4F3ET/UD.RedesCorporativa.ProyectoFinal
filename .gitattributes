@@ -3,3 +3,4 @@
 Dockerfile text eol=lf
 *.service text eol=lf
 levantar-sistema.cmd text eol=crlf
+servicios/bind9/zones/db.raiz-vacia text eol=lf

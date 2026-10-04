@@ -1,9 +1,8 @@
 .env
 # CA interna, certificado LDAPS y sus claves: cada instalacion genera los suyos (servicios/ca/generar-certificados.sh)
 servicios/ca/certs/
-# Zonas DNS (vista interna y vista lan) y ACL de la vista interna, generadas desde las plantillas por levantar-sistema.sh
+# Zona DNS y ACL de los contenedores con recursion, generadas desde la plantilla por levantar-sistema.sh
 servicios/bind9/zones/db.reservaviva.lan
-servicios/bind9/zones/db.reservaviva.lan.vista-lan
 servicios/bind9/zones/acl-interna.conf
 servicios/bind9/zones/*.tmp
 
@@ -11,7 +10,7 @@ servicios/bind9/zones/*.tmp
 sistema/resultados/
 # Cache de bytecode de Python (sistema/*.py)
 sistema/__pycache__/
-# PID del reenviador DNS de Windows del modo intranet (levantar-sistema.ps1 -Intranet)
+# PID del reenviador DNS de Windows (levantar-sistema.ps1, cuando el DNS no va al 53)
 sistema/.reenviador-dns.pid
 
 # Worktrees y ficheros locales de sesiones de agentes

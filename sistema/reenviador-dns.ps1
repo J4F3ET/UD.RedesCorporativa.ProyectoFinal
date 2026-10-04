@@ -1,11 +1,11 @@
 # reenviador-dns.ps1 - Reenvia el DNS de la LAN (IP:53, UDP y TCP) al DNS de Reserva Viva publicado en IP:PuertoDestino.
 #
 # Por que existe: con WSL en modo mirrored, Windows NO entrega a Linux el trafico que llega a su puerto 53 (comprobado:
-# un servidor en WSL recibe en el 54 pero no en el 53; Windows responde "puerto inalcanzable"). Por eso en modo intranet
-# el contenedor dns-interno se publica en IP:1053 y este proceso de Windows escucha en IP:53 y reenvia cada consulta.
+# un servidor en WSL recibe en el 54 pero no en el 53; Windows responde "puerto inalcanzable"). Por eso con Docker Engine
+# en WSL el contenedor dns-interno se publica en HOST_IP:1053 y este proceso de Windows escucha en IP:53 y reenvia cada consulta.
 #
-# Lo arranca levantar-sistema.ps1 -Intranet (proceso oculto, sin ventana); "levantar-sistema.ps1 detener" y el modo
-# local lo paran. Uso manual:
+# Lo arranca levantar-sistema.ps1 (proceso oculto, sin ventana) cuando el DNS queda publicado en un puerto distinto del 53;
+# "levantar-sistema.ps1 detener" y un arranque con el DNS en el 53 lo paran. Uso manual:
 #   powershell -ExecutionPolicy Bypass -File .\sistema\reenviador-dns.ps1 -IP 192.168.1.13 [-PuertoDestino 1053]
 # No necesita administrador. El cortafuegos para 53/udp+tcp lo abre sistema\habilitar-intranet-windows.ps1.
 #

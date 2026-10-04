@@ -6,7 +6,7 @@ Qué hay aquí:
 
 | Fichero | Para qué |
 |---|---|
-| `test.env` | Variables del laboratorio (puertos publicados, dirección de publicación y contraseñas de prueba, desechables). Es el `--env-file` de todo `docker compose` |
+| `test.env` | Variables del laboratorio (puertos publicados, `HOST_IP` —la IP en la que se publica todo— y contraseñas de prueba, desechables). Es el `--env-file` de todo `docker compose` |
 | `verificar_arquitectura.py` / `.md` | La verificación de la arquitectura y qué comprueba |
 | `ldaplogin.py`, `ldapprobe.py`, `probe.py` | Pruebas que invoca la verificación (login LDAP, bind LDAP crudo, sondeo HTTP) |
 | `resultados/` | Informes de `verificar` (fuera de git) |
@@ -22,7 +22,9 @@ docker compose --env-file sistema/test.env down -v              # BORRA todo, da
 
 Los tiempos medidos del arranque están en [`../docs/resultados-un-host.md`](../docs/resultados-un-host.md).
 
-`preparar` genera las dos zonas DNS de `reservaviva.lan` y la ACL de la vista interna (bind9 monta `servicios/bind9/zones/`): en la vista interna sustituye cada `IP_<NOMBRE>` por la IP fija del contenedor que da ese servicio, y en la vista lan pone la IP del anfitrión (`INTRANET_IP`).
+`preparar` genera la zona DNS de `reservaviva.lan` y la ACL de recursión (bind9 monta `servicios/bind9/zones/`): en la zona pone `HOST_IP` en todos los nombres de servicio.
+
+`HOST_IP` es la IP del equipo (`192.168.1.26` en el laboratorio). `./levantar-sistema.sh --ip X.X.X.X` la sustituye en esa ejecución y `--intranet` autodetecta la IP de la LAN; si llamas a `docker compose` a mano, exporta `HOST_IP` antes si no es la de `test.env`.
 
 Verificación de la arquitectura: `./levantar-sistema.sh verificar` (qué comprueba, en [`verificar_arquitectura.md`](verificar_arquitectura.md)).
 

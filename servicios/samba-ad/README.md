@@ -1,4 +1,4 @@
-# Samba AD DC (Infraestructura, VLAN 99)
+# Samba AD DC (Infraestructura)
 
 Directorio central del zoológico: Active Directory Domain Controller (Samba 4.22 sobre Debian trixie), en
 sustitución de OpenLDAP. Da LDAP/LDAPS (389/636, firmado por la CA interna de [`../ca/`](../ca/README.md)),
@@ -15,8 +15,9 @@ hiciera falta partir de un OpenLDAP con datos reales) están en `docs/directorio
 - **Realm:** `AD.RESERVAVIVA.LAN` (subdominio; Samba no admite `.local` ni renombrar el realm después).
   **Dominio/NetBIOS:** `RESERVAVIVA`. **DN base:** `DC=ad,DC=reservaviva,DC=lan`.
 - **Hostname:** `dc1` (≤ 15 caracteres, lo exige Samba), **FQDN:** `dc1.ad.reservaviva.lan`.
-- **IP:** `10.10.99.10` en `vlan99_infra`, la misma que tenía `openldap`: es la que el DC ve como suya y con la que
-  se registra en su propio DNS (si viera otra, o `127.0.0.1`, los clientes no lo alcanzarían).
+- **IP:** `10.10.99.10` en la red `reservaviva` (`NET_INTERNA`), la única IP fija junto con la de `dns-interno` (`.11`): es la que
+  el DC ve como suya y con la que se registra en su propio DNS (si viera otra, o `127.0.0.1`, los clientes no lo alcanzarían), y
+  cambiarla obligaría a reprovisionar el directorio. Dentro de `entrypoint.sh` es la variable `DC_IP`.
 
 ## `entrypoint.sh`
 
@@ -115,7 +116,7 @@ lo demás hace falta autenticarse, por UPN (`usuario@ad.reservaviva.lan`) o por 
 - **Resolver:** `dns: 10.10.99.11` (bind9), que delega `ad.reservaviva.lan` de vuelta a este contenedor.
 - **Volúmenes:** `samba_data` (`/var/lib/samba`) y `samba_etc` (`/etc/samba`). `./levantar-sistema.sh borrar-directorio` borra
   solo estos dos y el contenedor.
-- **Puertos:** se publican el 389 y el 636 en `${PUBLISH_IP}` (`LDAP_PORT` y `LDAPS_PORT`; 1389 y 1636 en `test.env`).
+- **Puertos:** se publican el 389 y el 636 en `${HOST_IP}` (`LDAP_PORT` y `LDAPS_PORT`; 1389 y 1636 en `test.env`).
 
 ## Límites
 

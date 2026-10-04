@@ -9,8 +9,8 @@
 # Acciones:
 #   arrancar   (por defecto) prepara todo, levanta los 26 servicios y espera a que esten sanos
 #   preparar   solo lo previo: certificados, zonas DNS, validacion del compose e imagen de OpenVPMS
-#   estado     estado de cada servicio, modo de publicacion (local o intranet) y direcciones de acceso
-#   verificar  ejecuta sistema/verificar_arquitectura.py contra el sistema levantado (respeta el modo en que este)
+#   estado     estado de cada servicio, IP y puertos en los que esta publicado y direcciones de acceso
+#   verificar  ejecuta sistema/verificar_arquitectura.py contra el sistema levantado (respeta la IP en que este)
 #   detener    para los contenedores sin borrar nada; "arrancar" los vuelve a levantar en minutos
 #   borrar     elimina contenedores Y VOLUMENES (todos los datos del laboratorio). Pide confirmacion
 #   borrar-directorio   elimina SOLO el contenedor y los volumenes de samba-ad (samba_data, samba_etc): para volver a
@@ -21,18 +21,20 @@
 #   --timeout MIN   espera maxima a que todo quede sano tras el arranque (por defecto 45)
 #   --rapido        (verificar) omite la prueba de persistencia de LDAP (down + up -d); ese caso queda como no verificado
 #   --si            (borrar, borrar-directorio) no pedir confirmacion
-#   --intranet      (arrancar/preparar) publica el proxy web (80) y el DNS en la IP de la LAN, para que otros
-#                   equipos entren por nombre (*.reservaviva.lan). El DNS va al 53, salvo con Docker Engine en WSL: ahi
-#                   va al 1053 y levantar-sistema.ps1 deja un reenviador de Windows en el 53. Sin esta opcion,
-#                   "arrancar" deja el modo local (todo en 127.0.0.1). Requisitos: docs/operacion.md, "Acceso desde la LAN"
-#   --ip X.X.X.X    (con --intranet) la IP de la LAN a usar; si no se da, la de la ruta por defecto de Windows (o del
-#                   sistema, fuera de Windows)
+#   --ip X.X.X.X    (arrancar/preparar) la IP del equipo en la que se publica todo (HOST_IP). Sin esta opcion se usa la de
+#                   la variable de entorno HOST_IP o, si no, la de sistema/test.env (192.168.1.26, la del switch del
+#                   laboratorio). El sistema siempre se publica en UNA IP, con un puerto por servicio: proxy web, las
+#                   cuatro aplicaciones, LDAP/LDAPS, DNS y NTP. Las aplicaciones tambien en 127.0.0.1 (localhost)
+#   --intranet      (arrancar/preparar) autodetecta la IP de la LAN de este equipo y la usa como HOST_IP: sirve para arrancar
+#                   en un equipo que no tiene la IP de test.env. --ip tiene prioridad. El DNS va al 53, salvo con Docker
+#                   Engine en WSL: ahi va al 1053 y levantar-sistema.ps1 deja un reenviador de Windows en el 53.
+#                   Requisitos de la LAN: docs/operacion.md, "Acceso desde la LAN"
 #
 # Es idempotente: se puede ejecutar las veces que haga falta. Si un arranque se interrumpe, volver a ejecutarlo
 # retoma donde quedo (la inicializacion de OpenVPMS y la creacion del sitio de ERPNext son reanudables).
 #
-# Usa el docker-compose.yml de la raiz (unico; servicios agrupados por departamento, con cada VLAN como un bridge de
-# Docker con su misma subred) y los ficheros de cada servicio en servicios/. Todo "docker compose" se ejecuta desde la
+# Usa el docker-compose.yml de la raiz (unico; servicios agrupados por departamento, todos en una red bridge de Docker)
+# y los ficheros de cada servicio en servicios/. Todo "docker compose" se ejecuta desde la
 # raiz con --env-file sistema/test.env (contrasenas de laboratorio, desechables).
 #
 # Solo ASCII a proposito: la salida se ve igual en cualquier consola de Windows.
@@ -56,7 +58,7 @@ SI=false
 INTRANET=false
 IP_PEDIDA=""
 
-uso() { sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+uso() { sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 es_ipv4() { [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] && \
             [ "${BASH_REMATCH[1]}" -le 255 ] && [ "${BASH_REMATCH[2]}" -le 255 ] && \
@@ -80,11 +82,8 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-if [ -n "${IP_PEDIDA}" ] && ! ${INTRANET}; then
-  echo "--ip solo tiene sentido con --intranet" >&2; exit 2
-fi
-if ${INTRANET} && [ "${ACCION}" != "arrancar" ] && [ "${ACCION}" != "preparar" ]; then
-  echo "--intranet solo se usa con arrancar o preparar; ${ACCION} detecta solo el modo en que esta publicado el sistema." >&2
+if { [ -n "${IP_PEDIDA}" ] || ${INTRANET}; } && [ "${ACCION}" != "arrancar" ] && [ "${ACCION}" != "preparar" ]; then
+  echo "--ip y --intranet solo se usan con arrancar o preparar; ${ACCION} usa la IP en la que esta publicado el sistema." >&2
   exit 2
 fi
 
@@ -109,52 +108,55 @@ sistema_docker() { docker info --format '{{.OperatingSystem}}' 2>/dev/null || tr
 
 contenedores_en_marcha() { docker ps -q --filter "label=com.docker.compose.project=${PROYECTO}" | grep -c . || true; }
 
-# Valor que usara compose para una variable de publicacion: la del entorno si esta exportada (el modo intranet las exporta
-# para esta ejecucion; en compose el entorno manda sobre --env-file) y si no, la de test.env.
+# Valor que usara compose para una variable: la del entorno si esta exportada (este script exporta HOST_IP y DNS_PORT para
+# esta ejecucion; en compose el entorno manda sobre --env-file) y si no, la de test.env.
 valor_efectivo() {
   local v="${!1:-}"
   [ -n "${v}" ] && printf '%s' "${v}" || valor_env "$1" "$2"
 }
 
-# --- Modo de publicacion: local (127.0.0.1, por defecto) o intranet (IP de la LAN) ----------------------------------
+# --- Publicacion: UNA IP (HOST_IP) y un puerto por servicio ---------------------------------------------------------
 #
-# Solo cambian dos contenedores: proxy-web (INTRANET_IP:HTTP_PORT -> 80) y dns-interno (DNS_BIND_IP:DNS_PORT -> 53). El
-# modo intranet no toca test.env en disco: exporta INTRANET_IP, DNS_BIND_IP y DNS_PORT para esta ejecucion. Por eso
-# "arrancar" sin --intranet vuelve al modo local, y "verificar"/"estado"/"preparar" detectan el modo en que esta
-# publicado el sistema, con el puerto real del DNS (para que el down + up -d de la verificacion no lo cambie).
+# Todo se publica en HOST_IP: proxy web, las cuatro aplicaciones (ademas en 127.0.0.1), LDAP/LDAPS, DNS y NTP. HOST_IP se
+# resuelve, de menor a mayor prioridad: sistema/test.env, la variable de entorno HOST_IP, --ip X; con --intranet y sin --ip
+# se usa la IP de la LAN que detecte este script. Se exporta para esta ejecucion (en compose el entorno manda sobre
+# --env-file), sin tocar test.env en disco. Las demas acciones (estado, verificar, detener...) usan la IP en la que ya esta
+# publicado el sistema, para que un "up -d" de la verificacion no recree contenedores en otra IP.
 #
-# Puerto del DNS en modo intranet: 53, salvo con Docker Engine dentro de WSL, donde es PUERTO_DNS_WSL (1053). Con WSL en
+# Puerto del DNS: 53, salvo con Docker Engine dentro de WSL, donde es PUERTO_DNS_WSL (1053). Con WSL en
 # networkingMode=mirrored, Windows NO entrega a Linux el trafico que llega a su puerto 53 (medido el 27/09/2026: un
 # servidor en WSL recibe en el 54 y en el 1053, pero en el 53 Windows responde "puerto inalcanzable" por UDP y rechaza la
 # conexion TCP). Por eso dns-interno se publica en <IP>:1053 y levantar-sistema.ps1 arranca en Windows
 # sistema/reenviador-dns.ps1, que escucha en <IP>:53 (UDP y TCP) y reenvia cada consulta a <IP>:1053. Los clientes de la
 # LAN siguen usando el 53. Con Docker Desktop (publica desde Windows) o con Linux nativo el DNS va directo al 53.
 
-MODO="local"
-IP_ANFITRION="127.0.0.1"   # a donde apunta la vista "lan" del DNS: la IP en la que escucha el proxy web
-PUERTO_DNS_WSL=1053        # puerto de dns-interno en modo intranet con Docker Engine en WSL (ver arriba)
+HOST_IP=""
+PUERTO_DNS_WSL=1053        # puerto de dns-interno con Docker Engine en WSL (ver arriba)
 
-# true si el DNS del modo intranet necesita el reenviador de Windows: Docker Engine dentro de WSL.
+# Todo lo que se publica en el host: contenedor|puerto interno/proto|variable del puerto|valor por defecto|etiqueta|tambien en 127.0.0.1
+PUBLICACIONES=(
+  "openvpms-app|8080/tcp|OPENVPMS_PORT|8080|OpenVPMS|si"
+  "erpnext-hr|8080/tcp|ERPNEXT_PORT|8080|ERPNext|si"
+  "pretix-web|80/tcp|PRETIX_PORT|80|Pretix|si"
+  "inventree-app|8000/tcp|INVENTREE_PORT|8000|InvenTree|si"
+  "samba-ad|389/tcp|LDAP_PORT|389|LDAP|no"
+  "samba-ad|636/tcp|LDAPS_PORT|636|LDAPS|no"
+  "proxy-web|80/tcp|HTTP_PORT|80|proxy web|no"
+  "dns-interno|53/udp|DNS_PORT|53|DNS|no"
+  "dns-interno|53/tcp|DNS_PORT|53|DNS|no"
+  "ntp-interno|123/udp|NTP_PORT|123|NTP|no"
+)
+
+# true si el DNS necesita el reenviador de Windows: Docker Engine dentro de WSL.
 dns_por_reenviador() { en_wsl && [ "$(sistema_docker)" != "Docker Desktop" ]; }
 
-# "IP|puerto" publicados por un contenedor para un puerto interno, o vacio si no existe o no publica.
+# Lineas "IP|puerto" publicadas por un contenedor para un puerto interno (una por enlace), o nada si no existe o no publica.
 publicacion_de() {
-  docker inspect --format "{{range \$p, \$b := .HostConfig.PortBindings}}{{if eq \$p \"$2\"}}{{range \$b}}{{.HostIp}}|{{.HostPort}}{{end}}{{end}}{{end}}" "$1" 2>/dev/null || true
+  docker inspect --format "{{range \$p, \$b := .HostConfig.PortBindings}}{{if eq \$p \"$2\"}}{{range \$b}}{{.HostIp}}|{{.HostPort}}{{\"\\n\"}}{{end}}{{end}}{{end}}" "$1" 2>/dev/null | grep . || true
 }
 
-# Detecta el modo del sistema en marcha a partir de lo que publica proxy-web. Exporta las variables para que cualquier
-# "compose up" de esta ejecucion lo conserve.
-detectar_modo_actual() {
-  local p d
-  p="$(publicacion_de proxy-web 80/tcp)"
-  [ -n "${p}" ] || return 0
-  if [ "${p%%|*}" != "127.0.0.1" ] && [ -n "${p%%|*}" ]; then
-    MODO="intranet"; IP_ANFITRION="${p%%|*}"
-    export INTRANET_IP="${p%%|*}" HTTP_PORT="${p##*|}"
-    d="$(publicacion_de dns-interno 53/udp)"
-    if [ -n "${d}" ]; then export DNS_BIND_IP="${d%%|*}" DNS_PORT="${d##*|}"; fi
-  fi
-}
+# Puerto de host que un contenedor publica en una IP concreta para un puerto interno (vacio si ninguno).
+publicado_en() { publicacion_de "$1" "$2" | awk -F'|' -v ip="$3" '$1 == ip { print $2; exit }'; }
 
 # IP de la LAN por defecto. En Windows (Git Bash o WSL) se pregunta a Windows por la ruta por defecto: en WSL con red NAT
 # la IP de la distro (172.x) no es la que ven los otros equipos. Fuera de Windows, la IP de origen de la ruta por defecto.
@@ -173,29 +175,50 @@ PS
   printf '%s' "${ip}"
 }
 
-# Fija el modo de esta ejecucion y exporta las variables de publicacion.
-resolver_modo() {
-  if ${INTRANET}; then
-    local ip="${IP_PEDIDA}"
-    if [ -z "${ip}" ]; then
-      ip="$(detectar_ip_lan)"
-      es_ipv4 "${ip}" || fallo "No se pudo detectar la IP de la LAN de este equipo. Indicala a mano: --ip X.X.X.X (en PowerShell: -Intranet -IP X.X.X.X). Es la IPv4 del adaptador Wi-Fi o Ethernet (ipconfig en Windows)."
+# Fija HOST_IP y DNS_PORT para esta ejecucion y los exporta (tambien para sistema/verificar_arquitectura.py).
+resolver_host_ip() {
+  local ip="" origen="" p
+  if [ "${ACCION}" != "arrancar" ] && [ "${ACCION}" != "preparar" ]; then
+    # Con el sistema en marcha, la IP real es la que publica proxy-web; el puerto del DNS y el del proxy, los suyos.
+    p="$(publicacion_de proxy-web 80/tcp | head -n 1)"
+    if [ -n "${p}" ]; then
+      ip="${p%%|*}"; origen="la que publica proxy-web"
+      export HTTP_PORT="${p##*|}"
+      p="$(publicacion_de dns-interno 53/udp | head -n 1)"
+      [ -z "${p}" ] || export DNS_PORT="${p##*|}"
     fi
-    case "${ip}" in
-      127.*|0.0.0.0) fallo "La IP ${ip} no sirve para el modo intranet: otros equipos no pueden llegar a ella. Usa la IP de la LAN (ipconfig en Windows) o arranca sin --intranet para el modo local." ;;
-    esac
-    MODO="intranet"; IP_ANFITRION="${ip}"
-    local puerto_dns=53
-    if dns_por_reenviador; then puerto_dns="${PUERTO_DNS_WSL}"; fi
-    export INTRANET_IP="${ip}" DNS_BIND_IP="${ip}" DNS_PORT="${puerto_dns}"
-  elif [ "${ACCION}" != "arrancar" ]; then
-    detectar_modo_actual
   fi
+  if [ -z "${ip}" ]; then
+    if [ -n "${IP_PEDIDA}" ]; then ip="${IP_PEDIDA}"; origen="--ip"
+    elif ${INTRANET}; then
+      ip="$(detectar_ip_lan)"; origen="la IP de la LAN detectada (--intranet)"
+      es_ipv4 "${ip}" || fallo "No se pudo detectar la IP de la LAN de este equipo. Indicala a mano: --ip X.X.X.X (en PowerShell: -IP X.X.X.X). Es la IPv4 del adaptador Wi-Fi o Ethernet (ipconfig en Windows)."
+    elif [ -n "${HOST_IP:-}" ]; then ip="${HOST_IP}"; origen="la variable de entorno HOST_IP"
+    else ip="$(valor_env HOST_IP "")"; origen="${ENV_FILE}"
+    fi
+  fi
+  [ -n "${ip}" ] || fallo "No hay HOST_IP: definela en ${ENV_FILE} (la IP del equipo en el switch del laboratorio) o pasa --ip X.X.X.X."
+  es_ipv4 "${ip}" || fallo "HOST_IP no es una direccion IPv4 valida (${ip}, de ${origen})."
+  case "${ip}" in
+    127.*|0.0.0.0) fallo "HOST_IP ${ip} (de ${origen}) no sirve: otros equipos no pueden llegar a ella. Usa la IP del equipo en la LAN (ipconfig en Windows, ip addr en Linux): --ip X.X.X.X, o --intranet para autodetectarla." ;;
+  esac
+  HOST_IP="${ip}"
+  export HOST_IP
+  if [ "${ACCION}" = "arrancar" ] || [ "${ACCION}" = "preparar" ]; then
+    if dns_por_reenviador; then export DNS_PORT="${PUERTO_DNS_WSL}"; else export DNS_PORT=53; fi
+  fi
+  info "HOST_IP=${HOST_IP} (${origen}); DNS en el puerto $(valor_efectivo DNS_PORT 53)"
 }
 
-# Comprobaciones previas del modo intranet, ANTES de tocar ningun contenedor. Cada fallo dice que hacer.
-comprobar_intranet() {
-  paso "Comprobando el modo intranet (IP ${IP_ANFITRION})"
+# true si ya hay escuchas ajenas en <proto> <ip>:<puerto> (en esa IP o en todas); imprime hasta tres.
+escuchan_en() {
+  local flag="-ltn"; [ "$1" = "udp" ] && flag="-lun"
+  ss -H "${flag}" "( sport = :$3 )" 2>/dev/null | awk -v ip="$2" '$4 ~ "^(" ip "|0\\.0\\.0\\.0|\\*|\\[::\\]):"' | head -n 3
+}
+
+# Comprobaciones previas, ANTES de tocar ningun contenedor: el sistema siempre se publica en HOST_IP. Cada fallo dice que hacer.
+comprobar_publicacion() {
+  paso "Comprobando la publicacion en ${HOST_IP}"
   local so; so="$(sistema_docker)"
   # (a) Que la IP este en este sistema. Con Docker Desktop, Desktop publica en Windows y no hace falta.
   if [ "${so}" != "Docker Desktop" ]; then
@@ -203,79 +226,64 @@ comprobar_intranet() {
       local red; red="$(wslinfo --networking-mode 2>/dev/null || echo desconocido)"
       info "Red de WSL: ${red}"
       if [ "${red}" != "mirrored" ]; then
-        fallo "WSL esta en modo de red '${red}', no 'mirrored'. En ese modo la distro no tiene la IP ${IP_ANFITRION}: Docker no puede publicar en ella y otros equipos de la LAN no llegarian a los contenedores.
+        fallo "WSL esta en modo de red '${red}', no 'mirrored'. En ese modo la distro no tiene la IP ${HOST_IP}: Docker no puede publicar en ella y otros equipos de la LAN no llegarian a los contenedores.
        Que hacer: ejecutar UNA vez, en PowerShell como administrador, sistema\\habilitar-intranet-windows.ps1 (activa
-       networkingMode=mirrored en .wslconfig y abre el cortafuegos para 80/tcp y 53/udp+tcp), despues 'wsl --shutdown'
-       (para los contenedores) y volver a lanzar: .\\levantar-sistema.ps1 -Intranet -Forzar
-       Pasos completos: docs/operacion.md, 'Acceso desde la LAN'. Nada se ha cambiado: el sistema sigue en el modo en que estaba."
+       networkingMode=mirrored en .wslconfig y abre el cortafuegos para los puertos del sistema), despues 'wsl --shutdown'
+       (para los contenedores) y volver a lanzar: .\\levantar-sistema.ps1 -Forzar
+       Pasos completos: docs/operacion.md, 'Acceso desde la LAN'. Nada se ha cambiado."
       fi
     fi
-    if ! ip -4 -o addr show 2>/dev/null | grep -q " ${IP_ANFITRION}/"; then
-      fallo "La IP ${IP_ANFITRION} no esta en ninguna interfaz de este sistema ($(ip -4 -o addr show 2>/dev/null | awk '{print $4}' | tr '\n' ' ')).
-       Comprueba la IP con ipconfig (Windows) o ip addr y pasala con --ip (PowerShell: -IP). Nada se ha cambiado."
+    if ! ip -4 -o addr show 2>/dev/null | grep -q " ${HOST_IP}/"; then
+      fallo "La IP ${HOST_IP} no esta en ninguna interfaz de este sistema ($(ip -4 -o addr show 2>/dev/null | awk '{print $4}' | tr '\n' ' ')).
+       Este equipo no tiene la IP de ${ENV_FILE}. Pasa la suya con --ip X.X.X.X (PowerShell: -IP X.X.X.X), o --intranet para
+       que la detecte (ipconfig en Windows, ip addr en Linux). Nada se ha cambiado."
     fi
   fi
-  # (b) Que el puerto del proxy y el del DNS esten libres en esa IP (o ya sean nuestros, de una ejecucion anterior en modo
-  # intranet). En WSL el del DNS es el 1053: el 53 de Windows es del reenviador y lo comprueba levantar-sistema.ps1.
-  local http_port dns_port="${DNS_PORT}" ocupado="" l
-  http_port="$(valor_efectivo HTTP_PORT 80)"
+  # (b) Que los puertos esten libres en HOST_IP (y en 127.0.0.1 las aplicaciones) o ya sean nuestros, de una ejecucion
+  # anterior. En WSL el del DNS es el 1053: el 53 de Windows es del reenviador y lo comprueba levantar-sistema.ps1.
+  local ocupado="" fila cont pint var def etiq loop puerto proto l ip
   if command -v ss >/dev/null 2>&1; then
-    if [ "$(publicacion_de proxy-web 80/tcp)" != "${IP_ANFITRION}|${http_port}" ]; then
-      l="$(ss -H -ltn "( sport = :${http_port} )" 2>/dev/null | awk -v ip="${IP_ANFITRION}" '$4 ~ "^(" ip "|0\\.0\\.0\\.0|\\*|\\[::\\]):"' | head -n 3)"
-      [ -n "${l}" ] && ocupado+=$'\n'"       ${http_port}/tcp (proxy web): ${l//$'\n'/ ; }"
-    fi
-    if [ "$(publicacion_de dns-interno 53/udp)" != "${IP_ANFITRION}|${dns_port}" ]; then
-      l="$(ss -H -lun "( sport = :${dns_port} )" 2>/dev/null | awk -v ip="${IP_ANFITRION}" '$4 ~ "^(" ip "|0\\.0\\.0\\.0|\\*|\\[::\\]):"' | head -n 3)"
-      [ -n "${l}" ] && ocupado+=$'\n'"       ${dns_port}/udp (DNS): ${l//$'\n'/ ; }"
-      l="$(ss -H -ltn "( sport = :${dns_port} )" 2>/dev/null | awk -v ip="${IP_ANFITRION}" '$4 ~ "^(" ip "|0\\.0\\.0\\.0|\\*|\\[::\\]):"' | head -n 3)"
-      [ -n "${l}" ] && ocupado+=$'\n'"       ${dns_port}/tcp (DNS): ${l//$'\n'/ ; }"
-    fi
+    for fila in "${PUBLICACIONES[@]}"; do
+      IFS='|' read -r cont pint var def etiq loop <<<"${fila}"
+      puerto="$(valor_efectivo "${var}" "${def}")"; proto="${pint#*/}"
+      for ip in "${HOST_IP}" 127.0.0.1; do
+        [ "${ip}" = "127.0.0.1" ] && [ "${loop}" != "si" ] && continue
+        [ "$(publicado_en "${cont}" "${pint}" "${ip}")" = "${puerto}" ] && continue
+        l="$(escuchan_en "${proto}" "${ip}" "${puerto}")"
+        [ -n "${l}" ] && ocupado+=$'\n'"       ${ip}:${puerto}/${proto} (${etiq}): ${l//$'\n'/ ; }"
+      done
+    done
   fi
   if [ -n "${ocupado}" ]; then
-    fallo "Hay puertos ocupados en ${IP_ANFITRION} por otros programas de este sistema:${ocupado}
-       Para 53: suele ser systemd-resolved (DNSStubListener) o dnsmasq; para ${http_port}: otro servidor web.
-       Liberalos o, para el proxy web, usa otro puerto libre: HTTP_PORT=<puerto> ./levantar-sistema.sh --intranet
-       (los clientes entraran entonces con http://<nombre>:<puerto>). Nada se ha cambiado."
+    fallo "Hay puertos ocupados por otros programas de este sistema:${ocupado}
+       Para 53: suele ser systemd-resolved (DNSStubListener) o dnsmasq; para 80: otro servidor web. Liberalos o cambia el
+       puerto con su variable (p. ej. HTTP_PORT=8088 ./levantar-sistema.sh; los clientes entraran entonces con
+       http://<nombre>:<puerto>). Nada se ha cambiado."
   fi
-  info "IP presente en el sistema y puertos ${http_port}/tcp y ${dns_port}/udp+tcp libres en ella (vistos desde aqui)."
-  if [ "${dns_port}" != "53" ]; then
-    info "DNS en ${IP_ANFITRION}:${dns_port}: con WSL mirrored, Windows no entrega su puerto 53 a Linux. El 53 lo atiende"
-    info "el reenviador de Windows (sistema/reenviador-dns.ps1), que arranca levantar-sistema.ps1 -Intranet."
+  info "IP presente en el sistema y los puertos del sistema libres en ella (vistos desde aqui)."
+  if [ "$(valor_efectivo DNS_PORT 53)" != "53" ]; then
+    info "DNS en ${HOST_IP}:$(valor_efectivo DNS_PORT 53): con WSL mirrored, Windows no entrega su puerto 53 a Linux. El 53 lo atiende"
+    info "el reenviador de Windows (sistema/reenviador-dns.ps1), que arranca levantar-sistema.ps1."
   fi
 }
 
-# Publica primero SOLO proxy-web y dns-interno en la IP de la LAN. Si Docker no puede (puerto ocupado en Windows por el
-# servicio ICS o por Portmaster, IP ausente...), explica la causa y vuelve a publicarlos en 127.0.0.1: el sistema no queda
-# a medias.
-publicar_intranet() {
-  paso "Publicando el proxy web (${IP_ANFITRION}:$(valor_efectivo HTTP_PORT 80)) y el DNS (${IP_ANFITRION}:${DNS_PORT}) en la LAN"
-  local salida
-  if salida="$(dc up -d --no-deps proxy dns 2>&1)"; then
-    printf '%s\n' "${salida}" | sed 's/^/    /'
-    return 0
-  fi
-  printf '%s\n' "${salida}" | sed 's/^/    /' >&2
-  local causa="Docker no pudo publicar en ${IP_ANFITRION} (salida de compose arriba)."
-  if printf '%s' "${salida}" | grep -qi 'address already in use'; then
-    if printf '%s' "${salida}" | grep -q ":${DNS_PORT}[^0-9]"; then
-      causa="El puerto ${DNS_PORT} de ${IP_ANFITRION} (DNS) ya esta en uso por otro programa. Si es el 53, en Windows lo
-       suelen tener el servicio 'Conexion compartida a Internet' (ICS, SharedAccess, en 0.0.0.0:53/udp) y Portmaster
-       (portmaster-core, en [::]:53): sistema\\habilitar-intranet-windows.ps1, como administrador, detecta quien lo ocupa
-       y da los comandos para liberarlo (no los ejecuta por su cuenta). Si es otro puerto, liberalo y repite."
+# Version anterior del sistema: cinco redes bridge reservaviva-smoke_vlan10_medica/20/30/40/99. La red unica usa la misma
+# subred que vlan99_infra y Docker rechazaria crearla. Se para el sistema SIN borrar volumenes (nunca "down -v": en ellos
+# estan el dominio de Samba y el sitio de ERPNext, ~30 min de reinicializacion) y se eliminan esas redes.
+migrar_redes_vlan() {
+  local viejas v
+  viejas="$(docker network ls --format '{{.Name}}' | grep -E "^${PROYECTO}_vlan" || true)"
+  [ -n "${viejas}" ] || return 0
+  paso "Migracion: el sistema tiene las redes de la version con VLAN ($(printf '%s' "${viejas}" | tr '\n' ' '))"
+  aviso "Se paran y recrean los contenedores del sistema y se eliminan esas redes. Los volumenes (datos) NO se tocan."
+  dc down --remove-orphans || fallo "No se pudo parar el sistema para migrar las redes."
+  for v in ${viejas}; do
+    if docker network rm "${v}" >/dev/null 2>&1; then
+      info "Red ${v} eliminada."
     else
-      causa="El puerto $(valor_efectivo HTTP_PORT 80) de ${IP_ANFITRION} ya esta en uso por otro servidor web (en Windows: IIS,
-       Skype antiguo, otro contenedor...). Liberalo o usa otro puerto libre para el proxy: HTTP_PORT=<puerto> en el entorno."
+      fallo "No se pudo eliminar la red ${v} (en uso por: $(docker network inspect "${v}" --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null)). Paralos y repite."
     fi
-  elif printf '%s' "${salida}" | grep -qi 'cannot assign requested address'; then
-    causa="La IP ${IP_ANFITRION} no esta en el sistema donde corre Docker. En WSL hace falta networkingMode=mirrored
-       (sistema\\habilitar-intranet-windows.ps1)."
-  fi
-  aviso "Vuelvo a publicar proxy-web y dns-interno como dice sistema/test.env (modo local) para no dejar el sistema a medias."
-  MODO="local"; IP_ANFITRION="127.0.0.1"
-  unset INTRANET_IP DNS_BIND_IP DNS_PORT HTTP_PORT
-  generar_zona >/dev/null
-  dc up -d --no-deps proxy dns >&2 || aviso "Tampoco se pudo volver al modo local: revisa 'docker compose ps' y vuelve a ejecutar sin --intranet."
-  fallo "${causa}"
+  done
 }
 
 # --- Requisitos -----------------------------------------------------------------------------------------------------
@@ -328,8 +336,8 @@ comprobar_memoria() {
 
 preparar_certificados() {
   paso "Certificados LDAPS (CA interna + Samba AD)"
-  # Idempotente: si existen, son validos y cubren las direcciones, no toca nada. No instala la CA en el host.
-  bash "${RAIZ}/servicios/ca/generar-certificados.sh" --sin-instalar-ca | sed 's/^/    /'
+  # Idempotente: si existen, son validos y cubren las direcciones (HOST_IP incluida), no toca nada. No instala la CA en el host.
+  HOST_IP="${HOST_IP}" bash "${RAIZ}/servicios/ca/generar-certificados.sh" --sin-instalar-ca | sed 's/^/    /'
   # Si falta un fichero de un bind mount, Docker crea un DIRECTORIO vacio en su lugar y LDAPS falla sin avisar.
   local f
   for f in ca.crt ldap.crt ldap.key; do
@@ -354,53 +362,39 @@ reemplazar_si_cambia() {
   fi
 }
 
-# Dos zonas de reservaviva.lan (una por vista de servicios/bind9/named.conf) y la ACL de la vista interna.
+# La zona reservaviva.lan (una sola, servicios/bind9/named.conf) y la ACL de los contenedores con recursion.
 generar_zona() {
-  paso "Zonas DNS reservaviva.lan (vista interna y vista lan) - modo ${MODO}"
+  paso "Zona DNS reservaviva.lan (todos los nombres -> ${HOST_IP})"
   local dir="${RAIZ}/servicios/bind9/zones"
   local tpl="${dir}/db.reservaviva.lan.tpl" out="${dir}/db.reservaviva.lan"
-  local tpl_lan="${dir}/db.reservaviva.lan.vista-lan.tpl" out_lan="${dir}/db.reservaviva.lan.vista-lan"
   local acl="${dir}/acl-interna.conf"
   [ -f "${tpl}" ] || fallo "Falta la plantilla ${tpl}"
-  [ -f "${tpl_lan}" ] || fallo "Falta la plantilla ${tpl_lan}"
-  # Vista interna: cada nombre apunta al contenedor que da ese servicio, con la misma IP fija que le da el compose
-  # (mismas subredes NET_* y mismos valores por defecto). rrhh es erpnext-hr, el nginx de ERPNext: el que atiende HTTP.
-  local infra medica taquilla logistica rrhh serial r
-  infra="$(valor_env NET_INFRA 10.10.99)";         medica="$(valor_env NET_MEDICA 10.10.10)"
-  taquilla="$(valor_env NET_TAQUILLA 10.10.20)";   logistica="$(valor_env NET_LOGISTICA 10.10.30)"
-  rrhh="$(valor_env NET_RRHH 10.10.40)"
-  local ip_ldap="${infra}.10" ip_dns="${infra}.11" ip_ntp="${infra}.12" ip_openvpms="${medica}.10" \
-        ip_pretix="${taquilla}.10" ip_inventree="${logistica}.10" ip_rrhh="${rrhh}.10"
+  # dns, ldap, ntp y las cuatro aplicaciones apuntan a HOST_IP; solo el glue de la delegacion ad.reservaviva.lan lleva la IP
+  # fija de samba-ad en la red del sistema (la misma que le da el compose: NET_INTERNA .10).
+  local red ip_dc serial r
+  red="$(valor_efectivo NET_INTERNA 10.10.99)"
+  ip_dc="${red}.10"
   serial="$(date +%Y%m%d%H)"
-  tr -d '\r' <"${tpl}" | sed -e "s/\${IP_DNS}/${ip_dns}/g" -e "s/\${IP_LDAP}/${ip_ldap}/g" \
-                             -e "s/\${IP_NTP}/${ip_ntp}/g" -e "s/\${IP_OPENVPMS}/${ip_openvpms}/g" \
-                             -e "s/\${IP_PRETIX}/${ip_pretix}/g" -e "s/\${IP_INVENTREE}/${ip_inventree}/g" \
-                             -e "s/\${IP_RRHH}/${ip_rrhh}/g" -e "s/\${SERIAL}/${serial}/g" >"${out}.tmp"
+  tr -d '\r' <"${tpl}" | sed -e "s/\${IP_ANFITRION}/${HOST_IP}/g" -e "s/\${IP_DC}/${ip_dc}/g" \
+                             -e "s/\${SERIAL}/${serial}/g" >"${out}.tmp"
   r="$(reemplazar_si_cambia "${out}")"
-  info "${r} vista interna: dns=${ip_dns} ldap=${ip_ldap} ntp=${ip_ntp} openvpms=${ip_openvpms} pretix=${ip_pretix}"
-  info "                         inventree=${ip_inventree} rrhh=${ip_rrhh}"
-  # Vista lan: las cuatro aplicaciones y el DNS apuntan a la IP del anfitrion (proxy web y DNS publicados).
-  tr -d '\r' <"${tpl_lan}" | sed -e "s/\${IP_ANFITRION}/${IP_ANFITRION}/g" -e "s/\${SERIAL}/${serial}/g" >"${out_lan}.tmp"
-  r="$(reemplazar_si_cambia "${out_lan}")"
-  info "${r} vista lan:     openvpms, pretix, inventree, rrhh y dns -> ${IP_ANFITRION} (sin ldap ni ntp)"
-  # ACL de la vista interna: las subredes de las VLAN sin su gateway .1 (por el .1 llega el anfitrion, ver named.conf).
-  local s nets=() excl=()
-  for s in "${medica}" "${taquilla}" "${logistica}" "${rrhh}" "${infra}"; do excl+=("!${s}.1;"); nets+=("${s}.0/24;"); done
-  { printf '// GENERADO por levantar-sistema.sh (generar_zona) desde las subredes NET_* del compose: no editar.\n'
-    printf '// Clientes de la vista "interna": los contenedores de las VLAN, sin el gateway .1 de cada bridge.\n'
-    printf 'acl "red-interna" { %s %s };\n' "${excl[*]}" "${nets[*]}"; } >"${acl}.tmp"
+  info "${r} zona: dns, ldap, ntp, openvpms, pretix, inventree y rrhh -> ${HOST_IP}; dc1.ad -> ${ip_dc} (delegacion de ad.reservaviva.lan)"
+  # ACL de los contenedores: la subred de la red del sistema sin su gateway .1 (por el .1 llega el anfitrion, ver named.conf).
+  { printf '// GENERADO por levantar-sistema.sh (generar_zona) desde NET_INTERNA del compose: no editar.\n'
+    printf '// Contenedores del sistema (con recursion): la subred de la red reservaviva, sin el gateway .1 del bridge.\n'
+    printf 'acl "red-interna" { !%s.1; %s.0/24; };\n' "${red}" "${red}"; } >"${acl}.tmp"
   r="$(reemplazar_si_cambia "${acl}")"
-  info "${r} ACL de la vista interna: ${nets[*]} (sin los .1)"
+  info "${r} ACL de recursion: ${red}.0/24 (sin el ${red}.1)"
 }
 
-# bind9 lee su configuracion y las zonas al arrancar y no vigila los ficheros. Si alguno (named.conf, las dos zonas o la
-# ACL) es mas nuevo que el arranque de dns-interno (p. ej. tras cambiar una plantilla o el modo de publicacion), se
-# reinicia solo ese contenedor: unos segundos, sin tocar datos.
+# bind9 lee su configuracion y las zonas al arrancar y no vigila los ficheros. Si alguno (named.conf, la zona o la ACL) es
+# mas nuevo que el arranque de dns-interno (p. ej. tras cambiar una plantilla o HOST_IP), se reinicia solo ese contenedor:
+# unos segundos, sin tocar datos.
 reiniciar_dns_si_zona_nueva() {
   local d="${RAIZ}/servicios/bind9" inicio t_dns t f
   inicio="$(docker inspect --format '{{.State.StartedAt}}' dns-interno 2>/dev/null)" || return 0
   t_dns="$(date -d "${inicio}" +%s 2>/dev/null)" || return 0
-  for f in "${d}/named.conf" "${d}/zones/db.reservaviva.lan" "${d}/zones/db.reservaviva.lan.vista-lan" "${d}/zones/acl-interna.conf"; do
+  for f in "${d}/named.conf" "${d}/zones/db.reservaviva.lan" "${d}/zones/acl-interna.conf" "${d}/zones/db.raiz-vacia"; do
     t="$(stat -c %Y "${f}" 2>/dev/null)" || continue
     if [ "${t}" -gt "${t_dns}" ]; then
       paso "La configuracion DNS cambio despues de arrancar dns-interno ($(basename "${f}")): se reinicia para que bind9 la lea"
@@ -596,49 +590,32 @@ PY
 # --- Acciones -------------------------------------------------------------------------------------------------------
 
 accesos() {
-  local p1 p2 p3 p4 ldap ldaps dns ntp hp suf="" dns_ip
-  p1="$(valor_env OPENVPMS_PORT 8080)"; p2="$(valor_env ERPNEXT_PORT 8080)"
-  p3="$(valor_env PRETIX_PORT 80)";     p4="$(valor_env INVENTREE_PORT 8000)"
-  ldap="$(valor_env LDAP_PORT 389)"; ldaps="$(valor_env LDAPS_PORT 636)"
-  dns="$(valor_efectivo DNS_PORT 53)"; ntp="$(valor_env NTP_PORT 123)"
-  dns_ip="$(valor_efectivo DNS_BIND_IP 127.0.0.1)"
+  local p1 p2 p3 p4 ldap ldaps dns ntp hp suf=""
+  p1="$(valor_efectivo OPENVPMS_PORT 8080)"; p2="$(valor_efectivo ERPNEXT_PORT 8080)"
+  p3="$(valor_efectivo PRETIX_PORT 80)";     p4="$(valor_efectivo INVENTREE_PORT 8000)"
+  ldap="$(valor_efectivo LDAP_PORT 389)"; ldaps="$(valor_efectivo LDAPS_PORT 636)"
+  dns="$(valor_efectivo DNS_PORT 53)"; ntp="$(valor_efectivo NTP_PORT 123)"
   hp="$(valor_efectivo HTTP_PORT 80)"; [ "${hp}" = "80" ] || suf=":${hp}"
-  if [ "${MODO}" = "intranet" ]; then
-    cat <<EOF
+  cat <<EOF
 
-    Modo INTRANET: el proxy web y el DNS se publican en ${IP_ANFITRION}. Desde cualquier equipo de la LAN:
-      Medica             OpenVPMS   http://openvpms.reservaviva.lan${suf}      usuario: admin
-      Taquilla           Pretix     http://pretix.reservaviva.lan${suf}        usuario: $(valor_env PRETIX_ADMIN_EMAIL admin@reservaviva.local)
-      Logistica          InvenTree  http://inventree.reservaviva.lan${suf}     usuario: $(valor_env INVENTREE_ADMIN_USER admin)
-      RRHH               ERPNext    http://rrhh.reservaviva.lan${suf}          usuario: Administrator
-    Para que esos nombres resuelvan, cada cliente debe usar como DNS la IP ${dns_ip} (puerto 53):
-      - a mano en el cliente (Windows: Configuracion > Red > Editar DNS; comprobar con: nslookup pretix.reservaviva.lan ${dns_ip}), o
-      - para toda la LAN, en el DHCP del router (DNS primario ${dns_ip}). OJO: este DNS solo conoce reservaviva.lan
+    Sistema publicado en ${HOST_IP}: una IP y un puerto por servicio (las cuatro aplicaciones tambien en localhost).
+      Departamento       Aplicacion  Directo (IP:puerto)                       Por nombre (proxy web)                     Usuario
+      Medica             OpenVPMS    http://${HOST_IP}:${p1}/openvpms     http://openvpms.reservaviva.lan${suf}      admin
+      Taquilla           Pretix      http://localhost:${p3}  (la IP: ${HOST_IP}:${p3} da 400)  http://pretix.reservaviva.lan${suf}  $(valor_env PRETIX_ADMIN_EMAIL admin@reservaviva.local)
+      Logistica          InvenTree   http://${HOST_IP}:${p4}                  http://inventree.reservaviva.lan${suf}     $(valor_env INVENTREE_ADMIN_USER admin)
+      RRHH               ERPNext     http://${HOST_IP}:${p2}                  http://rrhh.reservaviva.lan${suf}          Administrator
+      Infra              LDAP ${HOST_IP}:${ldap}  LDAPS ${HOST_IP}:${ldaps}  DNS ${HOST_IP}:${dns}  NTP ${HOST_IP}:${ntp}/udp  proxy web ${HOST_IP}:${hp}
+    Para entrar por nombre, el cliente debe usar como DNS la IP ${HOST_IP} (puerto 53):
+      - a mano en el cliente (Windows: Configuracion > Red > Editar DNS; comprobar con: nslookup pretix.reservaviva.lan ${HOST_IP}), o
+      - para toda la LAN, en el DHCP del router (DNS primario ${HOST_IP}). OJO: este DNS solo conoce reservaviva.lan
         (no hace recursion); con el DHCP, los clientes necesitan un DNS secundario para Internet.
-    AVISO: las contrasenas de laboratorio estan PUBLICAS en git (sistema/test.env). Cualquiera en esta red puede entrar
-    como administrador. Usa este modo solo en una red de laboratorio y vuelve al modo local al terminar:
-      .\\levantar-sistema.ps1 -Forzar   (o ./levantar-sistema.sh, sin --intranet)
-    Acceso directo desde este equipo (administracion): http://localhost:${p1}/openvpms  :${p3}  :${p4}  :${p2}
-      Infra              LDAP localhost:${ldap}  LDAPS localhost:${ldaps}  NTP localhost:${ntp}/udp  (solo este equipo)
+    AVISO: las contrasenas de laboratorio estan PUBLICAS en git (sistema/test.env) y todos los servicios son accesibles desde
+    la LAN en ${HOST_IP}: no hay aislamiento entre departamentos. Usalo solo en una red de laboratorio.
 EOF
-    if [ "${dns}" != "53" ]; then
-      info "DNS: dns-interno se publica en ${dns_ip}:${dns}; el puerto 53 lo atiende el reenviador de Windows"
-      info "(sistema/reenviador-dns.ps1), que arranca y comprueba levantar-sistema.ps1 -Intranet. Si lanzaste este script"
-      info "desde WSL a mano, ejecuta en Windows .\\levantar-sistema.ps1 -Intranet para tener el 53."
-    fi
-  else
-    cat <<EOF
-
-    Modo LOCAL: todo se publica en 127.0.0.1 (solo desde este equipo). Para otros equipos: --intranet (-Intranet).
-      Medica             OpenVPMS   http://localhost:${p1}/openvpms     usuario: admin
-      Taquilla           Pretix     http://localhost:${p3}              usuario: $(valor_env PRETIX_ADMIN_EMAIL admin@reservaviva.local)
-      Logistica          InvenTree  http://localhost:${p4}              usuario: $(valor_env INVENTREE_ADMIN_USER admin)
-      RRHH               ERPNext    http://localhost:${p2}              usuario: Administrator
-      Por nombre (proxy web en 127.0.0.1${suf}): http://pretix.reservaviva.lan${suf}, etc. Requiere que este equipo
-      resuelva *.reservaviva.lan a 127.0.0.1 (archivo hosts); el DNS local escucha en el puerto ${dns}, no en el 53.
-      Infra              LDAP localhost:${ldap}  LDAPS localhost:${ldaps}  DNS localhost:${dns}  NTP localhost:${ntp}/udp
-    Contrasenas de laboratorio (desechables): sistema/test.env
-EOF
+  if [ "${dns}" != "53" ]; then
+    info "DNS: dns-interno se publica en ${HOST_IP}:${dns}; el puerto 53 lo atiende el reenviador de Windows"
+    info "(sistema/reenviador-dns.ps1), que arranca y comprueba levantar-sistema.ps1. Si lanzaste este script"
+    info "desde WSL a mano, ejecuta en Windows .\\levantar-sistema.ps1 para tener el 53."
   fi
 }
 
@@ -651,14 +628,15 @@ aviso_sesion_wsl() {
 
 accion_arrancar() {
   comprobar_requisitos
-  resolver_modo
-  ${INTRANET} && comprobar_intranet
+  paso "IP de publicacion"
+  resolver_host_ip
+  comprobar_publicacion
   comprobar_memoria
   preparar
+  migrar_redes_vlan
   reiniciar_unhealthy
-  ${INTRANET} && publicar_intranet
   local n; n="$(dc config --services | grep -c .)"
-  paso "Levantando los ${n} servicios en modo ${MODO} (la primera vez descarga varios GB de imagenes)"
+  paso "Levantando los ${n} servicios en ${HOST_IP} (la primera vez descarga varios GB de imagenes)"
   # --remove-orphans: quien venia de un stack con "openldap" (servicio ya borrado del compose, sustituido por
   # samba-ad) se encuentra ese contenedor huerfano en cada "arrancar", con el aviso de Docker pero sin fallar.
   # Este flag SOLO borra contenedores que ya no estan en el compose actual; nunca toca volumenes (ldap_data y
@@ -674,39 +652,39 @@ accion_arrancar() {
   paso "Sistema en marcha: los ${n} servicios estan sanos"
   accesos
   info ""
-  info "Siguiente paso recomendado:  $0 verificar   (segmentacion, DNS, NTP, LDAP y acceso por nombre)"
+  info "Siguiente paso recomendado:  $0 verificar   (puertos, DNS, NTP, LDAP y acceso por nombre)"
   aviso_sesion_wsl
 }
 
 accion_preparar() {
   comprobar_requisitos
-  resolver_modo
+  paso "IP de publicacion"
+  resolver_host_ip
   preparar
-  paso "Preparacion completa (zonas DNS para el modo ${MODO}). Para levantar el sistema: $0 arrancar"
+  paso "Preparacion completa (zona DNS para ${HOST_IP}). Para levantar el sistema: $0 arrancar"
 }
 
 accion_estado() {
   cd "${RAIZ}"
   docker info >/dev/null 2>&1 || fallo "Docker no responde."
-  resolver_modo
+  resolver_host_ip
   paso "Estado de los servicios"
   dc ps -a --format 'table {{.Service}}\t{{.State}}\t{{.Status}}'
-  paso "Modo de publicacion: ${MODO}"
-  local p d
-  p="$(publicacion_de proxy-web 80/tcp)"; d="$(publicacion_de dns-interno 53/udp)"
-  if [ -n "${p}" ]; then p="${p/|/:}"; else p="no publicado (contenedor ausente)"; fi
-  if [ -n "${d}" ]; then d="${d/|/:} udp y tcp"; else d="no publicado (contenedor ausente)"; fi
-  info "proxy web (proxy-web):  ${p}"
-  info "DNS (dns-interno):      ${d}"
+  paso "Publicacion en el host (HOST_IP ${HOST_IP})"
+  local fila cont pint var def etiq loop p
+  for fila in "${PUBLICACIONES[@]}"; do
+    IFS='|' read -r cont pint var def etiq loop <<<"${fila}"
+    p="$(publicacion_de "${cont}" "${pint}" | sed 's/|/:/' | tr '\n' ' ')"
+    printf '    %-10s %-14s %-9s %s\n' "${etiq}" "${cont}" "${pint}" "${p:-no publicado (contenedor ausente)}"
+  done
   accesos
   aviso_sesion_wsl
 }
 
 accion_verificar() {
-  # Conserva el modo en que esta publicado el sistema: la prueba de persistencia hace down + up -d, y sin las variables
-  # exportadas ese up -d devolveria proxy-web y dns-interno al modo local.
-  resolver_modo
-  [ "${MODO}" = "intranet" ] && info "Sistema publicado en modo intranet (${IP_ANFITRION}): la verificacion lo conserva."
+  # Conserva la IP en que esta publicado el sistema: la prueba de persistencia hace down + up -d, y sin HOST_IP exportada
+  # ese up -d recrearia los contenedores en otra IP. El verificador lee HOST_IP del entorno (os.environ["HOST_IP"]).
+  resolver_host_ip
   cd "${ARNES}"
   local py
   py="$(command -v python3 || command -v python || true)"
@@ -725,6 +703,7 @@ accion_verificar() {
 
 accion_detener() {
   cd "${RAIZ}"
+  resolver_host_ip >/dev/null
   paso "Deteniendo los contenedores (no se borra nada)"
   dc stop
   info "Detenidos. Para volver a levantarlos: $0 arrancar"
@@ -732,6 +711,7 @@ accion_detener() {
 
 accion_borrar() {
   cd "${RAIZ}"
+  resolver_host_ip >/dev/null
   if ! ${SI}; then
     printf '\nEsto BORRA los contenedores y TODOS los datos (bases de datos, sitio de ERPNext, directorio AD).\n'
     printf 'El siguiente arranque volvera a inicializarlo todo (~40 min). Escribe "borrar" para confirmar: '
@@ -749,6 +729,7 @@ accion_borrar() {
 # guarda ese "name:" (reservaviva-smoke).
 accion_borrar_directorio() {
   cd "${RAIZ}"
+  resolver_host_ip >/dev/null
   local v1="${PROYECTO}_samba_data" v2="${PROYECTO}_samba_etc"
   if ! ${SI}; then
     printf '\nEsto borra el contenedor samba-ad y SUS volumenes (%s, %s): el dominio de AD se reprovisiona desde cero\n' "${v1}" "${v2}"

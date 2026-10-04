@@ -1,6 +1,7 @@
 # Seguridad y credenciales
 
-Qué protege el sistema de un host, con qué mecanismos y qué deja sin cubrir. Se dirige a quien clona el repositorio.
+Qué protege el sistema de un host, con qué mecanismos y qué deja sin cubrir (entre otras cosas, que **ya no hay aislamiento
+de red entre departamentos**: sección 5). Se dirige a quien clona el repositorio.
 Aquí no se repite la integración LDAP de cada aplicación, que está en [`directorio-activo.md`](directorio-activo.md). Las cifras de las pruebas
 están en [`resultados-un-host.md`](resultados-un-host.md).
 
@@ -27,7 +28,7 @@ certificado LDAPS de Samba AD. `levantar-sistema.sh` lo ejecuta en cada `prepara
 |---|---|---|---|
 | `ca.crt` | Certificado público de la CA. Es lo que deben confiar los clientes de LDAPS | RSA 4096, SHA-256, 3650 días, `CA:TRUE` (crítica), `keyCertSign, cRLSign`; sujeto `O=Zoologico Reserva Viva, CN=Reserva Viva CA interna` | 644 |
 | `ca.key` | Clave privada de la CA. **No se monta en ningún contenedor** | — | 600 |
-| `ldap.crt` | Certificado de servidor de `samba-ad`, firmado por la CA | RSA 2048, SHA-256, 825 días, `serverAuth`; SAN `DNS:ldap.reservaviva.lan`, `DNS:dc1.ad.reservaviva.lan`, `DNS:samba-ad`, `DNS:localhost`, `IP:10.10.99.10`, `IP:127.0.0.1` | 644 |
+| `ldap.crt` | Certificado de servidor de `samba-ad`, firmado por la CA | RSA 2048, SHA-256, 825 días, `serverAuth`; SAN `DNS:ldap.reservaviva.lan`, `DNS:dc1.ad.reservaviva.lan`, `DNS:samba-ad`, `DNS:localhost`, `IP:10.10.99.10`, `IP:127.0.0.1`, `IP:<HOST_IP>` | 644 |
 | `ldap.key` | Clave privada del servidor LDAPS | — | 600 |
 
 El script trabaja con `umask 077`. Opciones: `--forzar` lo regenera todo, y `--sin-instalar-ca` evita instalar `ca.crt` en
@@ -41,7 +42,7 @@ El script es idempotente. Si los certificados existen y son válidos, no toca na
 - **La CA** (y con ella el certificado LDAPS), con `--forzar`, si falta `ca.key` o si a `ca.crt` le quedan menos de
   30 días de vigencia.
 - **Solo el certificado LDAPS**, con `--forzar`, si falta `ldap.key`, si a `ldap.crt` le quedan menos de 30 días, si
-  `ldap.crt` no lo firma la `ca.crt` actual o si su SAN no incluye `ldap.reservaviva.lan`, `dc1.ad.reservaviva.lan`, `samba-ad` y `10.10.99.10` (un `ldap.crt`
+  `ldap.crt` no lo firma la `ca.crt` actual o si su SAN no incluye `ldap.reservaviva.lan`, `dc1.ad.reservaviva.lan`, `samba-ad`, `10.10.99.10` y la `HOST_IP` actual (un `ldap.crt`
   anterior a la migración a Samba AD se regenera solo en el siguiente `arrancar`, con la misma CA). Así se
   regeneró el 27/09/2026, al pasar el dominio de `.local` a `.lan`: solo `ldap.crt`/`ldap.key`, con la misma CA, sin tocar
   a los clientes (que confían en `ca.crt`).
@@ -76,7 +77,7 @@ OpenVPMS y Pretix no montan nada, porque no usan LDAP. Todo está definido en el
 
 **Por qué hay una sola CA.** Todos los servicios corren en el mismo motor Docker y salen del mismo clon del repositorio.
 Basta con un único `ca.crt`, montado por todos desde `./servicios/ca/certs/ca.crt`, y no hay copias que mantener
-sincronizadas. En el diseño de 3 equipos del anexo, cada equipo necesitaba su propia copia.
+sincronizadas. En el diseño histórico de 3 equipos ([`diseno-red/`](../diseno-red/README.md)), cada equipo necesitaba su propia copia.
 
 **Si falta `ca.crt`.** Cuando la ruta de origen de un montaje no existe, Docker crea en su lugar un **directorio vacío**.
 El contenedor arranca, pero `/certs/ca.crt` es entonces un directorio: la verificación TLS falla y el login LDAPS de
@@ -88,17 +89,17 @@ creó Docker, volver a ejecutar `preparar` y recrear los contenedores afectados.
 
 ### Qué aplicación usa LDAP
 
-Solo ERPNext e InvenTree, las dos por LDAPS (`ldaps://ldap.reservaviva.lan:636`) y verificando el certificado del DC con la
+Solo ERPNext e InvenTree, las dos por LDAPS (`ldaps://ldap.reservaviva.lan:LDAPS_PORT`, el 1636 del equipo) y verificando el certificado del DC con la
 CA interna; OpenVPMS y Pretix no usan LDAP. Cómo lo configura cada aplicación, qué se comprueba y por qué las otras dos no
-se integran: [`directorio-activo.md`](directorio-activo.md). El nombre `ldap.reservaviva.lan` se fija con `extra_hosts`
-para que coincida con el SAN del certificado sin depender del DNS.
+se integran: [`directorio-activo.md`](directorio-activo.md). El nombre `ldap.reservaviva.lan` se fija con `extra_hosts` a
+`HOST_IP` para que coincida con el SAN del certificado sin depender del DNS.
 
 ### Controles del directorio
 
 - **Solo LDAPS para el bind simple.** Samba lleva `ldap server require strong auth = yes` (el valor por defecto, que cierra
   [CVE-2016-2112](https://www.samba.org/samba/security/CVE-2016-2112.html)): un bind simple por el 389 sin cifrar se rechaza
-  con "Strong(er) authentication required". Las dos aplicaciones ya usan el 636, así que no se relajó. El 389 sigue
-  publicado en `127.0.0.1:1389`, pero no admite credenciales; AD tampoco admite consultas anónimas salvo al rootDSE.
+  con "Strong(er) authentication required". Las dos aplicaciones ya usan el 636, así que no se relajó. El 389 está
+  publicado en `HOST_IP:1389`, pero no admite credenciales; AD tampoco admite consultas anónimas salvo al rootDSE.
 - **Complejidad de contraseñas de AD.** Toda clave del dominio debe cumplirla (longitud mínima, tres de cuatro categorías y no
   contener el nombre de la cuenta). Dos claves de `test.env` no la cumplían y se cambió **la clave, no la política**. Con ello,
   `samba-tool` rechaza cualquier clave nueva débil.
@@ -106,14 +107,16 @@ para que coincida con el SAN del certificado sin depender del DNS.
   contenedor sin privilegios no puede escribirlas. Es la mayor concesión de este servicio: un contenedor privilegiado tiene
   acceso casi total al kernel del host. Se acepta en el laboratorio; en producción habría que acotar las capacidades
   necesarias en lugar de `privileged`.
-- **Puertos acotados.** Solo se publican el 389 y el 636, en `127.0.0.1`. No se publican el 445 (SMB; además lo ocupa Windows),
-  el 88 (Kerberos) ni el 53. Con `interfaces = eth0` y `bind interfaces only = yes`, Samba solo escucha en su interfaz de
-  `vlan99_infra`.
-- **Recursión limitada en bind9.** Para seguir la delegación de `ad.reservaviva.lan` hizo falta `recursion yes` en la vista
-  interna, limitada con `allow-recursion { red-interna; }` (las `options` globales y la vista `lan` siguen en `recursion no`).
-  Para que esa recursión no se convierta en un resolvedor de Internet, la vista lleva una zona `"."` de reenvío **sin
-  reenviadores** (`forward only; forwarders { };`): todo nombre que no sea de `reservaviva.lan` da `SERVFAIL` por política,
-  aunque `vlan99_infra` llegara a tener salida. Detalle en [`servicios/bind9/README.md`](../servicios/bind9/README.md).
+- **Puertos acotados.** De Samba AD solo se publican el 389 y el 636, en `HOST_IP`. No se publican el 445 (SMB; además lo
+  ocupa Windows), el 88 (Kerberos) ni el 53. Con `interfaces = eth0` y `bind interfaces only = yes`, Samba solo escucha en
+  su interfaz de la red `reservaviva`.
+- **Recursión limitada en bind9.** Para seguir la delegación de `ad.reservaviva.lan` hizo falta `recursion yes`, limitada
+  a los contenedores de la red `reservaviva` (ACL de la subred **sin el gateway `.1`**, que es el origen de las consultas del
+  anfitrión y de la LAN). Fuera de esa ACL, `recursion no`. Para que la recursión no se convierta en un resolvedor de
+  Internet, hay una raíz `"."` **autoritativa y vacía** (`zones/db.raiz-vacia`, con `allow-query { red-interna; }`): todo nombre que
+  no sea de `reservaviva.lan` da NXDOMAIN a los contenedores, tenga o no salida el host, y REFUSED al anfitrión y a la LAN. Una zona
+  `"."` de reenvío con `forwarders { }` **no** lo evita (BIND recursiona con sus root hints; se midió el 04/10/2026: `example.com`
+  resolvía a IP reales). Detalle en [`servicios/bind9/README.md`](../servicios/bind9/README.md).
 - **Cuentas de laboratorio sin caducidad.** Las cuatro cuentas de prueba y `svc-lectura` llevan `--noexpiry` (UAC `66048`)
   en cada arranque, para que un login de prueba no falle por caducidad a los 41 días. La política del dominio (`maxPwdAge`)
   no se toca, y `Administrator` sí caduca. Con claves públicas en git, en producción esto no se admitiría.
@@ -205,78 +208,81 @@ intentos, el arranque termina con error.
 
 ## 5. Exposición de red
 
+### Sin aislamiento de red entre departamentos
+
+**El sistema ya no segmenta la red por departamento.** El switch del laboratorio obliga a una sola IP (la del equipo,
+`HOST_IP`) y un puerto distinto por servicio, así que el 04/10/2026 se eliminaron las cinco redes que emulaban VLAN y se
+sustituyeron por una única red de Docker, `reservaviva`. Consecuencias, sin matices:
+
+- **Todos los contenedores comparten una red.** Cualquier contenedor alcanza a cualquier otro por su IP o su nombre. Un
+  compromiso de, por ejemplo, la aplicación de Taquilla permite llegar a las bases de datos y a las aplicaciones de los demás
+  departamentos. Ya no existe una barrera de red entre Médica, Taquilla, Logística y RRHH.
+- **Todo lo publicado es accesible desde la LAN en `HOST_IP`:** las cuatro aplicaciones (18080-18083), el proxy web (80),
+  LDAP y LDAPS (1389, 1636), el DNS (1053, y 53 por el reenviador de Windows) y el NTP (1123/udp). Ya no hay un "modo local"
+  que limite el acceso al propio equipo.
+- Las contraseñas de laboratorio están **públicas en git** y todo viaja por HTTP sin cifrar (salvo LDAPS): cualquier equipo de
+  la misma red puede entrar como administrador en OpenVPMS, Pretix, InvenTree y ERPNext. El sistema solo debe usarse en
+  una red de laboratorio.
+
+Es una decisión impuesta por el switch del laboratorio, no una mejora de diseño. El diseño anterior, con una VLAN por
+departamento, está en [`diseno-red/`](../diseno-red/README.md) como registro histórico.
+
+**Lo que se conserva:**
+
+- **Bases de datos y Redis sin publicar.** Ninguno tiene puerto en el equipo (`verificar` comprueba que no tienen
+  `PortBindings` y que 5432, 3306 y 6379 están cerrados en `HOST_IP`). Siguen siendo alcanzables desde la red `reservaviva`
+  por nombre de servicio, pero no desde la LAN.
+- **`erpnext_internal`:** la MariaDB, los Redis y los workers de ERPNext están en una red privada a la que solo se unen
+  `erpnext-backend` y `erpnext-hr` (además de `reservaviva`).
+- **LDAPS con CA propia:** el bind simple solo se admite cifrado y las aplicaciones verifican el certificado del DC.
+- **Control de acceso por grupos de AD dentro de cada aplicación:** solo entra en ERPNext quien está en `GG-RRHH` y en
+  InvenTree quien está en `GG-Operaciones`.
+
+Lo que ya no existe: la prueba negativa de segmentación de `verificar` (qué departamento alcanza a cuál) y la matriz entre
+departamentos. `verificar` demuestra ahora que cada servicio está abierto donde se publica y que las bases de datos no
+lo están ([`../sistema/verificar_arquitectura.md`](../sistema/verificar_arquitectura.md)).
+
 ### Qué se publica
 
-En **modo local** (el de por defecto) todos los puertos se publican en `127.0.0.1` (`PUBLISH_IP`, `DNS_BIND_IP` e
-`INTRANET_IP` en `sistema/test.env`). **Solo se accede desde el propio equipo**, no desde la red local. La lista de puertos
-está en [`arquitectura.md`, "Puertos publicados"](arquitectura.md#7-puertos-publicados); Samba AD publica también el
-389, que solo admite el bind si es seguro (sección 3).
+Todos los puertos se publican en `HOST_IP` (variable de `sistema/test.env`; `192.168.1.26` en el laboratorio) y, además, las
+cuatro aplicaciones en `127.0.0.1` con el mismo puerto. La lista está en
+[`arquitectura.md`, "Puertos publicados"](arquitectura.md#7-puertos-publicados). `HOST_IP` es obligatoria: sin ella el compose
+no arranca. Nada se publica en `0.0.0.0`. `--ip X` cambia `HOST_IP` solo en esa ejecución y `--intranet` autodetecta la IP de la
+LAN.
 
-Si alguna de esas variables faltara en `test.env`, el compose publica igualmente en `127.0.0.1`: todos los `ports:` del
-`docker-compose.yml` único usan `${PUBLISH_IP:-127.0.0.1}`, `${DNS_BIND_IP:-127.0.0.1}` o `${INTRANET_IP:-127.0.0.1}`
-(hasta el 27/09/2026 el valor por defecto era `0.0.0.0`, todas las interfaces). Nada se publica nunca en `0.0.0.0`.
+Con Docker Engine en WSL, el 53 de la LAN lo atiende un reenviador de Windows (`sistema/reenviador-dns.ps1`, sin
+privilegios de administrador) que pasa las consultas tal cual a bind9, publicado en `HOST_IP:1053`. Para el 1053 no se
+crea ninguna regla de entrada: los clientes solo deben usar el 53 (no se ha medido desde otro equipo si el 1053 queda
+filtrado).
 
-### Modo intranet: qué se expone y por qué es opcional
+El DNS expuesto no amplía la superficie: es autoritativo solo de `reservaviva.lan` y a la LAN no le hace recursión, así que
+no sirve como resolvedor abierto ni para ataques de amplificación. Un cliente de fuera de la red de contenedores recibe
+`REFUSED` para cualquier nombre ajeno a la zona. Hoy sí anuncia `ldap`, `ntp` y la delegación `ad.reservaviva.lan`, porque
+sus puertos también están publicados en `HOST_IP`.
 
-El **modo intranet** (`levantar-sistema --intranet`) publica **solo dos puertos** en la IP de la LAN del equipo: el proxy
-web (80/tcp), que da acceso a las cuatro aplicaciones por su nombre, y el DNS (53/udp y tcp). Con Docker Engine en WSL,
-el 53 lo atiende un reenviador de Windows (`sistema/reenviador-dns.ps1`, sin privilegios de administrador) que pasa las
-consultas tal cual a bind9, publicado en `<IP de la LAN>:1053`. Para el 1053 no se crea ninguna regla de entrada: los
-clientes solo deben usar el 53 (no se ha medido desde otro equipo si el 1053 queda filtrado). Samba AD, NTP y el acceso
-directo 1808x siguen en `127.0.0.1`. Es **opcional y no persistente** (un `arrancar` sin la opción vuelve al modo local)
-por una razón concreta: las contraseñas de laboratorio están **públicas en git**. Con el modo intranet activo, cualquier
-equipo de la misma red puede entrar como administrador en OpenVPMS, Pretix, InvenTree y ERPNext, y todo viaja por HTTP
-sin cifrar. Solo debe usarse en una red de laboratorio, y lo razonable es volver al modo local al terminar.
-
-El DNS expuesto no amplía la superficie: es autoritativo solo de `reservaviva.lan` y a la LAN (vista `lan`) no le hace
-recursión, así que no sirve como resolvedor abierto ni para ataques de amplificación. La recursión de la vista interna
-(que sigue la delegación a Samba AD) solo atiende a `red-interna` y no resuelve nada fuera de `reservaviva.lan`. A la LAN no
-le anuncia `ldap` ni `ntp`, ni la zona `ad.reservaviva.lan`, y a un cliente de la
-LAN nunca le da una IP de contenedor (vista `lan`, [arquitectura.md](arquitectura.md#la-zona-reservavivalan-y-sus-dos-vistas)).
-
-**Alcance de las reglas de cortafuegos** que crea `sistema/habilitar-intranet-windows.ps1` (y que `-Deshacer` quita):
-
-- Firewall de Windows: tres reglas de **entrada** (`ReservaViva-HTTP-TCP-80`, `ReservaViva-DNS-UDP-53`,
-  `ReservaViva-DNS-TCP-53`), solo desde la **subred local** de la interfaz elegida (por ejemplo `192.168.1.0/24`), en todos
-  los perfiles: la Wi-Fi del equipo de medida está en perfil "Pública", y una regla solo para "Privada" no aplicaría.
-- Firewall de Hyper-V: las mismas tres reglas para la VM de WSL (`VMCreatorId` de WSL), también limitadas a la subred.
-- Nada más: no abre otros puertos, no cambia la acción por defecto de ningún perfil y no toca ICS ni Portmaster.
+**Reglas de cortafuegos** que crea `sistema/habilitar-intranet-windows.ps1` (y que `-Deshacer` quita): reglas de **entrada**
+solo desde la **subred local** de la interfaz elegida (por ejemplo `192.168.1.0/24`), en todos los perfiles (la Wi-Fi del
+equipo de medida está en perfil "Pública", y una regla solo para "Privada" no aplicaría), tanto en el Firewall de Windows
+como en el de Hyper-V para la VM de WSL. Cubren los puertos publicados: 80/tcp, 53 udp y tcp, 18080-18083/tcp, 1389 y
+1636/tcp y el puerto NTP/udp. No cambia la acción por defecto de ningún perfil y no toca ICS ni Portmaster.
 
 `networkingMode=mirrored` cambia la red de **toda** la distro de WSL, no solo la de Docker: cualquier servicio que escuche
 dentro de WSL queda en las interfaces de Windows, aunque sin las reglas de entrada anteriores el cortafuegos lo filtra.
 
-### Qué aísla el sistema
-
-Cada VLAN es una **red bridge de Docker** con la subred de su VLAN (10.10.10/24, .20, .30, .40 y .99). Dos bridges no se
-enrutan entre sí. Cada aplicación está en la red de su departamento y además en `vlan99_infra` con IP fija, para llegar a
-Samba AD, DNS y NTP. Las direcciones están en [`arquitectura.md`](arquitectura.md).
+### Qué comprueba `verificar` sobre la exposición
 
 `levantar-sistema.sh verificar` ([`../sistema/verificar_arquitectura.md`](../sistema/verificar_arquitectura.md)) comprueba:
 
-- Un cliente que solo está en la VLAN de un departamento no alcanza otro departamento ni `vlan99_infra`.
-- Una aplicación alcanza `samba-ad` (389 y 636) y no alcanza otros departamentos.
-- bind9 responde con autoridad a su zona y no resuelve nombres externos: la vista `lan` los rechaza (`REFUSED`) y la interna
-  no da respuesta (`SERVFAIL`, por la zona `"."` sin reenviadores).
-- La delegación de `ad.reservaviva.lan` se sigue desde `vlan99_infra` (registros SRV de `_ldap._tcp` y `_kerberos._tcp`) y la
-  vista `lan` no la resuelve.
+- Cada servicio publicado está abierto en `HOST_IP:puerto`, desde el host y desde un contenedor de la red.
+- Las bases de datos y los Redis no tienen puertos publicados y sus puertos están cerrados en `HOST_IP`.
+- bind9 responde con autoridad a su zona y no resuelve nombres externos (NXDOMAIN para los contenedores, `REFUSED` para el anfitrión y la LAN).
+- La delegación de `ad.reservaviva.lan` se sigue desde un contenedor de la red (registros SRV de `_ldap._tcp` y
+  `_kerberos._tcp`).
 - Los logins LDAPS funcionan con la CA interna y fallan con una CA ajena o con una clave errónea, y un usuario de otro
   grupo (`vet.prueba`) no entra.
 
-### Qué no aísla un solo host (limitación conocida)
-
-- **Las aplicaciones se ven entre sí por `vlan99_infra`.** Esa red es un único dominio L2 compartido por las cuatro
-  aplicaciones, así que una puede conectar con otra por su IP de infraestructura. `verificar` lo informa con los **12 INFO
-  app↔app** previstos: es una limitación del diseño en un host, no un fallo oculto. En el diseño de 3 equipos del anexo,
-  el tráfico entre VLAN lo decide la matriz de segmentación, aplicada por el switch L3 o por el firewall de PC-3
-  ([`firewall-pc3-matriz.sh`](../diseno-red/l2-fallback/scripts/firewall-pc3-matriz.sh)). Ver
-  [`../diseno-red/README.md`](../diseno-red/README.md) y
-  [`arquitectura-3-equipos-departamentos.md`](../diseno-red/arquitectura-3-equipos-departamentos.md), sección 4.
-- **El equipo anfitrión no está en ninguna VLAN.** Cualquier proceso del equipo llega a todos los puertos publicados en
-  127.0.0.1, sea del departamento que sea. Además, en Linux/WSL el anfitrión suele poder alcanzar directamente las IP de
-  los bridges; es un comportamiento general de Docker que `verificar` no comprueba.
-- Tampoco se prueban el etiquetado 802.1Q, el switch físico ni el acceso desde otros equipos (los pasos para probarlo
-  están en [`operacion.md`](operacion.md#acceso-desde-la-lan)). La lista completa está en
-  "Qué NO puede demostrar un solo host" de `verificar_arquitectura.md`.
+Lo que no se prueba: el acceso desde otros equipos (los pasos están en [`operacion.md`](operacion.md#acceso-desde-la-lan)) ni el
+switch físico.
 
 ## 6. Buenas prácticas y pendientes
 
@@ -309,9 +315,9 @@ después: siguen en el historial de git.
 
 - Sacar los secretos del repositorio: un `test.env` fuera de git o los *secrets* de Docker. Hoy `erpnext-create-site` recibe
   las claves por la línea de comandos (pendiente anotado en [`resultados-un-host.md`](resultados-un-host.md)).
-- Reglas de filtrado dentro de `vlan99_infra` para que cada aplicación solo alcance Samba AD, DNS y NTP, y no a las demás
-  aplicaciones.
-- Quitar la publicación del 389 si nadie la necesita (hoy solo admite bind seguro, pero sigue abierto).
+- Segmentación de red entre departamentos (una red por departamento y reglas entre ellas), que el switch del laboratorio
+  hoy impide, y limitar qué equipos de la LAN pueden alcanzar cada puerto publicado.
+- Quitar la publicación del 389 si nadie la necesita (hoy solo admite bind seguro, pero sigue abierto en `HOST_IP`).
 - Usuarios de prueba borrados, mapeo de roles en cada aplicación y una cuenta de servicio por aplicación en lugar de una
   compartida (**los grupos ya están resueltos**: el acceso lo decide `GG-RRHH` o `GG-Operaciones`). Cuentas de laboratorio sin
   la excepción de no caducar.
@@ -319,5 +325,5 @@ después: siguen en el historial de git.
   dominio.
 - Custodia de `ca.key` fuera del equipo que sirve los servicios, y un procedimiento de renovación de certificados con la
   recreación de los contenedores.
-- HTTPS en las cuatro aplicaciones: hoy se sirven por HTTP, en 127.0.0.1 y, en modo intranet, en la LAN por el proxy web.
+- HTTPS en las cuatro aplicaciones: hoy se sirven por HTTP, en `HOST_IP` (directo y por el proxy web) y en 127.0.0.1.
   El sitio natural para TLS sería ese proxy, con un certificado de la CA interna.
