@@ -273,9 +273,11 @@ Cambio: las cinco redes que emulaban VLAN, las variables `NET_*` y las IP fijas 
 |---|---|
 | 16:58, primera con el verificador nuevo (`verificacion-20261004-165841.txt`) | 101 PASS, **15 FAIL**, 3 INFO. 11 FAIL eran UDP del anfitrión (WSL) hacia su propia IP; 2 eran el reenviador del 53; 1 el marcador del caso 4; y 1 era un defecto real de bind9 (siguiente fila) |
 | 17:03, UDP local bajo WSL como INFO (`verificacion-20261004-170316.txt`) | 101 PASS, **4 FAIL**, 13 INFO. El FAIL nuevo: `example.com` consultado desde un contenedor a `dns-interno` resolvía a IP reales (`104.20.23.154`, `172.66.147.243`) |
-| 17:11, con la raíz vacía de bind9 (`verificacion-20261004-171119.txt`) | **102 PASS, 3 FAIL, 13 INFO** |
+| 17:11, con la raíz vacía de bind9 (`verificacion-20261004-171119.txt`) | 102 PASS, **3 FAIL**, 13 INFO. Los 3 FAIL: los dos del reenviador DNS de Windows (`pretix.reservaviva.lan` por `192.168.1.12:53`, UDP con timeout y TCP "connection refused"), que aún no se había arrancado, y el marcador del caso 4 |
+| 17:33, tras `habilitar-intranet-windows.ps1`, con Portmaster activo (`verificacion-20261004-173317.txt`) | 102 PASS, **3 FAIL**, 13 INFO. Los mismos 3: Portmaster seguía con el 53/udp y el reenviador no pudo arrancar |
+| 17:43, con Portmaster detenido y el reenviador en marcha (`verificacion-20261004-174302.txt`) | **104 PASS, 1 FAIL, 13 INFO**. Los dos del reenviador pasan, por UDP y por TCP |
 
-Los 3 FAIL de la última pasada: los dos del **reenviador DNS de Windows** (`pretix.reservaviva.lan` por `192.168.1.12:53`, UDP con timeout y TCP "connection refused") y el marcador "caso 4 no ejecutado" de `--rapido`. El reenviador no se arrancó en esta sesión: siguen siendo FAIL y no se han convertido en INFO. Los 13 INFO: `chronyc sources`, Pretix por `HOST_IP:puerto` (400, limitación conocida) y 11 comprobaciones UDP del anfitrión bajo WSL (DNS y NTP en el bloque 1, los 7 nombres de la zona, NXDOMAIN y el SNTP del bloque 3).
+El único FAIL de la última pasada es el marcador "caso 4 no ejecutado" de `--rapido` (la persistencia se midió aparte, más abajo); por él el veredicto global de la pasada sigue siendo FAIL. Los 13 INFO: `chronyc sources`, Pretix por `HOST_IP:puerto` (400, limitación conocida) y 11 comprobaciones UDP del anfitrión bajo WSL (DNS y NTP en el bloque 1, los 7 nombres de la zona, NXDOMAIN y el SNTP del bloque 3).
 
 **Hallazgos de esta pasada:**
 - **bind9 recursionaba hacia Internet desde los contenedores.** La zona `"."` de reenvío con `forwarders { }` no bloquea nada: BIND desactiva el reenvío y recursiona con sus root hints. El SERVFAIL que se veía antes era solo falta de salida a Internet. Estaba ya desde la rama de Samba, no por quitar las VLAN. Corregido con una raíz autoritativa y vacía (`servicios/bind9/zones/db.raiz-vacia`, `allow-query { red-interna; }`). Medido tras reiniciar solo `dns-interno`, desde un contenedor a `10.10.99.11`: `example.com` → NXDOMAIN, `dc1.ad.reservaviva.lan` → 10.10.99.10, `_ldap._tcp.ad.reservaviva.lan` → `dc1.ad` puerto 389, `pretix.reservaviva.lan` → 192.168.1.12; desde el anfitrión por TCP a `192.168.1.12:1053`: `example.com` → REFUSED, `pretix` → 192.168.1.12. `samba-ad` siguió `healthy`, y el bloque de AD (kinit, klist, grupos) en PASS.
@@ -283,10 +285,14 @@ Los 3 FAIL de la última pasada: los dos del **reenviador DNS de Windows** (`pre
 
 **Persistencia (`ldaplogin.py --persistencia`, ejecutado aparte, con `HOST_IP=192.168.1.12` y `DNS_PORT=1053` exportados):** `VEREDICTO GLOBAL: PASS`, RC=0. Casos 1 a 3 en PASS (login LDAP de `rrhh.prueba` en ERPNext y `logistica.prueba` en InvenTree, clave errónea 417 y 401, `ldapsearch` por LDAPS con la CA rc=0, clave errónea rc=49, CA ajena rc=255). Caso 4: `down` sin `-v` y `up -d` con rc=0 ambos, y los casos 4a, 4b y 4c en PASS. Después, 23 contenedores en marcha (los 26 servicios menos los 3 trabajos de un solo disparo) y `proxy-web` seguía publicado en `192.168.1.12:80`. No se midió una pasada única de `verificar` completo: la persistencia se partió en una ejecución aparte por el límite de 10 minutos de la herramienta.
 
+**Lanzador de Windows, cortafuegos y reenviador DNS (misma tarde):**
+- `.\levantar-sistema.ps1 -IP 192.168.1.12`, primera ejecución: detectó `networkingMode = mirrored` y Docker Engine en WSL, reconstruyó la imagen de OpenVPMS y dejó 26/26 sanos, pero terminó con RC=1 porque el reenviador no pudo arrancar: el 53/udp de Windows lo tenía `portmaster-core` (servicio `PortmasterCore`) en `::`. El lanzador lo detectó y lo dijo. Comprobado aparte abriendo un socket a mano: `192.168.1.12:53/udp` daba "acceso a un socket no permitido" y `53/tcp` estaba libre. `SharedAccess` (ICS) estaba detenido y deshabilitado.
+- `sistema\habilitar-intranet-windows.ps1` (como administrador, lo ejecutó el usuario): creó las reglas de cortafuegos del proxy (TCP 80), DNS (UDP y TCP 53), las cuatro aplicaciones (TCP 18080 a 18083), LDAP (1389), LDAPS (1636) y NTP (UDP 1123). No libera el 53: solo indica los pasos.
+- Con `PortmasterCore` detenido (`Stop-Service PortmasterCore`), segunda ejecución del `.ps1`: RC=0, reenviador lanzado en segundo plano y comprobado por el propio lanzador (`pretix.reservaviva.lan` → `192.168.1.12` por UDP a `192.168.1.12:53`). Es la pasada de las 17:43 de la tabla.
+
 **No probado:**
-- La ejecución real de `levantar-sistema.ps1` (`-IP`, `-Intranet`, arranque y vigilancia del reenviador) y del reenviador DNS de Windows (por eso los 2 FAIL).
-- `sistema/habilitar-intranet-windows.ps1` (reglas de cortafuegos, `.wslconfig`).
-- `--intranet` (autodetección de la IP de la LAN) y el rechazo de `127.*` como `HOST_IP`.
+- `-Intranet` / `--intranet` (autodetección de la IP de la LAN) y el rechazo de `127.*` como `HOST_IP`. Del `.ps1` solo se ejecutó `arrancar` con `-IP`.
+- Que las reglas de cortafuegos dejen pasar de verdad a otro equipo: se comprobó que existen, no su efecto.
 - El acceso desde otro equipo de la LAN (solo se probó desde el anfitrión, desde contenedores y desde Windows con UDP a mano).
 - La regeneración de `ldap.crt` al cambiar `HOST_IP`.
 - `docker compose` fuera de WSL (Docker Desktop o Linux nativo): ahí el UDP del anfitrión sería FAIL, no INFO.

@@ -122,6 +122,13 @@ El script también informa de quién tiene el puerto 53 en Windows. En el equipo
 `[::]:53`, un cortafuegos de aplicaciones que además filtra conexiones entrantes). El script no detiene ni reconfigura
 ninguno: muestra los comandos para ICS y los pasos para Portmaster.
 
+Medido el 04/10/2026: con Portmaster en marcha, el reenviador DNS no arranca y `.\levantar-sistema.ps1` termina con error
+aunque los 26 servicios queden sanos (el 53/udp de `HOST_IP` da "acceso a un socket no permitido"; el 53/tcp sí está
+libre, pero el DNS va sobre todo por UDP). Con ICS ya deshabilitado, bastó `Stop-Service PortmasterCore` (como
+administrador) y repetir el lanzador: el reenviador arrancó y `verificar` pasó sus dos pruebas del 53. Mientras el
+servicio está detenido no hay filtrado de Portmaster; al volver a iniciarlo (`Start-Service PortmasterCore`) el
+reenviador pierde el puerto. Un equipo sin Portmaster ni ICS no necesita nada de esto.
+
 **Pasos del usuario:**
 
 1. En PowerShell **como administrador**, desde la raíz del repositorio:
