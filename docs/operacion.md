@@ -275,6 +275,12 @@ El reenviador DNS de Windows tampoco sobrevive al reinicio: se vuelve a ejecutar
 minutos en responder dentro de WSL mientras restaura los contenedores; el lanzador se queda en "Buscando Docker" y es
 normal.
 
+### Migrar un sistema ya inicializado (versión con VLAN)
+
+Si el equipo ya tenía el sistema levantado con las cinco redes `reservaviva-smoke_vlan…`, **basta con `arrancar`**: el lanzador detecta esas redes, para el sistema con `down --remove-orphans` **sin `-v`** (los volúmenes, es decir, el dominio de Samba, el sitio de ERPNext y las bases de datos, no se tocan) y elimina solo las redes `vlan*`, porque la red única reutiliza la subred de `vlan99_infra`. Nunca hace falta `borrar` ni `down -v` para migrar.
+
+Un efecto que ya está corregido: OpenVPMS guardaba la IP vieja de su base de datos en el volumen `openvpms_state` (`openvpms.properties`, `db.url=…10.10.10.11…`), y por eso no arrancaba tras la migración. Desde el commit `aebfd41`, `servicios/openvpms/entrypoint.sh` reescribe `db.url` y `reporting.db.url` en cada arranque. Resultado de la migración medido por la sesión que la hizo: `arrancar --ip 192.168.1.12` RC=0 en 208 s, 26/26 sanos ([`resultados-un-host.md`](resultados-un-host.md#eliminación-de-las-vlan-una-ip-y-un-puerto-por-servicio-04102026)).
+
 ## 5. Diagnóstico
 
 **Leer `estado`.** Lo normal con el sistema sano son 23 servicios `running` (`Up …`, con `(healthy)` los que tienen sonda de salud) y los tres trabajos de ERPNext en `exited` con `Exited (0)`. Debajo, la `HOST_IP` y dónde publican los servicios. Un `Exited` con código distinto de 0, `(unhealthy)` o un contador de reinicios que sube indican un problema.
