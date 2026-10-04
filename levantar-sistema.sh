@@ -394,7 +394,7 @@ reiniciar_dns_si_zona_nueva() {
   local d="${RAIZ}/servicios/bind9" inicio t_dns t f
   inicio="$(docker inspect --format '{{.State.StartedAt}}' dns-interno 2>/dev/null)" || return 0
   t_dns="$(date -d "${inicio}" +%s 2>/dev/null)" || return 0
-  for f in "${d}/named.conf" "${d}/zones/db.reservaviva.lan" "${d}/zones/acl-interna.conf"; do
+  for f in "${d}/named.conf" "${d}/zones/db.reservaviva.lan" "${d}/zones/acl-interna.conf" "${d}/zones/db.raiz-vacia"; do
     t="$(stat -c %Y "${f}" 2>/dev/null)" || continue
     if [ "${t}" -gt "${t_dns}" ]; then
       paso "La configuracion DNS cambio despues de arrancar dns-interno ($(basename "${f}")): se reinicia para que bind9 la lea"
