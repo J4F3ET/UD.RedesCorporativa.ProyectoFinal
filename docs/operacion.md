@@ -79,10 +79,15 @@ LDAP/LDAPS, el DNS y el NTP, cada uno en su puerto. Ya no hay "modo local" y "mo
 en una interfaz; si no la tiene, el arranque se detiene y dice que uses `--ip`.
 
 - `--ip X.X.X.X` (`-IP X.X.X.X` en PowerShell) sustituye `HOST_IP` solo en esa ejecución, sin tocar `test.env`.
-- `--intranet` (`-Intranet`) autodetecta la IP de la LAN del equipo y la usa como `HOST_IP`, útil para arrancar en un equipo
-  que no es el `192.168.1.26`.
+- `--intranet` (`-Intranet`) autodetecta la IP de la LAN del equipo (la de la ruta por defecto) y la usa como `HOST_IP`, útil
+  para arrancar en un equipo que no es el `192.168.1.26`. Si se pasan los dos, manda `--ip`.
+- Sin ninguna de las dos, `HOST_IP` es la variable de entorno del mismo nombre, si está definida, y si no la de `test.env`.
+- `--ip` y `--intranet` solo valen con `arrancar` y `preparar`; con cualquier otra acción el lanzador se detiene con un error.
+  Las demás acciones (`estado`, `verificar`, `detener`, `borrar`…) usan la IP en la que **ya está publicado** el sistema
+  (la que publica `proxy-web`), para que, por ejemplo, el `down` + `up -d` de `verificar` no recree los contenedores en otra IP.
 
-`HOST_IP` no se guarda en ningún otro fichero: el siguiente `arrancar` sin opciones vuelve a la de `test.env`.
+`HOST_IP` no se guarda en ningún otro fichero: el siguiente `arrancar` sin opciones vuelve a la de `test.env`. El lanzador la
+exporta al entorno y `verificar` se la pasa a `verificar_arquitectura.py`, que la lee de ahí.
 
 ### Acceso desde la LAN
 
@@ -237,18 +242,19 @@ http://HOST_IP/`. El acceso directo `http://localhost:1808x` sigue funcionando e
 `arrancar` ejecuta, en este orden:
 
 1. **Requisitos** (`comprobar_requisitos`): `docker` responde, Compose ≥ 2.24.4 y `openssl` presente.
-2. **`HOST_IP`**: la de `test.env`, o la de `--ip` / `--intranet`. Después, las comprobaciones previas: WSL en mirrored, la IP presente en la distro y los puertos publicados libres en ella (el 53 de Windows lo comprueba antes el `.ps1`). Si algo falla, se detiene sin tocar ningún contenedor.
+2. **`HOST_IP`** (`resolver_host_ip`): `--ip`, si no `--intranet`, si no la variable de entorno `HOST_IP`, si no `test.env`; también fija `DNS_PORT` (53, o 1053 con Docker Engine en WSL). Después, las comprobaciones previas (`comprobar_publicacion`): WSL en mirrored, la IP presente en la distro y los puertos publicados libres en ella, en `HOST_IP` y, las cuatro aplicaciones, también en `127.0.0.1` (el 53 de Windows lo comprueba antes el `.ps1`). Si algo falla, se detiene sin tocar ningún contenedor.
 3. **Memoria** (`comprobar_memoria`). En Windows, el `.ps1` ya ha comprobado antes la memoria libre del equipo.
 4. **`preparar`**:
    1. **Certificados** (`preparar_certificados`): ejecuta [`servicios/ca/generar-certificados.sh`](../servicios/ca/generar-certificados.sh) `--sin-instalar-ca`, que solo genera la CA interna y el certificado LDAPS (con los SAN de `samba-ad` y la `HOST_IP`) si faltan, van a caducar o su SAN no cubre `ldap.reservaviva.lan` y la `HOST_IP`. Después comprueba que `ca.crt`, `ldap.crt` y `ldap.key` existan en `servicios/ca/certs/` como **ficheros no vacíos**.
    2. **Zonas DNS** (`generar_zona`): genera la zona de `reservaviva.lan` (todos los nombres con la `HOST_IP`) y la ACL de recursión, desde la plantilla de `servicios/bind9/zones/`. Si solo cambia el serial, conserva el fichero anterior.
    3. **Validación** del compose (`docker compose config -q`).
    4. **Imagen de OpenVPMS**: se reconstruye siempre (con caché tarda segundos). Sin red, solo acepta la imagen existente si su `entrypoint.sh` e `init-lib.sh` son idénticos a los del repositorio.
-5. **`up -d --remove-orphans`** de los 26 servicios (`--remove-orphans` elimina el contenedor `openldap` de un stack anterior, si lo hay). Antes reinicia los contenedores que un arranque anterior dejó `unhealthy` (`reiniciar_unhealthy`), porque `up -d` no los recrearía y abortaría enseguida. `up -d` respeta los `depends_on` con `service_healthy`: en un primer arranque casi toda la espera ocurre aquí, sin el progreso del paso 7 ni su límite de tiempo. Si `named.conf`, una zona o la ACL son más nuevos que el contenedor `dns-interno`, lo reinicia para que bind9 los lea (`reiniciar_dns_si_zona_nueva`); si el certificado LDAPS es más nuevo que el último arranque de `samba-ad`, lo **reinicia** (no lo recrea: el entrypoint recoge el certificado en cada arranque) y reinicia sus clientes LDAPS, `inventree-app` y `erpnext-backend`, y después `erpnext-hr`, cuyo nginx resuelve la IP del backend solo al arrancar (`reiniciar_directorio_si_cert_nuevo`; [Certificado nuevo](#certificado-nuevo)). Los servicios que usan el directorio (`inventree-app`, `erpnext-backend`, `erpnext-ldap-config`) esperan a que `samba-ad` esté `healthy`, y eso solo ocurre cuando terminó de sembrar.
-6. **Espera a que todo esté sano** (`esperar_sano`). Cada 20 s imprime `[mm:ss] sanos N/26 - esperando: …`. Los tres trabajos de un solo disparo (`erpnext-configurator`, `erpnext-create-site` y `erpnext-ldap-config`) cuentan como sanos cuando terminan con código 0. El límite es de 45 min (`-TimeoutMin` / `--timeout`).
-7. **Administrador de Pretix** (`crear_admin_pretix`): crea el de `PRETIX_ADMIN_EMAIL` y borra el `admin@localhost` que trae la imagen.
-8. **Accesos**: imprime la `HOST_IP`, las URL y los usuarios, la IP del DNS para los clientes y el aviso de las claves públicas.
-9. **Reenviador DNS** (solo el `.ps1`, con Docker Engine en WSL y `DNS_PORT` distinto de 53): lo arranca o reutiliza y comprueba que responde ([Acceso desde la LAN](#acceso-desde-la-lan)).
+5. **Migración de redes antiguas** (`migrar_redes_vlan`): si el Docker tiene las cinco redes de la versión anterior (`reservaviva-smoke_vlan…`), para el sistema con `down --remove-orphans` **sin borrar volúmenes** y elimina esas redes, porque la red única usa la misma subred que la antigua `vlan99_infra` y Docker no podría crearla. Los datos (dominio de Samba, sitio de ERPNext, bases de datos) se conservan; si no hay redes antiguas, no hace nada.
+6. **`up -d --remove-orphans`** de los 26 servicios (`--remove-orphans` elimina el contenedor `openldap` de un stack anterior, si lo hay). Antes reinicia los contenedores que un arranque anterior dejó `unhealthy` (`reiniciar_unhealthy`), porque `up -d` no los recrearía y abortaría enseguida. `up -d` respeta los `depends_on` con `service_healthy`: en un primer arranque casi toda la espera ocurre aquí, sin el progreso del paso 7 ni su límite de tiempo. Si `named.conf`, una zona o la ACL son más nuevos que el contenedor `dns-interno`, lo reinicia para que bind9 los lea (`reiniciar_dns_si_zona_nueva`); si el certificado LDAPS es más nuevo que el último arranque de `samba-ad`, lo **reinicia** (no lo recrea: el entrypoint recoge el certificado en cada arranque) y reinicia sus clientes LDAPS, `inventree-app` y `erpnext-backend`, y después `erpnext-hr`, cuyo nginx resuelve la IP del backend solo al arrancar (`reiniciar_directorio_si_cert_nuevo`; [Certificado nuevo](#certificado-nuevo)). Los servicios que usan el directorio (`inventree-app`, `erpnext-backend`, `erpnext-ldap-config`) esperan a que `samba-ad` esté `healthy`, y eso solo ocurre cuando terminó de sembrar.
+7. **Espera a que todo esté sano** (`esperar_sano`). Cada 20 s imprime `[mm:ss] sanos N/26 - esperando: …`. Los tres trabajos de un solo disparo (`erpnext-configurator`, `erpnext-create-site` y `erpnext-ldap-config`) cuentan como sanos cuando terminan con código 0. El límite es de 45 min (`-TimeoutMin` / `--timeout`).
+8. **Administrador de Pretix** (`crear_admin_pretix`): crea el de `PRETIX_ADMIN_EMAIL` y borra el `admin@localhost` que trae la imagen.
+9. **Accesos**: imprime la `HOST_IP`, las URL y los usuarios, la IP del DNS para los clientes y el aviso de las claves públicas.
+10. **Reenviador DNS** (solo el `.ps1`, con Docker Engine en WSL y `DNS_PORT` distinto de 53): lo arranca o reutiliza y comprueba que responde ([Acceso desde la LAN](#acceso-desde-la-lan)).
 
 **Primer arranque y siguientes.** El primero descarga imágenes e inicializa los volúmenes: OpenVPMS crea su esquema y carga los datos base, ERPNext crea su sitio, `samba-ad` construye su imagen, provisiona el dominio y siembra las OU, grupos y cuentas, y Pretix e InvenTree migran. Es el lento. Con los volúmenes ya inicializados, los siguientes solo arrancan los contenedores y tardan unos minutos.
 
