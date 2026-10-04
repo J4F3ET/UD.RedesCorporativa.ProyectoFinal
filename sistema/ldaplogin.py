@@ -19,10 +19,11 @@ Casos:
   3. ldapsearch por LDAPS con la CA         -> OK con verificacion completa (nombre ldap.reservaviva.lan);
                                                y FALLA con una CA ajena por verificacion del certificado ("unable to get local issuer certificate")
   4. Persistencia tras down sin -v + up -d  -> los casos 1-3 dan el mismo resultado
-Las peticiones HTTP se hacen con `docker exec` DENTRO de los contenedores de las apps (con macvlan/bridge
-el host no alcanza esas IP). El ldapsearch (caso 3) se ejecuta con `docker exec` DENTRO de `samba-ad`: es
+Las peticiones HTTP se hacen con `docker exec` DENTRO de los contenedores de las apps (las apps no se publican en
+el puerto interno que usan aqui). El ldapsearch (caso 3) se ejecuta con `docker exec` DENTRO de `samba-ad`: es
 quien tiene montada la CA del proyecto en /certs/ca.crt y resuelve ldap.reservaviva.lan con su propio DNS
-(forwarder hacia bind9 para lo que no es su propia zona AD). Hay que ejecutarlo donde `docker` sea el
+(forwarder hacia bind9 para lo que no es su propia zona AD): ese nombre apunta a HOST_IP, asi que el ldapsearch
+sale por HOST_IP:LDAPS_PORT, igual que las apps. Hay que ejecutarlo donde `docker` sea el
 cliente nativo (p. ej. dentro de WSL): `docker` como .cmd no lo resuelve subprocess sin shell.
 """
 import argparse, json, os, shlex, subprocess, sys, time
@@ -59,7 +60,7 @@ MALA = "clave-incorrecta-xyz"
 # NO usar ldaps://localhost: libldap canonicaliza el nombre al hostname del contenedor (p. ej.
 # 4f89b94c57b9), que no esta en el SAN, y la verificacion falla aunque LDAPS funcione (ver
 # docs/prueba-smoke-test-resultados.md, ejecucion de 2026-09-20; retirado, ver git show 95e0da4).
-LDAP_URI = "ldaps://ldap.reservaviva.lan:636"
+LDAP_URI = f"ldaps://ldap.reservaviva.lan:{os.environ.get('LDAPS_PORT') or valor_env('LDAPS_PORT')}"
 
 # Se ejecuta dentro del contenedor: imprime "<status> <cuerpo recortado>". Sin dependencias externas.
 HTTP_ERP = r"""

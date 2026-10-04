@@ -8,11 +8,12 @@ un bind simple anonimo (nombre y clave vacios) y, si el bind da exito, busca el 
 atributo namingContexts (publico incluso sin autenticar). Protocolo LDAP crudo (BER), sin python-ldap
 ni otras dependencias, para poder ejecutarse dentro de contenedores efimeros minimos (ver
 verificar_arquitectura.py:bloque_consolidado, que invoca este script tal cual, sin duplicarlo).
+
+Uso: ldapprobe.py HOST PUERTO   (p. ej. HOST_IP y LDAP_PORT; o la IP fija del DC y 389, dentro de la red)
 """
 import socket
 import sys
 
-HOST, PUERTO = "10.10.99.10", 389
 
 
 def _tlv(tag, valor):
@@ -78,6 +79,10 @@ def _result_code(mensaje, j):
 
 
 def main():
+    if len(sys.argv) != 3 or not sys.argv[2].isdigit():
+        print(__doc__.strip().splitlines()[-1])
+        return 2
+    HOST, PUERTO = sys.argv[1], int(sys.argv[2])
     try:
         s = socket.create_connection((HOST, PUERTO), timeout=5)
     except OSError as e:
