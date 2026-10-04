@@ -2,6 +2,8 @@
 
 Documento vigente con las cifras medidas. Sustituye a las actas históricas (`docs/prueba-smoke-test-resultados.md` y `docs/auditoria-coherencia-documental.md`), retiradas el 26/09/2026. Se pueden leer con `git show 95e0da4:<ruta>`.
 
+> **Nota (04/10/2026):** las secciones fechadas hasta el 01/10/2026 son **anteriores a la eliminación de las VLAN**: se midieron con una red por departamento, IP fijas y `vlan99_infra`, y se conservan tal cual como registro. Lo que hoy hace `verificar` está en [`../sistema/verificar_arquitectura.md`](../sistema/verificar_arquitectura.md) y la pasada con el compose nuevo, en la sección del 04/10/2026 de este documento.
+
 **Entorno de medida:** Windows 11 con 13,9 GB de RAM y Docker Engine 29.8.1 / Compose 5.5.1 dentro de WSL (`Ubuntu-24.04`), sin Docker Desktop. La VM de WSL tiene 8 GB de techo. Proyecto compose `reservaviva-smoke`.
 
 ## Arranque (`levantar-sistema.ps1 -Forzar`, 26/09/2026)
@@ -134,7 +136,7 @@ Desde el 26/09 21:59 hay 99 PASS y no 92: la comprobación "los nombres dns/ntp/
 
 En todas las pasadas válidas, `ExecMainStartTimestamp` de `docker.service` es el mismo antes y después: el demonio no se reinició durante la prueba.
 
-Qué cubre cada bloque (detalle en [`../sistema/verificar_arquitectura.md`](../sistema/verificar_arquitectura.md)):
+Qué cubría cada bloque en estas pasadas, con el diseño anterior de una red por departamento (lo que comprueba hoy `verificar` está en [`../sistema/verificar_arquitectura.md`](../sistema/verificar_arquitectura.md)):
 
 - **Prerrequisitos:** las 4 apps en su VLAN y en la 99, y OpenLDAP, DNS y NTP en la 99, cada uno con la IP fija de [`arquitectura.md`](arquitectura.md#4-servicios).
 - **Segmentación:** controles positivos, negativos entre departamentos, y alcance de LDAP solo desde las apps dual-homed.
