@@ -63,6 +63,8 @@ SIN_PUBLICAR = {"openvpms-db": 3306, "pretix-db": 5432, "pretix-redis": 6379, "i
                 "erpnext-redis-cache": 6379, "erpnext-redis-queue": 6379}
 # Unicas IP fijas de la red: el DC se provisiona con la suya y la delegacion de ad.reservaviva.lan la necesita.
 SUFIJO_DC, SUFIJO_DNS = 10, 11
+# Los de ERPNext solo estan en erpnext_internal (no en reservaviva): se les busca desde la pila de red de erpnext-backend.
+ERP_PRIVADOS = ("erpnext-db", "erpnext-redis-cache", "erpnext-redis-queue")
 ZONA_NOMBRES = ["dns", "ldap", "ntp", "openvpms", "pretix", "inventree", "rrhh"]   # todos -> HOST_IP
 # Acceso por nombre a traves del proxy web. Por aplicacion: nombre, pagina HTML que se pide (la de login: la primera que
 # ve un usuario) y servicio de SERVICIOS_TCP con el puerto del acceso directo. De esa pagina se saca el primer CSS/JS
@@ -406,15 +408,17 @@ def bloque_prereq():
         reg(f"samba-ad esta en la red {RED}", "FAIL", f"redes de samba-ad: {list(redes['samba-ad'])}")
         return None
     pref = red[:-len(RED)]
-    fuera = {c: r for c, r in redes.items() if not r.get(red)}
-    reg(f"los {len(redes)} contenedores comprobados estan en la red unica {red} con IP", "PASS" if not fuera else "FAIL",
-        "\n".join(f"{c}: {r.get(red) or '(sin IP en esa red)'}" for c, r in redes.items()))
+    comunes = {c: r for c, r in redes.items() if c not in ERP_PRIVADOS}
+    fuera = [c for c, r in comunes.items() if not r.get(red)]
+    reg(f"los {len(comunes)} contenedores comprobados estan en la red unica {red} con IP", "PASS" if not fuera else "FAIL",
+        "\n".join(f"{c}: {r.get(red) or '(sin IP en esa red)'}" for c, r in comunes.items()))
     otras = sorted({k for r in redes.values() for k in r} - {red, pref + RED_ERP})
     reg(f"no hay mas redes que {RED} y {RED_ERP}", "PASS" if not otras else "FAIL",
         f"redes encontradas en esos contenedores: {sorted({k for r in redes.values() for k in r})}")
-    erp = [c for c in ("erpnext-backend", "erpnext-hr", "erpnext-db") if not redes[c].get(pref + RED_ERP)]
-    reg(f"erpnext-backend, erpnext-hr y erpnext-db estan en {RED_ERP}", "PASS" if not erp else "FAIL",
-        f"fuera de {RED_ERP}: {erp or 'ninguno'}")
+    erp = [c for c in ("erpnext-backend", "erpnext-hr") + ERP_PRIVADOS if not redes[c].get(pref + RED_ERP)]
+    reg(f"erpnext-backend y erpnext-hr estan en {RED_ERP} ademas de {RED}; la BD y los Redis de ERPNext, solo en {RED_ERP}",
+        "PASS" if not erp and not any(redes[c].get(red) for c in ERP_PRIVADOS) else "FAIL",
+        f"fuera de {RED_ERP}: {erp or 'ninguno'}; BD/Redis de ERPNext tambien en {RED}: {[c for c in ERP_PRIVADOS if redes[c].get(red)] or 'ninguno'}")
     base = config("NET_INTERNA", "10.10.99")
     fijas = {"samba-ad": f"{base}.{SUFIJO_DC}", "dns-interno": f"{base}.{SUFIJO_DNS}"}
     reg("IP fijas: samba-ad y dns-interno (el resto, dinamica)", "PASS" if all(redes[c][red] == ip for c, ip in fijas.items()) else "FAIL",
@@ -436,8 +440,10 @@ def bloque_medicion(ctx, script):
             "ca": ca, "dns": [("dns", host, CONSULTA_DNS, 1, p["dns"])], "ntp": [("ntp", host, p["ntp"])]}
     m = {"ca": bool(ca), "host": medir(spec), "app": {}}
     # El contenedor efimero ademas busca cada BD/Redis por su NOMBRE: es el control del destino de los negativos.
-    interno = [(f"interno {c}", c, pto) for c, pto in SIN_PUBLICAR.items()]
+    interno = [(f"interno {c}", c, pto) for c, pto in SIN_PUBLICAR.items() if c not in ERP_PRIVADOS]
     m["red"] = vantage(ctx["red"], {**spec, "tcp": tcp + interno}, ctx["img_py"], script)
+    m["erp"] = vantage("container:erpnext-backend", {"tcp": [(f"interno {c}", c, SIN_PUBLICAR[c]) for c in ERP_PRIVADOS]},
+                       ctx["img_py"], script)
     for app in ("inventree-app", "erpnext-backend"):
         m["app"][app] = vantage(f"container:{app}", {"tcp": [("ldaps", host, p["ldaps"])],
                                                      "tls": [("ldaps", host, p["ldaps"], CONSULTA_DNS)], "ca": ca},
@@ -504,7 +510,8 @@ def bloque_puertos(ctx, m):
     for c, pto in SIN_PUBLICAR.items():
         pb = bindings(c)
         reg(f"{c}: sin PortBindings", "PASS" if not pb else "FAIL", f"PortBindings={pb or '{}'}")
-        dentro = fila(m["red"], "tcp", f"interno {c}") if "error" not in m["red"] else None
+        res = m["erp"] if c in ERP_PRIVADOS else m["red"]
+        dentro = fila(res, "tcp", f"interno {c}") if "error" not in res else None
         ctl_destino = bool(dentro) and dentro["estado"] == "ABIERTO"
         t = fila(m["host"], "tcp", f"cerrado {c}")
         if not ctl_origen:
