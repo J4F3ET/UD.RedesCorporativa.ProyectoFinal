@@ -378,6 +378,23 @@ def publicado(contenedor, puerto):
     return ("127.0.0.1" if ip in ("0.0.0.0", "") else ip), p
 
 
+def en_wsl():
+    try:
+        return "microsoft" in Path("/proc/version").read_text().lower()
+    except OSError:
+        return False
+
+
+NOTA_UDP_WSL = ("\nDocker Engine en WSL no entrega el UDP que el propio anfitrion envia a su IP publicada (medido el 04/10/2026: "
+                "TCP y el UDP de un contenedor responden; el UDP desde Windows, otro origen, tambien). Es una limitacion del punto "
+                "de vista, no del servicio: se registra como INFO.")
+
+
+def veredicto_udp_local(ok):
+    """PASS si responde; si no, FAIL, salvo bajo WSL: ahi el UDP del anfitrion hacia su propia IP no es la ruta de la LAN."""
+    return "PASS" if ok else ("INFO" if en_wsl() else "FAIL")
+
+
 def puertos():
     """Puerto publicado de cada servicio (clave = nombre de SERVICIOS_TCP, mas 'ntp')."""
     p = {n: int(config(var, str(defecto))) for n, _, _, var, defecto, _ in SERVICIOS_TCP}
@@ -479,11 +496,15 @@ def bloque_puertos(ctx, m):
             t = fila(res, "tcp", n)
             reg(f"{origen} -> {host}:{p[n]} ({n}, {cont}) ABIERTO", "PASS" if t["estado"] == "ABIERTO" else "FAIL", linea_tcp(t))
         d = fila(res, "dns", "dns")
-        reg(f"{origen} -> {host}:{p['dns']}/udp (dns): bind9 responde por UDP", "PASS" if "error" not in d and d["rcode"] == 0 else "FAIL",
-            f"respuesta={resp(d)}")
+        ok = "error" not in d and d["rcode"] == 0
+        v = veredicto_udp_local(ok) if origen == "anfitrion" else ("PASS" if ok else "FAIL")
+        reg(f"{origen} -> {host}:{p['dns']}/udp (dns): bind9 responde por UDP", v,
+            f"respuesta={resp(d)}" + (NOTA_UDP_WSL if v == "INFO" else ""))
         x = fila(res, "ntp", "ntp")
-        reg(f"{origen} -> {host}:{p['ntp']}/udp (ntp): ntp-interno responde por UDP",
-            "PASS" if "error" not in x and x["modo"] == 4 else "FAIL", f"respuesta={resp(x)}")
+        ok = "error" not in x and x["modo"] == 4
+        v = veredicto_udp_local(ok) if origen == "anfitrion" else ("PASS" if ok else "FAIL")
+        reg(f"{origen} -> {host}:{p['ntp']}/udp (ntp): ntp-interno responde por UDP", v,
+            f"respuesta={resp(x)}" + (NOTA_UDP_WSL if v == "INFO" else ""))
 
     imprime("  -- a) desde el anfitrion (como un equipo de la LAN que llega a HOST_IP)")
     abierto(m["host"], "anfitrion", "anfitrion")
@@ -553,13 +574,19 @@ def bloque_dns(ctx, m, zonas):
         vias = {"udp (anfitrion)": dns_consulta(host, fq, puerto=dnsp), "tcp (anfitrion)": dns_consulta_tcp(host, fq, puerto=dnsp),
                 "udp (contenedor)": por[h]}
         bien = {k: "error" not in d and d["rcode"] == 0 and d["aa"] and d["respuestas"] == [host] for k, d in vias.items()}
-        reg(f"{fq} -> {host}: autoritativo por {', '.join(vias)}", "PASS" if all(bien.values()) else "FAIL",
-            "\n".join(f"{k} {host}:{dnsp}: " + ("ok " if bien[k] else "MAL ") + f"respuesta={resp(d)}" for k, d in vias.items()))
+        resto_ok = all(v_ for k, v_ in bien.items() if k != "udp (anfitrion)")
+        v = "PASS" if all(bien.values()) else ("INFO" if resto_ok and en_wsl() else "FAIL")
+        reg(f"{fq} -> {host}: autoritativo por {', '.join(vias)}", v,
+            (NOTA_UDP_WSL.lstrip() + "\n" if v == "INFO" else "") + "\n".join(f"{k} {host}:{dnsp}: " + ("ok " if bien[k] else "MAL ") + f"respuesta={resp(d)}" for k, d in vias.items()))
     d1, d2 = (dns_consulta(host, f"no-existe-xyz.{DOMINIO}", puerto=dnsp), dns_consulta_tcp(host, f"no-existe-xyz.{DOMINIO}", puerto=dnsp))
+    nx = lambda d: "error" not in d and d["rcode"] == 3 and d["aa"]
+    v = "PASS" if nx(d1) and nx(d2) else ("INFO" if nx(d2) and en_wsl() else "FAIL")
     reg("nombre inexistente -> NXDOMAIN autoritativo, por udp y tcp (distingue 'nombre desconocido' de 'sin respuesta')",
-        "PASS" if all("error" not in d and d["rcode"] == 3 and d["aa"] for d in (d1, d2)) else "FAIL", f"udp={d1}\ntcp={d2}")
-    d = dns_consulta(host, "example.com", puerto=dnsp)
-    reg(f"example.com desde el anfitrion ({host}:{dnsp}) -> REFUSED (el anfitrion y la LAN no tienen recursion)",
+        v, f"udp={d1}\ntcp={d2}" + (NOTA_UDP_WSL if v == "INFO" else ""))
+    # Bajo WSL el anfitrion pregunta por TCP (el UDP hacia su propia IP no llega); en el resto, por UDP como un cliente normal.
+    proto, consulta = ("tcp", dns_consulta_tcp) if en_wsl() else ("udp", dns_consulta)
+    d = consulta(host, "example.com", puerto=dnsp)
+    reg(f"example.com desde el anfitrion ({host}:{dnsp}/{proto}) -> REFUSED (el anfitrion y la LAN no tienen recursion)",
         "PASS" if "error" not in d and d["rcode"] == 5 else "FAIL", f"respuesta={d}")
     g = por["glue"]
     reg(f"delegacion: dc1.{DOMINIO_AD} -> {ctx['ip_dc']} desde un contenedor ({ip_dns}:53; no autoritativo: bind9 la resuelve "
@@ -601,8 +628,9 @@ def bloque_ntp(ctx, m):
     for origen, res in (("anfitrion", m["host"]), ("contenedor", m["red"])):
         x = fila(res, "ntp", "ntp") if "error" not in res else {"error": cuerpo_error(res)}
         ok = "error" not in x and x["modo"] == 4 and 1 <= x["stratum"] <= 15 and x["li"] != 3 and abs(x["offset_s"]) < 5
-        reg(f"un cliente SNTP del {origen} recibe hora valida de {host}:{pn}/udp", "PASS" if ok else "FAIL",
-            f"respuesta={resp(x)}\ncriterio: modo 4, 1<=stratum<=15, LI!=3 (3 = 'no sincronizado': un cliente lo rechaza), |offset|<5s")
+        v = veredicto_udp_local(ok) if origen == "anfitrion" else ("PASS" if ok else "FAIL")
+        reg(f"un cliente SNTP del {origen} recibe hora valida de {host}:{pn}/udp", v,
+            f"respuesta={resp(x)}" + (NOTA_UDP_WSL if v == "INFO" else "") + f"\ncriterio: modo 4, 1<=stratum<=15, LI!=3 (3 = 'no sincronizado': un cliente lo rechaza), |offset|<5s")
     r = sh(["docker", "run", "--rm", "--pull=never", "--label", ETIQUETA, "--network", ctx["red"],
             "--entrypoint", "chronyd", ctx["img_ntp"], "-Q", f"server {host} port {pn} iburst"], timeout=120)
     txt = (r.stdout + r.stderr).strip()
