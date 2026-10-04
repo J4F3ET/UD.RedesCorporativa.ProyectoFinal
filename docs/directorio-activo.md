@@ -31,27 +31,26 @@ OpenVPMS y Pretix siguen con su administrador local ([aplicaciones.md](aplicacio
 | Realm Kerberos | `AD.RESERVAVIVA.LAN` |
 | Dominio NetBIOS | `RESERVAVIVA` |
 | DN base | `DC=ad,DC=reservaviva,DC=lan` |
-| Controlador | `dc1`, FQDN `dc1.ad.reservaviva.lan`, contenedor `samba-ad`, `10.10.99.10` en `vlan99_infra` |
+| Controlador | `dc1`, FQDN `dc1.ad.reservaviva.lan`, contenedor `samba-ad`, `10.10.99.10` fija en la red `reservaviva` |
 | Roles | `--server-role=dc`, DNS `SAMBA_INTERNAL`, `--use-rfc2307` |
 | Volúmenes | `samba_data` (`/var/lib/samba`) y `samba_etc` (`/etc/samba`) |
 
-El realm es un **subdominio** (`ad.`) porque Samba no admite `.local` ni renombrar el realm después. El sufijo antiguo desaparece del DN: el árbol ya no cuelga de `reservaviva.local`. El hostname `dc1` respeta el límite de 15 caracteres de Samba. La IP es la que tenía `openldap`: es la que el DC ve como suya y registra en su propio DNS, y por eso el nombre `ldap.reservaviva.lan` sigue apuntando a `10.10.99.10`.
+El realm es un **subdominio** (`ad.`) porque Samba no admite `.local` ni renombrar el realm después. El sufijo antiguo desaparece del DN: el árbol ya no cuelga de `reservaviva.local`. El hostname `dc1` respeta el límite de 15 caracteres de Samba. La IP `10.10.99.10` es la que tenía `openldap`: es la que el DC ve como suya y registra en su propio DNS (se provisionó con ella), y por eso es una de las dos únicas IP fijas del sistema (la otra es `dns-interno`, `10.10.99.11`). Para las aplicaciones y los clientes, `ldap.reservaviva.lan` apunta a `HOST_IP`, donde se publica el 636.
 
-**DNS: delegación real, no zona forward.** El plan preveía una zona `type forward` en bind9 hacia el DC. No funciona: `ad.reservaviva.lan` cuelga de `reservaviva.lan`, de la que bind9 es **autoritativo**, y una zona autoritativa responde ella misma (`NXDOMAIN` con `aa=1`) a cualquier nombre de su árbol; la zona forward nunca se llega a consultar. Lo que hay es la delegación estándar de DNS, solo en la **vista interna** ([`db.reservaviva.lan.tpl`](../servicios/bind9/zones/db.reservaviva.lan.tpl)):
+**DNS: delegación real, no zona forward.** El plan preveía una zona `type forward` en bind9 hacia el DC. No funciona: `ad.reservaviva.lan` cuelga de `reservaviva.lan`, de la que bind9 es **autoritativo**, y una zona autoritativa responde ella misma (`NXDOMAIN` con `aa=1`) a cualquier nombre de su árbol; la zona forward nunca se llega a consultar. Lo que hay es la delegación estándar de DNS, en la única zona ([`db.reservaviva.lan.tpl`](../servicios/bind9/zones/db.reservaviva.lan.tpl)):
 
 ```
 ad          IN NS   dc1.ad.reservaviva.lan.
-dc1.ad      IN A    10.10.99.10          ; el glue, que genera levantar-sistema.sh
+dc1.ad      IN A    10.10.99.10          ; el glue (IP fija del DC)
 ```
 
-Para seguir esa delegación, la vista interna lleva `recursion yes; allow-recursion { red-interna; }` (las `options` globales y la vista `lan` siguen en `recursion no`), y para que la recursión no sirva nada más, una zona `"."` de reenvío **sin reenviadores**: cualquier nombre que no sea de `reservaviva.lan` (ni de su delegación) da `SERVFAIL` por política, tenga o no salida la red. Detalle y razones en [`servicios/bind9/README.md`](../servicios/bind9/README.md).
+Para seguir esa delegación, bind9 lleva `recursion yes` limitada a los contenedores de la red (`allow-recursion`, la subred sin el gateway `.1`; el anfitrión y la LAN no tienen recursión), y para que la recursión no sirva nada más, una zona `"."` de reenvío **sin reenviadores**: cualquier nombre que no sea de `reservaviva.lan` (ni de su delegación) da `SERVFAIL` por política, tenga o no salida la red. Detalle y razones en [`servicios/bind9/README.md`](../servicios/bind9/README.md).
 
 Cuatro cosas más que conviene tener claras:
 
 - **El DC usa a bind9 como resolver** (`dns: 10.10.99.11` en el compose): `kinit` y `samba_dnsupdate`, dentro del contenedor, resuelven por SRV y el DNS embebido de Docker no sabe nada de la zona AD. bind9 delega de vuelta al propio DC para esa zona. A la inversa, el `dns forwarder` del DNS interno de Samba es `10.10.99.11` (se fija con `--option` en `domain provision`): para todo lo que no es su zona, Samba pregunta a bind9.
-- **La vista `lan` no publica la zona AD** (da `NXDOMAIN`, igual que `ldap` y `ntp`): un equipo de la LAN no llega a `10.10.99.10`.
-- **Solo `vlan99_infra` es cliente de bind9.** Los departamentos no llegan a él (es la segmentación existente), así que la resolución SRV de la zona AD la hace quien está en la VLAN 99. Las aplicaciones no la necesitan: encuentran el DC por `extra_hosts` (`ldap.reservaviva.lan` → `10.10.99.10` en `inventree-app` y `erpnext-backend`).
-- **El certificado LDAPS** lo firma la CA del proyecto ([`servicios/ca/`](../servicios/ca/README.md)) con los SAN `ldap.reservaviva.lan`, `dc1.ad.reservaviva.lan`, `samba-ad`, `localhost`, `10.10.99.10` y `127.0.0.1`. Se conservan los nombres de archivo `ldap.crt`/`ldap.key` y la misma `/certs/ca.crt` en los clientes. Samba rechaza la clave privada si no tiene permisos 0600, y el montaje de solo lectura no se puede chmodear: el entrypoint copia los tres ficheros a `/var/lib/samba/private/tls/` con `chmod 600` **en cada arranque**. Un certificado nuevo exige por tanto **reiniciar** `samba-ad` (no recrearlo); el lanzador lo hace solo ([operacion.md](operacion.md#certificado-nuevo)).
+- **La delegación solo sirve dentro de la red.** El glue apunta a `10.10.99.10`, una IP de contenedor que un equipo de la LAN no alcanza; los registros SRV de la zona AD los resuelve un contenedor de `reservaviva` consultando a `dns-interno` (`10.10.99.11`). Las aplicaciones no la necesitan: encuentran el DC por `extra_hosts` (`ldap.reservaviva.lan` → `HOST_IP` en `inventree-app` y `erpnext-backend`).
+- **El certificado LDAPS** lo firma la CA del proyecto ([`servicios/ca/`](../servicios/ca/README.md)) con los SAN `ldap.reservaviva.lan`, `dc1.ad.reservaviva.lan`, `samba-ad`, `localhost`, `10.10.99.10`, `127.0.0.1` y la `HOST_IP`. Se conservan los nombres de archivo `ldap.crt`/`ldap.key` y la misma `/certs/ca.crt` en los clientes. Samba rechaza la clave privada si no tiene permisos 0600, y el montaje de solo lectura no se puede chmodear: el entrypoint copia los tres ficheros a `/var/lib/samba/private/tls/` con `chmod 600` **en cada arranque**. Un certificado nuevo exige por tanto **reiniciar** `samba-ad` (no recrearlo); el lanzador lo hace solo ([operacion.md](operacion.md#certificado-nuevo)).
 
 ## 3. Objetos del directorio
 
@@ -86,9 +85,9 @@ DC=ad,DC=reservaviva,DC=lan
 
 ### Lo común
 
-- **Servidor:** `ldaps://ldap.reservaviva.lan:636`. El nombre lo fija `extra_hosts` hacia `10.10.99.10`, para que coincida con el certificado sin depender del DNS ([arquitectura.md](arquitectura.md#6-flujos)).
+- **Servidor:** `ldaps://ldap.reservaviva.lan:LDAPS_PORT` (1636 en `test.env`). El nombre lo fija `extra_hosts` hacia `HOST_IP`, donde se publica el 636 de `samba-ad`, para que coincida con el certificado sin depender del DNS ([arquitectura.md](arquitectura.md#6-flujos)).
 - **Verificación TLS:** contra la CA interna, montada desde `servicios/ca/certs/ca.crt` en `/certs/ca.crt` (solo lectura) en `inventree-app` y `erpnext-backend`. Con la CA del sistema, o con otra CA, la conexión falla.
-- **Solo LDAPS.** Samba lleva `ldap server require strong auth = yes` (el valor por defecto, [CVE-2016-2112](https://www.samba.org/samba/security/CVE-2016-2112.html)): un bind simple por el 389 sin cifrar se rechaza con "Strong(er) authentication required". Las dos aplicaciones usan el 636, así que se dejó en `yes` en vez de bajar la seguridad.
+- **Solo LDAPS.** Samba lleva `ldap server require strong auth = yes` (el valor por defecto, [CVE-2016-2112](https://www.samba.org/samba/security/CVE-2016-2112.html)): un bind simple por el 389 sin cifrar se rechaza con "Strong(er) authentication required". Las dos aplicaciones usan LDAPS, así que se dejó en `yes` en vez de bajar la seguridad.
 - **Flujo.** (1) La aplicación hace bind con `svc-lectura` (`CN=svc-lectura,OU=Servicios,DC=ad,DC=reservaviva,DC=lan`). (2) Busca al usuario por `sAMAccountName` en **toda la base del dominio**, con un filtro que exige además `memberOf` del grupo de su departamento. (3) Con el DN que encontró, hace bind con la clave del propio usuario. Si el usuario no existe, o no es miembro del grupo, la búsqueda no devuelve nada y recibe "clave inválida".
 - **Clave de `svc-lectura`:** `LDAP_SVC_LECTURA_PASSWORD` en `sistema/test.env`, una sola cuenta compartida por las dos aplicaciones: el compose pasa la variable a InvenTree (`INVENTREE_LDAP_BIND_PASSWORD`), a `erpnext-ldap-config` y a `samba-ad` (que la siembra).
 - **Arranque.** `inventree-app`, `erpnext-backend` y `erpnext-ldap-config` tienen `depends_on: samba-ad: condition: service_healthy`.
@@ -115,7 +114,7 @@ El filtro decide el acceso; la OU ya no. La base de búsqueda es la raíz del do
 ### ERPNext
 
 - "LDAP Settings" de Frappe (`ldap3`), que escribe el trabajo idempotente `erpnext-ldap-config` en cada arranque: `ldap_directory_server: "Active Directory"`, `ldap_username_field: sAMAccountName`, `mail`/`givenName`/`sn` como campos de correo y nombre, `require_trusted_certificate: Yes` y `local_ca_certs_file: /certs/ca.crt`. Búsqueda de usuarios en la raíz del dominio y de grupos en `OU=Grupos`. El campo `base_dn` de Frappe **no es la base de búsqueda**: es el DN con el que se autentica la cuenta de servicio.
-- `erpnext-ldap-config` guarda con `ignore_mandatory`: **no se conecta al DC** al guardar, y por eso no necesita `vlan99_infra`. La prueba real es el login. Quien habla LDAPS es `erpnext-backend`.
+- `erpnext-ldap-config` guarda con `ignore_mandatory`: **no se conecta al DC** al guardar, y por eso no necesita llegar a la red `reservaviva`. La prueba real es el login. Quien habla LDAPS es `erpnext-backend`.
 - El `ssl_tls_mode` es `Off` porque la conexión ya va por `ldaps://`.
 
 ## 5. Kerberos
@@ -128,7 +127,7 @@ docker exec samba-ad klist                                       # el TGT: vet.p
 docker exec samba-ad kdestroy                                    # descarta el ticket
 ```
 
-`kinit` encuentra el KDC por los registros SRV de `_kerberos._tcp.ad.reservaviva.lan`, que el contenedor resuelve por bind9 (sección 2). Desde otro contenedor de `vlan99_infra` se pueden consultar a mano:
+`kinit` encuentra el KDC por los registros SRV de `_kerberos._tcp.ad.reservaviva.lan`, que el contenedor resuelve por bind9 (sección 2). Desde otro contenedor de `reservaviva` se pueden consultar a mano:
 
 ```bash
 dig @10.10.99.11 _ldap._tcp.ad.reservaviva.lan SRV +short
@@ -180,12 +179,11 @@ docker exec samba-ad samba-tool user setexpiry ana.perez --noexpiry
 | Clave errónea | Rechazada en las dos |
 | `ldapsearch` por LDAPS desde `samba-ad` | Válido con la CA interna y fallido con una CA ajena |
 | `docker compose down` (sin `-v`) + `up -d` | Los casos anteriores se repiten igual (con `--persistencia`; el modo `--rapido` lo omite) |
-| Registros SRV `_ldap._tcp` y `_kerberos._tcp` de la zona AD | Consultados a bind9 desde `vlan99_infra`: demuestra la delegación |
+| Registros SRV `_ldap._tcp` y `_kerberos._tcp` de la zona AD | Consultados a bind9 desde un contenedor de la red: demuestra la delegación |
 | `kinit vet.prueba@AD.RESERVAVIVA.LAN` y `klist` | Dentro de `samba-ad`, con la clave por stdin |
 | Pertenencia a grupos | `samba-tool group listmembers` de cada `GG-*` |
 | Prueba negativa de grupos | `vet.prueba` (`GG-Medica`) no entra ni en ERPNext ni en InvenTree |
-| Vista `lan` | No resuelve `ad.reservaviva.lan` |
-| `rootDSE` anónimo | Bind anónimo y búsqueda a `10.10.99.10:389` desde `vlan99_infra` (`ldapprobe.py`) |
+| `rootDSE` anónimo | Bind anónimo y búsqueda al LDAP del DC desde un contenedor de la red (`ldapprobe.py`, `HOST_IP:LDAP_PORT`) |
 
 `verificar` **no comprueba**: el rechazo de otros usuarios de otro departamento (por ejemplo `rrhh.prueba` en InvenTree), el login de `taquilla.prueba`, ni el botón "Login with LDAP" del formulario `/login` de ERPNext, que no se ha probado en un navegador ([pendientes](resultados-un-host.md#pendientes)).
 
@@ -248,7 +246,7 @@ El árbol de OpenLDAP vivía en dos volúmenes y un contenedor que el compose ya
 ## 9. Límites y decisiones
 
 - **`privileged: true`.** Samba guarda las ACL de AD en atributos extendidos `security.*`, y el contenedor sin privilegios no puede escribirlos. Es una concesión de seguridad deliberada; se anota en [seguridad.md](seguridad.md#3-directorio-activo-y-ldaps).
-- **Puertos.** Solo se publican el 389 y el 636 (`LDAP_PORT` y `LDAPS_PORT`, 1389 y 1636 en `test.env`, en `127.0.0.1`), para las herramientas del host. **No se publican** el 445 (SMB: lo ocupa Windows en el host), el 88 (Kerberos: se prueba dentro de la red) ni el 53 (el DNS llega por bind9). Con `interfaces = eth0` y `bind interfaces only = yes`, Samba no escucha en loopback: el healthcheck consulta por la IP fija.
+- **Puertos.** Solo se publican el 389 y el 636 (`LDAP_PORT` y `LDAPS_PORT`, 1389 y 1636 en `test.env`, en `HOST_IP`), para las herramientas del host y, por `extra_hosts`, InvenTree y ERPNext. **No se publican** el 445 (SMB: lo ocupa Windows en el host), el 88 (Kerberos: se prueba dentro de la red) ni el 53 (el DNS llega por bind9). Con `interfaces = eth0` y `bind interfaces only = yes`, Samba no escucha en loopback: el healthcheck consulta por la IP fija.
 - **Unión de equipos fuera de alcance.** No se une ningún equipo Windows o Linux al dominio, y por eso no hay GPO ni RSAT en el laboratorio; el SMB (445) no se expone. El dominio está provisionado para que se pueda hacer, pero no se prueba.
 - **Un solo controlador.** No hay réplica ni segundo DC.
 - **Cuentas de laboratorio sin caducidad** (sección 3): decisión de laboratorio, con la política del dominio intacta.
