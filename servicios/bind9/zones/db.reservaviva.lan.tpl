@@ -1,7 +1,7 @@
 ; PLANTILLA de la zona reservaviva.lan. NO se monta tal cual: levantar-sistema.sh (generar_zona) la convierte en
-; db.reservaviva.lan sustituyendo ${IP_ANFITRION} por HOST_IP (la IP del equipo, donde estan publicados el proxy web, el DNS,
-; LDAP/LDAPS y NTP), ${IP_DC} por la IP fija de samba-ad en la red del sistema y ${SERIAL} por la fecha. db.reservaviva.lan
-; esta en .gitignore. Editar SOLO esta plantilla.
+; db.reservaviva.lan sustituyendo los marcadores IP_ANFITRION (HOST_IP: la IP del equipo, donde estan publicados el proxy web,
+; el DNS, LDAP/LDAPS y NTP), IP_DC (la IP fija de samba-ad en la red del sistema) y SERIAL (la fecha), escritos entre llaves
+; con un dolar delante. db.reservaviva.lan esta en .gitignore. Editar SOLO esta plantilla.
 ;
 ; Una sola zona para todos los clientes: los contenedores, el propio equipo y los equipos de la LAN. Todos los nombres de
 ; servicio llevan a la IP del equipo: los servicios se hablan por HOST_IP y el puerto publicado, no por la red de Docker.
@@ -25,7 +25,7 @@ ntp         IN A ${IP_ANFITRION}
 ; "forward": dentro de una zona de la que bind9 es autoritativo (esta), una zona "type forward" para un subdominio NUNCA se
 ; llega a consultar, porque la zona autoritativa responde ella misma (NXDOMAIN con aa=1) para cualquier nombre bajo su
 ; propio arbol. La delegacion, en cambio, es el mecanismo estandar de DNS: bind9 devuelve el NS y, con "recursion yes" para
-; los contenedores (ver named.conf), sigue la delegacion y reenvia la consulta a ${IP_DC}. Una delegacion no admite puerto:
+; los contenedores (ver named.conf), sigue la delegacion y reenvia la consulta al DC. Una delegacion no admite puerto:
 ; por eso el DC conserva su IP fija en la red del sistema (es la unica IP que no es HOST_IP).
 ad          IN NS   dc1.ad.reservaviva.lan.
 dc1.ad      IN A    ${IP_DC}
