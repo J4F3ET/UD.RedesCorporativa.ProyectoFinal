@@ -593,13 +593,11 @@ def bloque_dns(ctx, m, zonas):
         "por la delegacion hacia samba-ad)", "PASS" if "error" not in g and g["rcode"] == 0 and not g["aa"] and g["respuestas"] == [ctx["ip_dc"]] else "FAIL",
         f"respuesta={resp(g)}")
     d = por["externo"]
-    ok = "error" not in d and d["rcode"] in (2, 5) and not d["respuestas"]
-    reg(f"example.com desde un contenedor ({ip_dns}:53): sin resolucion real (SERVFAIL o REFUSED, sin respuestas)",
-        "PASS" if ok else "FAIL", f"respuesta={resp(d)}")
-    if ok and d["rcode"] == 2:
-        reg("aviso: los contenedores SI tienen recursion en bind9 (la delegacion de ad.reservaviva.lan la exige)", "INFO",
-            f"respuesta={resp(d)}\nSERVFAIL y no REFUSED: bind9 intenta recursionar. Que no resuelva example.com depende de la zona "
-            "'.' vacia de named.conf, no de la red: esta red SI tiene salida a Internet.")
+    ok = "error" not in d and d["rcode"] == 3 and not d["respuestas"]
+    reg(f"example.com desde un contenedor ({ip_dns}:53): NXDOMAIN de la raiz vacia, sin respuestas ni IP reales de Internet",
+        "PASS" if ok else "FAIL", f"respuesta={resp(d)}\n"
+        "los contenedores tienen recursion (la delegacion de ad.reservaviva.lan la exige); "
+        "lo que impide resolver Internet es la raiz '.' autoritativa y vacia de named.conf (zones/db.raiz-vacia), no que el host no tenga salida")
     # Con Docker Engine en WSL, dns-interno va a <IP>:DNS_PORT y el 53 de la LAN lo atiende el reenviador de Windows
     # (sistema/reenviador-dns.ps1; ver docs/operacion.md). Se prueba esa ruta completa por UDP y TCP.
     if dnsp != 53:
