@@ -51,6 +51,11 @@ if [ ! -f "${STATE_DIR}/openvpms.properties" ]; then
     echo "${key}"
   } > "${STATE_DIR}/openvpms.properties"
 fi
+# La URL de la base se reescribe en CADA arranque desde OPENVPMS_DB_HOST: el fichero del volumen puede venir de una version
+# anterior con otra direccion (la IP fija que tenia openvpms-db antes de existir una sola red). Solo cambian db.url y
+# reporting.db.url; la clave de cifrado y las claves de la base no se tocan.
+URL="jdbc:mysql://${OPENVPMS_DB_HOST}:${DB_PORT}/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true"
+sed -i -e "s|^db\.url=.*|db.url=${URL}|" -e "s|^reporting\.db\.url=.*|reporting.db.url=${URL}|" "${STATE_DIR}/openvpms.properties"
 cp "${STATE_DIR}/openvpms.properties" "${PROPS}"
 chmod 600 "${PROPS}" "${STATE_DIR}/openvpms.properties"
 
