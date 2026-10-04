@@ -2,18 +2,18 @@
 
 Guía de las cuatro aplicaciones de la intranet: para qué sirve cada una en el zoológico, qué contenedores la forman, cómo se entra la primera vez y qué hay que saber antes de usarla. Supone que el sistema ya está en marcha con `levantar-sistema` (ver [operacion.md](operacion.md)).
 
-Cada aplicación tiene dos entradas. El **acceso directo** por `localhost` (puertos publicados solo en `127.0.0.1`, `PUBLISH_IP` de [`sistema/test.env`](../sistema/test.env)) sirve desde el propio equipo y es el de administración. El **acceso por nombre** (`*.reservaviva.lan`, a través del proxy web) es el que usan los demás equipos de la LAN cuando el sistema está en modo intranet ([operacion.md](operacion.md#acceso-desde-la-lan)). Los servicios están definidos en el [`docker-compose.yml`](../docker-compose.yml) de la raíz, agrupados por departamento. Las redes, las IP y los flujos entre servicios están en [arquitectura.md](arquitectura.md).
+Cada aplicación tiene dos entradas. El **acceso directo** por `HOST_IP:puerto` (la IP del equipo, variable `HOST_IP` de [`sistema/test.env`](../sistema/test.env)), que además se publica en `127.0.0.1` con el mismo puerto (`http://localhost:<puerto>`), es el de administración. El **acceso por nombre** (`*.reservaviva.lan`, a través del proxy web en `HOST_IP:80`) es el que usan los demás equipos de la LAN con el DNS del sistema ([operacion.md](operacion.md#acceso-desde-la-lan)). Los servicios están definidos en el [`docker-compose.yml`](../docker-compose.yml) de la raíz, agrupados por departamento. La red, los puertos y los flujos entre servicios están en [arquitectura.md](arquitectura.md).
 
 ## Resumen
 
-| Aplicación | Departamento | VLAN | Por nombre (LAN, modo intranet) | Acceso directo (este equipo) | Usuario inicial | Variable de `test.env` con su clave | ¿LDAP? |
-|---|---|---|---|---|---|---|---|
-| OpenVPMS | Unidad Médica Veterinaria | 10 | http://openvpms.reservaviva.lan | http://localhost:18080/openvpms | `admin` | `OPENVPMS_ADMIN_PASSWORD` | No |
-| Pretix | Taquilla y Boletería | 20 | http://pretix.reservaviva.lan | http://localhost:18082 | `admin@reservaviva.local` (`PRETIX_ADMIN_EMAIL`) | `PRETIX_ADMIN_PASSWORD` | No |
-| InvenTree | Logística y Almacén | 30 | http://inventree.reservaviva.lan | http://localhost:18083 | `admin` | `INVENTREE_ADMIN_PASSWORD` | Sí (LDAPS) |
-| ERPNext (HR) | Recursos Humanos | 40 | http://rrhh.reservaviva.lan | http://localhost:18081 | `Administrator` | `ERPNEXT_ADMIN_PASSWORD` | Sí (LDAPS) |
+| Aplicación | Departamento | Por nombre (LAN) | Acceso directo (`HOST_IP` o `localhost`) | Usuario inicial | Variable de `test.env` con su clave | ¿LDAP? |
+|---|---|---|---|---|---|---|
+| OpenVPMS | Unidad Médica Veterinaria | http://openvpms.reservaviva.lan | http://HOST_IP:18080/openvpms | `admin` | `OPENVPMS_ADMIN_PASSWORD` | No |
+| Pretix | Taquilla y Boletería | http://pretix.reservaviva.lan | http://localhost:18082 (por `HOST_IP:18082` da 400) | `admin@reservaviva.local` (`PRETIX_ADMIN_EMAIL`) | `PRETIX_ADMIN_PASSWORD` | No |
+| InvenTree | Logística y Almacén | http://inventree.reservaviva.lan | http://HOST_IP:18083 | `admin` | `INVENTREE_ADMIN_PASSWORD` | Sí (LDAPS) |
+| ERPNext (HR) | Recursos Humanos | http://rrhh.reservaviva.lan | http://HOST_IP:18081 | `Administrator` | `ERPNEXT_ADMIN_PASSWORD` | Sí (LDAPS) |
 
-Los puertos del acceso directo salen de `OPENVPMS_PORT`, `PRETIX_PORT`, `INVENTREE_PORT` y `ERPNEXT_PORT` en `test.env`. El script repite esta tabla al terminar el arranque (`levantar-sistema.sh`, función `accesos`), con las URL por nombre en modo intranet. El correo del administrador de Pretix conserva el sufijo `.local`: es un identificador guardado en su base, no un nombre DNS ([arquitectura.md](arquitectura.md#identificadores-con-el-sufijo-antiguo)).
+Los puertos del acceso directo salen de `OPENVPMS_PORT`, `PRETIX_PORT`, `INVENTREE_PORT` y `ERPNEXT_PORT` en `test.env`. El script repite esta tabla al terminar el arranque (`levantar-sistema.sh`, función `accesos`), con la `HOST_IP` en uso y las URL por nombre. El correo del administrador de Pretix conserva el sufijo `.local`: es un identificador guardado en su base, no un nombre DNS ([arquitectura.md](arquitectura.md#identificadores-con-el-sufijo-antiguo)).
 
 Las claves de los administradores son de laboratorio y desechables. Viven en [`sistema/test.env`](../sistema/test.env): este documento nunca las copia. Cómo se gestionan y cuándo rotarlas está en [seguridad.md](seguridad.md).
 
@@ -62,7 +62,7 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 
 - **El administrador lo crea el script, no la imagen (H19).** La imagen de Pretix trae de fábrica un superusuario `admin@localhost` con una clave conocida. Tras el arranque, `levantar-sistema.sh` (función `crear_admin_pretix`) crea `admin@reservaviva.local` si no existe y **borra `admin@localhost`**. Si Pretix se levanta a mano con `docker compose up` sin el script, ese paso no ocurre: hay que ejecutar el script o repetirlo a mano.
 - **Primer arranque.** `pretix-web` migra la base antes de responder. Por eso `pretix-worker` y `pretix-cron` esperan a que esté `healthy`.
-- **URL de Pretix (H20).** `PRETIX_PRETIX_URL` es `http://pretix.reservaviva.lan`. Pretix solo acepta el `Host` de esa URL o `localhost` (`LOCAL_HOST_NAMES` de su middleware multidominio), así que funcionan el nombre y http://localhost:18082, pero no `127.0.0.1`, que responde 400. Comprobado el 27/09/2026: un login con credenciales inventadas se rechaza por credenciales, no por CSRF, por las dos entradas. Los enlaces absolutos que genere Pretix (correos, PDF) llevan el nombre.
+- **URL de Pretix (H20).** `PRETIX_PRETIX_URL` es `http://pretix.reservaviva.lan`. Pretix solo acepta el `Host` de esa URL o `localhost` (`LOCAL_HOST_NAMES` de su middleware multidominio), así que funcionan el nombre y http://localhost:18082, pero no `127.0.0.1` ni `HOST_IP:18082`, que responden 400 (limitación conocida: se entra por nombre o por `localhost`). Comprobado el 27/09/2026: un login con credenciales inventadas se rechaza por credenciales, no por CSRF, por las dos entradas. Los enlaces absolutos que genere Pretix (correos, PDF) llevan el nombre.
 - **Aviso "unexpected origin" en el log: inofensivo y esperado.** Pretix 2026.7.0 calcula el origen esperado sin puerto (`http://pretix.reservaviva.lan`, de `PRETIX_PRETIX_URL`) y lo compara con el que manda el navegador (por ejemplo `http://localhost:18082`). Al no coincidir, la vista de login y la vista `bad_origin_report` (`@csrf_exempt`) solo registran un `warning`; el resultado del login no depende de esa comparación, así que no lo bloquea.
 
 ## InvenTree: Logística y Almacén
@@ -101,7 +101,7 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 
 | Contenedor | Función |
 |---|---|
-| `erpnext-hr` | nginx, puerto 8080 publicado en 18081. Único punto de entrada web; el proxy le llega por su pata en `vlan99_infra` para `rrhh.reservaviva.lan` |
+| `erpnext-hr` | nginx, puerto 8080 publicado en 18081. Único punto de entrada web; el proxy llega a él por `HOST_IP:18081` para `rrhh.reservaviva.lan` |
 | `erpnext-backend` | Aplicación Frappe. Es quien habla LDAPS con Samba AD |
 | `erpnext-websocket` | Tiempo real (socket.io) |
 | `erpnext-scheduler`, `erpnext-queue-short`, `erpnext-queue-long` | Tareas programadas y colas de trabajo |
@@ -126,13 +126,13 @@ OpenVPMS no publica imagen Docker. El `Dockerfile` descarga el release oficial y
 
 ## Infraestructura compartida
 
-Las cuatro aplicaciones comparten cuatro servicios en la VLAN 99. Cada aplicación está en la VLAN de su departamento y en la VLAN 99 para llegar a ellos. Direcciones, reglas y flujos, en [arquitectura.md](arquitectura.md). La CA y las cuentas de servicio, en [seguridad.md](seguridad.md).
+Las cuatro aplicaciones comparten cuatro servicios de infraestructura, todos en la misma red `reservaviva`. Puertos y flujos, en [arquitectura.md](arquitectura.md). La CA y las cuentas de servicio, en [seguridad.md](seguridad.md).
 
 | Servicio | Contenedor | Carpeta | Uso |
 |---|---|---|---|
 | Samba AD DC (imagen propia sobre `debian:trixie`, Samba 4.22) | `samba-ad` | [`servicios/samba-ad/`](../servicios/samba-ad/README.md) | Directorio `DC=ad,DC=reservaviva,DC=lan` (realm `AD.RESERVAVIVA.LAN`): LDAPS, Kerberos y DNS de su zona, con una OU y un grupo `GG-*` por departamento |
-| bind9 9.18 | `dns-interno` | [`servicios/bind9/`](../servicios/bind9/) | Zona autoritativa `reservaviva.lan`, con una vista para los contenedores y otra para el anfitrión y la LAN |
+| bind9 9.18 | `dns-interno` | [`servicios/bind9/`](../servicios/bind9/) | Zona autoritativa `reservaviva.lan`, con una sola vista: todos los nombres apuntan a `HOST_IP` |
 | NTP (`cturra/ntp`) | `ntp-interno` | [`servicios/ntp/`](../servicios/ntp/) | Hora de referencia local (stratum 10) |
-| nginx 1.30 | `proxy-web` | [`servicios/proxy/`](../servicios/proxy/) | Acceso por nombre a las cuatro aplicaciones (puerto 80) |
+| nginx 1.30 | `proxy-web` | [`servicios/proxy/`](../servicios/proxy/) | Acceso por nombre a las cuatro aplicaciones (`HOST_IP:80`); llega a ellas por `HOST_IP:puerto` |
 
 Sus puertos en el equipo están en [arquitectura.md](arquitectura.md#7-puertos-publicados). Los usuarios de prueba del directorio y en qué aplicación entra cada uno, en [directorio-activo.md](directorio-activo.md#3-objetos-del-directorio).
