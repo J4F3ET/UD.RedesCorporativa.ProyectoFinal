@@ -12,11 +12,14 @@
 #            no aportaría nada y solo obligaría a tocar más sitios.
 #
 # Uso:  servicios/ca/generar-certificados.sh [--forzar] [--sin-instalar-ca]
-# Variables opcionales: DOMINIO_DNS (reservaviva.lan), LDAP_IP (10.10.99.10), CERTS_DIR (servicios/ca/certs).
+# Variables opcionales: DOMINIO_DNS (reservaviva.lan), LDAP_IP (10.10.99.10, la IP fija de samba-ad en la red del sistema),
+# HOST_IP (la IP del equipo, sistema/test.env; levantar-sistema.sh la pasa) y CERTS_DIR (servicios/ca/certs).
+# HOST_IP va en el SAN porque InvenTree y ERPNext llegan a LDAPS por ldap.reservaviva.lan -> HOST_IP:LDAPS_PORT, y las
+# herramientas del host pueden hacerlo por la IP directa. Si HOST_IP cambia, se regenera solo ldap.crt/ldap.key con la misma CA.
 # DOMINIO_DNS es el dominio DNS del servidor (el SAN es ldap.<DOMINIO_DNS>), NO el DN base del directorio: ese es
 # DC=ad,DC=reservaviva,DC=lan, fijo en servicios/samba-ad/entrypoint.sh (no hay una variable de compose para él,
 # a diferencia de LDAP_DOMAIN de la antigua imagen osixia/openldap). Si el SAN del certificado existente no cubre
-# ldap.<DOMINIO_DNS>, dc1.ad.reservaviva.lan y samba-ad (p. ej. uno anterior con ldap.reservaviva.local, o anterior a la
+# ldap.<DOMINIO_DNS>, dc1.ad.reservaviva.lan, samba-ad y HOST_IP (p. ej. uno anterior con ldap.reservaviva.local, o anterior a la
 # migración a Samba AD), se regenera SOLO ldap.crt/ldap.key, firmado por la misma CA; levantar-sistema.sh reinicia
 # entonces samba-ad (su entrypoint recoge el certificado en cada arranque) y sus clientes.
 # Como root, además instala ca.crt en el almacén de confianza del host (para que ldapsearch, curl, etc.
@@ -31,6 +34,7 @@ export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 AQUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # servicios/ca
 DOMAIN="${DOMINIO_DNS:-reservaviva.lan}"
 LDAP_IP="${LDAP_IP:-10.10.99.10}"
+HOST_IP="${HOST_IP:-}"
 OUT="${CERTS_DIR:-${AQUI}/certs}"
 FORZAR=false
 INSTALAR_CA=true
@@ -75,14 +79,16 @@ fi
 cubre_direcciones() {  # el certificado actual incluye la IP y los nombres esperados (los de samba-ad incluidos)
   local san
   san="$(openssl x509 -in ldap.crt -noout -ext subjectAltName 2>/dev/null || true)"
-  [[ "${san}" == *"${LDAP_IP}"* && "${san}" == *"ldap.${DOMAIN}"*      && "${san}" == *"DNS:dc1.ad.reservaviva.lan"* && "${san}" == *"DNS:samba-ad"* ]]
+  [[ "${san}" == *"${LDAP_IP}"* && "${san}" == *"ldap.${DOMAIN}"*      && "${san}" == *"DNS:dc1.ad.reservaviva.lan"* && "${san}" == *"DNS:samba-ad"* ]] || return 1
+  # -checkip compara la IP exacta (un "192.168.1.1" no debe darse por cubierto por un "192.168.1.12").
+  [ -z "${HOST_IP}" ] || openssl x509 -in ldap.crt -noout -checkip "${HOST_IP}" 2>/dev/null | grep -q "does match"
 }
 if ${FORZAR} || [ ! -f ldap.key ] || ! vigente ldap.crt \
    || ! openssl verify -CAfile ca.crt ldap.crt >/dev/null 2>&1 || ! cubre_direcciones; then
   if [ -f ldap.crt ] && ! cubre_direcciones; then
-    echo "[certs] El SAN del certificado actual no cubre ldap.${DOMAIN}, dc1.ad.reservaviva.lan, samba-ad y ${LDAP_IP}: se regenera (la CA se conserva)."
+    echo "[certs] El SAN del certificado actual no cubre ldap.${DOMAIN}, dc1.ad.reservaviva.lan, samba-ad, ${LDAP_IP}${HOST_IP:+ y ${HOST_IP}}: se regenera (la CA se conserva)."
   fi
-  echo "[certs] Generando el certificado LDAPS (ldap.${DOMAIN}, dc1.ad.reservaviva.lan, ${LDAP_IP})..."
+  echo "[certs] Generando el certificado LDAPS (ldap.${DOMAIN}, dc1.ad.reservaviva.lan, ${LDAP_IP}${HOST_IP:+, ${HOST_IP}})..."
   GENERADO_LDAP=true
   rm -f ldap.key ldap.crt   # se sustituyen en vez de sobrescribirse, por si el fichero anterior es de otro dueño
   openssl genrsa -out ldap.key 2048 2>/dev/null
@@ -91,7 +97,7 @@ if ${FORZAR} || [ ! -f ldap.key ] || ! vigente ldap.crt \
 basicConstraints=CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth
-subjectAltName=DNS:ldap.${DOMAIN},DNS:dc1.ad.reservaviva.lan,DNS:samba-ad,DNS:localhost,IP:${LDAP_IP},IP:127.0.0.1
+subjectAltName=DNS:ldap.${DOMAIN},DNS:dc1.ad.reservaviva.lan,DNS:samba-ad,DNS:localhost,IP:${LDAP_IP},IP:127.0.0.1${HOST_IP:+,IP:${HOST_IP}}
 EOF
   openssl x509 -req -in ldap.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
     -sha256 -days 825 -extfile ldap.ext -out ldap.crt 2>/dev/null
