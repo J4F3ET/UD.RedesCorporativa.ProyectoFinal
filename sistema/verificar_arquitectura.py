@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Verificacion de que la ARQUITECTURA (no solo los contenedores) se comporta como esta disenada, en un host.
 
+El sistema se publica en UNA IP (HOST_IP) y un puerto por servicio; los contenedores comparten una sola red. Este
+guion comprueba que cada servicio esta abierto donde debe (desde el anfitrion y desde un contenedor), que las bases de
+datos y Redis no se publican, y que DNS, NTP, el proxy web y el directorio (Samba AD) funcionan por esos puertos.
+
 El ultimo resultado contra el sistema completo esta en docs/resultados-un-host.md. `--autotest` prueba la mecanica
-(clasificador de conexiones, cliente DNS por UDP y TCP, cliente SNTP, lector de zona) contra sockets locales, sin tocar
+(cliente DNS por UDP y TCP, cliente SNTP, lector de zona, lectura de PortBindings) contra sockets locales, sin tocar
 Docker. Ver verificar_arquitectura.md para el alcance y sus limites.
 
 Requisito: el sistema levantado (`levantar-sistema.sh arrancar`) y sano. Ejecutar donde `docker` sea el cliente
 nativo (p. ej. dentro de WSL), igual que ldaplogin.py. Sin dependencias fuera de la libreria estandar.
+HOST_IP se toma del entorno (el lanzador lo exporta, y `--ip` lo sobrescribe) o, si falta, de sistema/test.env; se
+contrasta con la IP en la que Docker publica proxy-web.
 
 Uso (desde esta carpeta):
     python3 verificar_arquitectura.py                     # todos los bloques, incluido ldaplogin.py --persistencia
@@ -14,53 +20,57 @@ Uso (desde esta carpeta):
     python3 verificar_arquitectura.py --informe out.txt   # ademas guarda la salida completa
     python3 verificar_arquitectura.py --autotest          # solo la mecanica, sin Docker
 
-Bloques: 1 segmentacion (prueba negativa) | 2 DNS (bind9 consultado de verdad, vista interna) | 3 NTP |
-4 acceso por nombre (vista lan del DNS, proxy web con HTML + estatico, acceso directo por localhost) |
+Bloques: 1 puertos (una IP, un puerto por servicio; BD y Redis sin publicar) | 2 DNS (bind9 consultado de verdad) |
+3 NTP | 4 acceso por nombre (proxy web con HTML + estatico, acceso directo por HOST_IP y por localhost) |
 5 Active Directory (SRV de _ldap/_kerberos via bind9, kinit/klist, grupos, prueba negativa de membresia) |
 6 consolidacion (ldapprobe.py, probe.py, ldaplogin.py, sin duplicarlos).
 Cada comprobacion da PASS / FAIL / INFO con la salida literal en la que se apoya. Sale con 0 SOLO si no hay ningun FAIL.
 INFO no cuenta: son hallazgos que hay que leer, no fallos del guion.
 
-Por que un fallo tiene que ocurrir por la razon correcta: un destino inalcanzable y un nombre que no resuelve dan
-resultados parecidos. Aqui los negativos usan SIEMPRE una IP literal (el DNS no interviene) y solo cuentan como PASS si
-(a) el cliente prueba, desde su propia VLAN, que su herramienta funciona (control positivo) y (b) el destino contesta
-desde SU propia VLAN (control del destino). Un timeout sin esos dos controles no prueba nada y se marca FAIL.
+Por que un fallo tiene que ocurrir por la razon correcta: un puerto cerrado y un destino mudo dan resultados parecidos.
+Los negativos (BD y Redis no alcanzables en HOST_IP) solo cuentan como PASS si (a) el anfitrion prueba que HOST_IP es
+alcanzable (control del origen: el proxy contesta) y (b) el servicio SI escucha dentro de la red, por su nombre (control
+del destino). Sin esos dos controles un puerto cerrado no prueba nada y se marca FAIL.
 """
-import argparse, errno, http.client, json, re, socket, struct, subprocess, sys, threading, time
+import argparse, errno, http.client, json, os, re, socket, ssl, struct, subprocess, sys, threading, time
 from urllib.parse import urljoin
 from pathlib import Path
 
 AQUI = Path(__file__).resolve().parent
 RAIZ = AQUI.parent
 DOMINIO = "reservaviva.lan"
-ZONA = RAIZ / "servicios/bind9/zones/db.reservaviva.lan"                 # vista interna (IP de contenedor)
-ZONA_LAN = RAIZ / "servicios/bind9/zones/db.reservaviva.lan.vista-lan"   # vista lan (IP del anfitrion)
+ZONA = RAIZ / "servicios/bind9/zones/db.reservaviva.lan"   # unica zona (todos los nombres -> HOST_IP, mas la delegacion ad)
+CA_CRT = RAIZ / "servicios/ca/certs/ca.crt"
 ENV_FILE = AQUI / "test.env"
 ETIQUETA = "verificacion-arquitectura=1"   # solo se borran contenedores efimeros con esta etiqueta
-# depto -> (contenedor de la app dual-homed, puerto TCP donde escucha). Cada app esta ademas en vlan99_infra.
-APPS = {10: ("openvpms-app", 8080), 20: ("pretix-web", 80), 30: ("inventree-app", 8000), 40: ("erpnext-backend", 8000)}
-APP_DEPTO = {a: d for d, (a, _) in APPS.items()}
-RED = {10: "vlan10_medica", 20: "vlan20_taquilla", 30: "vlan30_logistica", 40: "vlan40_rrhh", 99: "vlan99_infra"}
+RED = "reservaviva"            # red unica de compose; Docker le antepone el proyecto (reservaviva-smoke_reservaviva)
+RED_ERP = "erpnext_internal"   # red privada de ERPNext (MariaDB, Redis, workers)
 CONSULTA_DNS = f"ldap.{DOMINIO}"
-# nombre de la zona -> (contenedor que da ese servicio, VLAN donde se le busca la IP real). bloque_dns compara la zona
-# generada con `docker inspect`. rrhh -> erpnext-hr: es el nginx de ERPNext, el unico contenedor de RRHH que atiende HTTP
-# a los usuarios (escucha en 8080 y es el que publica ERPNEXT_PORT en el host); erpnext-backend (gunicorn, 8000) no
-# publica nada y solo se le llega a traves de ese nginx. Comprobado con docker inspect el 26/09/2026.
-ZONA_ESPERADA = {"dns": ("dns-interno", 99), "ldap": ("samba-ad", 99), "ntp": ("ntp-interno", 99),
-                 "openvpms": ("openvpms-app", 10), "pretix": ("pretix-web", 20), "inventree": ("inventree-app", 30),
-                 "rrhh": ("erpnext-hr", 40)}
-# Acceso por nombre a traves del proxy web (proxy-web, solo en vlan99_infra). Por aplicacion: contenedor e IP en vlan99 a
-# la que llega el proxy, pagina HTML que se pide (la de login: la primera que ve un usuario) y variable de test.env con el
-# puerto del acceso directo. De esa pagina se saca el primer CSS/JS referenciado y tambien se pide (H22: un 200 del HTML
-# no prueba que la web funcione; InvenTree llego a servir el HTML sin estaticos).
-WEB = {"openvpms": ("openvpms-app", "/openvpms/login", "OPENVPMS_PORT", 8080),
-       "pretix": ("pretix-web", "/control/login", "PRETIX_PORT", 80),
-       "inventree": ("inventree-app", "/web/", "INVENTREE_PORT", 8000),
-       "rrhh": ("erpnext-hr", "/login", "ERPNEXT_PORT", 8080)}
-# La vista lan solo anuncia las aplicaciones y el DNS; ldap, ntp y la zona AD no se publican a la LAN (NXDOMAIN a proposito).
-LAN_SI = ["openvpms", "pretix", "inventree", "rrhh", "dns"]
-LAN_NO = ["ldap", "ntp", "ad"]
-# Samba AD DC: realm, dominio de la zona AD (reenviada por bind9) y grupos por departamento con sus usuarios de prueba.
+# Servicios por TCP publicados en HOST_IP: (nombre, contenedor, puerto dentro del contenedor, variable de test.env con el
+# puerto publicado, valor por defecto, tambien en 127.0.0.1). Las 4 apps se publican ademas en 127.0.0.1 con el mismo
+# puerto; erpnext-hr es el nginx de ERPNext, el unico contenedor de RRHH que publica (erpnext-backend, gunicorn, no).
+SERVICIOS_TCP = [("openvpms", "openvpms-app", "8080/tcp", "OPENVPMS_PORT", 18080, True),
+                 ("pretix", "pretix-web", "80/tcp", "PRETIX_PORT", 18082, True),
+                 ("inventree", "inventree-app", "8000/tcp", "INVENTREE_PORT", 18083, True),
+                 ("erpnext", "erpnext-hr", "8080/tcp", "ERPNEXT_PORT", 18081, True),
+                 ("proxy", "proxy-web", "80/tcp", "HTTP_PORT", 80, False),
+                 ("ldap", "samba-ad", "389/tcp", "LDAP_PORT", 1389, False),
+                 ("ldaps", "samba-ad", "636/tcp", "LDAPS_PORT", 1636, False),
+                 ("dns", "dns-interno", "53/tcp", "DNS_PORT", 1053, False)]
+SERVICIOS_UDP = [("dns", "dns-interno", "53/udp", "DNS_PORT", 1053), ("ntp", "ntp-interno", "123/udp", "NTP_PORT", 1123)]
+# Bases de datos y Redis: se hablan por nombre dentro de la red y NO se publican. contenedor -> puerto en el que escucha.
+SIN_PUBLICAR = {"openvpms-db": 3306, "pretix-db": 5432, "pretix-redis": 6379, "inventree-db": 5432, "erpnext-db": 3306,
+                "erpnext-redis-cache": 6379, "erpnext-redis-queue": 6379}
+# Unicas IP fijas de la red: el DC se provisiona con la suya y la delegacion de ad.reservaviva.lan la necesita.
+SUFIJO_DC, SUFIJO_DNS = 10, 11
+ZONA_NOMBRES = ["dns", "ldap", "ntp", "openvpms", "pretix", "inventree", "rrhh"]   # todos -> HOST_IP
+# Acceso por nombre a traves del proxy web. Por aplicacion: nombre, pagina HTML que se pide (la de login: la primera que
+# ve un usuario) y servicio de SERVICIOS_TCP con el puerto del acceso directo. De esa pagina se saca el primer CSS/JS
+# referenciado y tambien se pide (H22: un 200 del HTML no prueba que la web funcione; InvenTree llego a servir el HTML
+# sin estaticos).
+WEB = {"openvpms": ("/openvpms/login", "openvpms"), "pretix": ("/control/login", "pretix"),
+       "inventree": ("/web/", "inventree"), "rrhh": ("/login", "erpnext")}
+# Samba AD DC: realm, dominio de la zona AD (delegada por bind9) y grupos por departamento con sus usuarios de prueba.
 REALM_AD = "AD.RESERVAVIVA.LAN"
 DOMINIO_AD = f"ad.{DOMINIO}"
 GRUPOS_AD = {"GG-Medica": ["vet.prueba"], "GG-Operaciones": ["logistica.prueba", "taquilla.prueba"],
@@ -101,18 +111,6 @@ def origen_para(ip):
         return o
     except OSError as e:
         return f"?({e.strerror})"
-
-
-def rutas():
-    out = []
-    try:
-        ip = lambda h: socket.inet_ntoa(struct.pack("<L", int(h, 16)))
-        for l in open("/proc/net/route").read().splitlines()[1:]:
-            f = l.split()
-            out.append(f"{f[0]} dest={ip(f[1])} mask={ip(f[7])} gw={ip(f[2])}")
-    except OSError as e:
-        out.append(f"no se pudo leer /proc/net/route: {e}")
-    return out
 
 
 def dns_paquete(nombre, tipo=1, ident=0x1234):
@@ -237,32 +235,46 @@ def sntp_consulta(servidor, timeout=3.0, puerto=123):
         s.close()
 
 
-def sonda(spec):
-    """Se ejecuta dentro del contenedor efimero. Imprime UNA linea JSON con los resultados literales."""
-    res = {"rutas": rutas(), "tcp": [], "dns": [], "ntp": []}
+
+def tls_estado(ip, port, nombre, ca_pem, timeout=5.0):
+    """Handshake TLS contra ip:port verificando la cadena con `ca_pem` y que el certificado cubra `nombre` (un nombre DNS
+    o una IP, que se compara con el SAN). Devuelve (estado, detalle): VERIFICADO | TLS_FALLA | SIN_CONEXION."""
+    try:
+        ctx = ssl.create_default_context(cadata=ca_pem or None)   # sin CA, la del sistema: no verificara
+        with socket.create_connection((ip, port), timeout=timeout) as crudo:
+            with ctx.wrap_socket(crudo, server_hostname=nombre) as s:
+                cert = s.getpeercert()
+                san = [f"{k}:{v}" for k, v in cert.get("subjectAltName", ())]
+                return "VERIFICADO", f"{s.version()} verifica la CA y cubre '{nombre}'; SAN={san}"
+    except ssl.SSLError as e:   # antes que OSError: SSLError la hereda
+        return "TLS_FALLA", f"{type(e).__name__}: {e}"
+    except OSError as e:
+        return "SIN_CONEXION", f"errno={e.errno} {e.strerror or e}"
+
+
+def medir(spec):
+    """Resultados literales de una medicion: TCP, TLS, DNS (udp) y NTP. Corre en el host o dentro de un contenedor."""
+    res = {"tcp": [], "tls": [], "dns": [], "ntp": []}
     for et, ip, port in spec.get("tcp", []):
         est, det, seg = tcp_estado(ip, port)
         res["tcp"].append({"et": et, "ip": ip, "port": port, "estado": est, "detalle": det, "seg": seg,
                            "origen": origen_para(ip)})
+    for et, ip, port, nombre in spec.get("tls", []):
+        est, det = tls_estado(ip, port, nombre, spec.get("ca", ""))
+        res["tls"].append({"et": et, "ip": ip, "port": port, "nombre": nombre, "estado": est, "detalle": det})
     for item in spec.get("dns", []):
-        et, srv, nombre, *resto = item   # resto opcional: [tipo] (1=A por defecto, 33=SRV)
-        res["dns"].append({"et": et, "srv": srv, "nombre": nombre, **dns_consulta(srv, nombre, tipo=(resto[0] if resto else 1))})
-    for et, srv in spec.get("ntp", []):
-        res["ntp"].append({"et": et, "srv": srv, **sntp_consulta(srv)})
-    print(json.dumps(res))
+        et, srv, nombre, *resto = item   # resto opcional: [tipo, puerto] (tipo 1=A por defecto, 33=SRV; puerto 53)
+        tipo, puerto = (resto + [1, 53][len(resto):])[:2]
+        res["dns"].append({"et": et, "srv": srv, "puerto": puerto, "nombre": nombre,
+                           **dns_consulta(srv, nombre, tipo=tipo, puerto=puerto)})
+    for et, srv, *resto in spec.get("ntp", []):   # resto opcional: [puerto] (123 por defecto)
+        res["ntp"].append({"et": et, "srv": srv, **sntp_consulta(srv, puerto=(resto[0] if resto else 123))})
+    return res
 
 
-def juzga_negativo(estado, control_origen_ok, control_destino_ok):
-    """PASS solo si NO hay ruta/respuesta Y los dos controles prueban que la prueba es valida."""
-    if not control_origen_ok:
-        return "FAIL", "inconcluyente: el control positivo del ORIGEN fallo (la herramienta o la red del cliente no funcionan)"
-    if not control_destino_ok:
-        return "FAIL", "inconcluyente: el DESTINO no contesto ni desde su propia VLAN; un timeout no prueba segmentacion"
-    if estado in ("SIN_RESPUESTA", "SIN_RUTA"):
-        return "PASS", f"{estado}: no hay camino hacia el destino, que si contesta desde su VLAN"
-    if estado in ("ABIERTO", "RECHAZADO"):
-        return "FAIL", f"SEGMENTACION ROTA: el destino contesto ({estado})"
-    return "FAIL", f"error de la sonda ({estado}), no de la red"
+def sonda(spec):
+    """Se ejecuta dentro del contenedor efimero. Imprime UNA linea JSON con los resultados literales."""
+    print(json.dumps(medir(spec)))
 
 
 # ------------------------------------------------------------------------------------------------
@@ -301,7 +313,7 @@ def imagen_de(contenedor):
 
 
 def vantage(red, spec, imagen, script):
-    """Contenedor efimero. `red` = nombre de red, o 'container:X' para compartir la pila de red de una app dual-homed."""
+    """Contenedor efimero. `red` = nombre de red, o 'container:X' para compartir la pila de red de una app."""
     cmd = ["docker", "run", "--rm", "-i", "--pull=never", "--label", ETIQUETA, "--network", red,
            "--entrypoint", "python3", imagen, "-", "--sonda", json.dumps(spec)]
     r = sh(cmd, entrada=script, timeout=240)
@@ -315,12 +327,13 @@ def linea_tcp(t):
     return f"{t['et']} {t['ip']}:{t['port']} desde {t['origen']} -> {t['estado']} ({t['detalle']}; {t['seg']}s)"
 
 
-def tcp_de(res, prefijo):
-    return [t for t in res.get("tcp", []) if t["et"].startswith(prefijo)]
-
-
 def cuerpo_error(res):
     return res.get("error", "") if isinstance(res, dict) else ""
+
+
+def resp(d):
+    """Una respuesta DNS/NTP sin las claves de etiquetado, para mostrarla como evidencia."""
+    return {k: v for k, v in d.items() if k not in ("et", "srv", "nombre", "puerto")}
 
 
 def zona(fichero=ZONA):
@@ -330,214 +343,244 @@ def zona(fichero=ZONA):
             if (m := re.match(r"^(\S+)\s+IN\s+A\s+(\S+)", l))}
 
 
-def ip_real(ctx, contenedor, d):
-    """IP del contenedor en la VLAN d ('' si no esta en ella). Reutiliza lo ya inspeccionado en los prerrequisitos."""
-    if contenedor in ctx["ips"]:
-        return ctx["ips"][contenedor].get(d, "")
-    return (redes_de(contenedor) or {}).get(ctx["pref"] + RED[d], "")
-
-
 def estado_docker():
     r = sh(["systemctl", "show", "docker", "-p", "ExecMainStartTimestamp"], timeout=30)
     return (r.stdout or r.stderr).strip() or f"rc={r.returncode}"
 
 
+def config(clave, defecto=""):
+    """Valor de una variable: el entorno (el lanzador exporta HOST_IP y `--ip` lo sobrescribe) o, si falta, sistema/test.env."""
+    return os.environ.get(clave) or valor_env(clave, defecto)
+
+
+def parse_bindings(texto):
+    """PortBindings de `docker inspect` -> {'80/tcp': [(HostIp, HostPort), ...]}; {} si el contenedor no publica nada."""
+    try:
+        crudo = json.loads(texto) or {}
+        return {p: [(b.get("HostIp") or "0.0.0.0", int(b["HostPort"])) for b in (v or [])] for p, v in crudo.items()}
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
+def bindings(contenedor):
+    r = sh(["docker", "inspect", contenedor, "--format", "{{json .HostConfig.PortBindings}}"], timeout=30)
+    return parse_bindings(r.stdout)
+
+
+def publicado(contenedor, puerto):
+    """(ip, puerto) en que Docker publica `puerto` (p. ej. '80/tcp') del contenedor, o None. 0.0.0.0 -> 127.0.0.1."""
+    b = bindings(contenedor).get(puerto)
+    if not b:
+        return None
+    ip, p = b[0]
+    return ("127.0.0.1" if ip in ("0.0.0.0", "") else ip), p
+
+
+def puertos():
+    """Puerto publicado de cada servicio (clave = nombre de SERVICIOS_TCP, mas 'ntp')."""
+    p = {n: int(config(var, str(defecto))) for n, _, _, var, defecto, _ in SERVICIOS_TCP}
+    p["ntp"] = int(config("NTP_PORT", "1123"))
+    return p
+
+
 def bloque_prereq():
     imprime("\n== Prerrequisitos")
-    ips, ok = {}, True
-    for c in ["samba-ad", "dns-interno", "ntp-interno"] + [a for a, _ in APPS.values()]:
-        redes = redes_de(c)
-        if redes is None:
+    host = config("HOST_IP")
+    if not host:
+        reg("HOST_IP definida", "FAIL", "ni el entorno ni sistema/test.env la definen (levantar-sistema la exporta; `--ip X` la fija)")
+        return None
+    nombres = (["samba-ad", "dns-interno", "ntp-interno", "proxy-web", "erpnext-backend"]
+               + [c for _, c, _, _, _, _ in SERVICIOS_TCP] + list(SIN_PUBLICAR))
+    redes, ok = {}, True
+    for c in dict.fromkeys(nombres):
+        r = redes_de(c)
+        if r is None:
             reg(f"contenedor {c} existe", "FAIL", "docker inspect fallo: el arnes no esta levantado o el nombre es otro")
             ok = False
-            continue
-        ips[c] = redes
+        else:
+            redes[c] = r
     if not ok:
         return None
-    pref = next((k[:-len(RED[99])] for k in ips["samba-ad"] if k.endswith(RED[99])), None)
-    if pref is None:
-        reg("samba-ad esta en vlan99_infra", "FAIL", f"redes de samba-ad: {list(ips['samba-ad'])}")
+    red = next((k for k in redes["samba-ad"] if k.endswith(RED)), None)
+    if red is None:
+        reg(f"samba-ad esta en la red {RED}", "FAIL", f"redes de samba-ad: {list(redes['samba-ad'])}")
         return None
-    por_depto = {}
-    for nombre, redes in ips.items():
-        por_depto[nombre] = {v: redes.get(pref + n, "") for v, n in RED.items()}
-    faltan = [f"{a}@vlan{d}" for a, _ in APPS.values() for d in (10, 20, 30, 40, 99)
-              if (d == 99 or APPS[d][0] == a) and not por_depto[a][d]]  # d == 99 primero: APPS no tiene clave 99
-    for d, (a, _) in APPS.items():
-        if not por_depto[a][d] or not por_depto[a][99]:
-            faltan.append(f"{a} no esta dual-homed (vlan{d} + vlan99)")
-    if faltan:
-        reg("las 4 apps estan en su VLAN y en vlan99_infra con IP", "FAIL", "; ".join(sorted(set(faltan))))
-        return None
-    reg("las 4 apps estan en su VLAN y en vlan99_infra con IP", "PASS",
-        "\n".join(f"{a}: vlan{d}={por_depto[a][d]} vlan99={por_depto[a][99]}" for d, (a, _) in APPS.items())
-        + f"\nsamba-ad={por_depto['samba-ad'][99]} dns-interno={por_depto['dns-interno'][99]} ntp-interno={por_depto['ntp-interno'][99]}")
-    return {"ips": por_depto, "pref": pref, "img_py": imagen_de("pretix-web"), "img_ntp": imagen_de("ntp-interno")}
+    pref = red[:-len(RED)]
+    fuera = {c: r for c, r in redes.items() if not r.get(red)}
+    reg(f"los {len(redes)} contenedores comprobados estan en la red unica {red} con IP", "PASS" if not fuera else "FAIL",
+        "\n".join(f"{c}: {r.get(red) or '(sin IP en esa red)'}" for c, r in redes.items()))
+    otras = sorted({k for r in redes.values() for k in r} - {red, pref + RED_ERP})
+    reg(f"no hay mas redes que {RED} y {RED_ERP}", "PASS" if not otras else "FAIL",
+        f"redes encontradas en esos contenedores: {sorted({k for r in redes.values() for k in r})}")
+    erp = [c for c in ("erpnext-backend", "erpnext-hr", "erpnext-db") if not redes[c].get(pref + RED_ERP)]
+    reg(f"erpnext-backend, erpnext-hr y erpnext-db estan en {RED_ERP}", "PASS" if not erp else "FAIL",
+        f"fuera de {RED_ERP}: {erp or 'ninguno'}")
+    base = config("NET_INTERNA", "10.10.99")
+    fijas = {"samba-ad": f"{base}.{SUFIJO_DC}", "dns-interno": f"{base}.{SUFIJO_DNS}"}
+    reg("IP fijas: samba-ad y dns-interno (el resto, dinamica)", "PASS" if all(redes[c][red] == ip for c, ip in fijas.items()) else "FAIL",
+        "\n".join(f"{c}: esperada {ip}, real {redes[c][red]}" for c, ip in fijas.items()))
+    pub = publicado("proxy-web", "80/tcp")
+    reg(f"HOST_IP={host} coincide con la IP en que Docker publica proxy-web", "PASS" if pub and pub[0] == host else "FAIL",
+        f"HOST_IP (entorno o test.env)={host}; proxy-web 80/tcp publicado en {pub}")
+    return {"host": host, "p": puertos(), "red": red, "pref": pref, "ip_dc": redes["samba-ad"][red],
+            "ip_dns": redes["dns-interno"][red], "img_py": imagen_de("pretix-web"), "img_ntp": imagen_de("ntp-interno")}
 
 
 def bloque_medicion(ctx, script):
-    """Todos los contenedores efimeros de sondeo, juntos, para poder cruzar controles despues."""
-    ips, pref, img = ctx["ips"], ctx["pref"], ctx["img_py"]
-    ldap = ips["samba-ad"][99]
-    dns_ip, ntp_ip = ips["dns-interno"][99], ips["ntp-interno"][99]
-    m = {"dept": {}, "dual": {}}
-    m["infra"] = vantage(pref + RED[99], {
-        "tcp": [("samba-ad:389", ldap, 389), ("samba-ad:636", ldap, 636)],
-        "dns": [("zona", dns_ip, CONSULTA_DNS)], "ntp": [("ntp", ntp_ip)]}, img, script)
-    for d, (app, port) in APPS.items():
-        tcp = [(f"control {app}@vlan{d}", ips[app][d], port)]
-        for e, (app_e, port_e) in APPS.items():
-            if e != d:
-                tcp += [(f"{app_e}@vlan{e}", ips[app_e][e], port_e), (f"{app_e}@vlan99", ips[app_e][99], port_e)]
-        tcp += [("samba-ad:389", ldap, 389), ("samba-ad:636", ldap, 636)]
-        m["dept"][d] = vantage(pref + RED[d], {"tcp": tcp, "dns": [("dns", dns_ip, CONSULTA_DNS)],
-                                               "ntp": [("ntp", ntp_ip)]}, img, script)
-        tcp = [("samba-ad:389", ldap, 389), ("samba-ad:636", ldap, 636)]
-        for e, (app_e, port_e) in APPS.items():
-            if e != d:
-                tcp += [(f"{app_e}@vlan{e}", ips[app_e][e], port_e), (f"{app_e}@vlan99", ips[app_e][99], port_e)]
-        m["dual"][d] = vantage(f"container:{app}", {"tcp": tcp, "dns": [("dns", dns_ip, CONSULTA_DNS)],
-                                                    "ntp": [("ntp", ntp_ip)]}, img, script)
+    """Todas las sondas, juntas: el anfitrion, un contenedor efimero en la red y la pila de red de las apps con LDAPS."""
+    host, p = ctx["host"], ctx["p"]
+    ca = CA_CRT.read_text(encoding="utf8") if CA_CRT.exists() else ""
+    tcp = [(n, host, p[n]) for n, *_ in SERVICIOS_TCP]
+    tcp += [(f"cerrado {c}", host, pto) for c, pto in SIN_PUBLICAR.items()]
+    spec = {"tcp": tcp, "tls": [("ldaps nombre", host, p["ldaps"], CONSULTA_DNS), ("ldaps IP", host, p["ldaps"], host)],
+            "ca": ca, "dns": [("dns", host, CONSULTA_DNS, 1, p["dns"])], "ntp": [("ntp", host, p["ntp"])]}
+    m = {"ca": bool(ca), "host": medir(spec), "app": {}}
+    # El contenedor efimero ademas busca cada BD/Redis por su NOMBRE: es el control del destino de los negativos.
+    interno = [(f"interno {c}", c, pto) for c, pto in SIN_PUBLICAR.items()]
+    m["red"] = vantage(ctx["red"], {**spec, "tcp": tcp + interno}, ctx["img_py"], script)
+    for app in ("inventree-app", "erpnext-backend"):
+        m["app"][app] = vantage(f"container:{app}", {"tcp": [("ldaps", host, p["ldaps"])],
+                                                     "tls": [("ldaps", host, p["ldaps"], CONSULTA_DNS)], "ca": ca},
+                                ctx["img_py"], script)
     return m
 
 
-def bloque_segmentacion(ctx, m):
-    imprime("\n== 1. Segmentacion (prueba negativa). PASS = 'no hay camino', nunca 'no respondio' sin controles")
-    ips = ctx["ips"]
-    ctl_ok = {}
-    for d, (app, _) in APPS.items():
-        r = m["dept"][d]
+def fila(res, lista, et):
+    return next((x for x in res.get(lista, []) if x["et"] == et), None)
+
+
+def bloque_puertos(ctx, m):
+    imprime("\n== 1. Puertos: una IP, un puerto por servicio. Ya no hay segmentacion entre departamentos; se comprueba que "
+            "cada servicio esta donde debe y que BD y Redis no se publican")
+    host, p = ctx["host"], ctx["p"]
+    imprime(f"  -- publicacion (docker inspect): HOST_IP={host}; las 4 apps ademas en 127.0.0.1")
+    for n, cont, interno, var, _, loopback in SERVICIOS_TCP:
+        esperado = {(host, p[n])} | ({("127.0.0.1", p[n])} if loopback else set())
+        real = set(bindings(cont).get(interno, []))
+        reg(f"{cont} publica {interno} en {', '.join(f'{i}:{q}' for i, q in sorted(esperado))} ({var})",
+            "PASS" if real == esperado else "FAIL", f"publicado: {sorted(real) or '(nada)'}")
+    for n, cont, interno, var, _ in SERVICIOS_UDP:
+        esperado = {(host, p[n] if n == "ntp" else p["dns"])}
+        real = set(bindings(cont).get(interno, []))
+        reg(f"{cont} publica {interno} en {host}:{next(iter(esperado))[1]} ({var})", "PASS" if real == esperado else "FAIL",
+            f"publicado: {sorted(real) or '(nada)'}")
+
+    def abierto(res, titulo, origen):
+        if "error" in res:
+            reg(f"{titulo}: contenedor de sondeo", "FAIL", cuerpo_error(res))
+            return
+        for n, cont, *_ in SERVICIOS_TCP:
+            t = fila(res, "tcp", n)
+            reg(f"{origen} -> {host}:{p[n]} ({n}, {cont}) ABIERTO", "PASS" if t["estado"] == "ABIERTO" else "FAIL", linea_tcp(t))
+        d = fila(res, "dns", "dns")
+        reg(f"{origen} -> {host}:{p['dns']}/udp (dns): bind9 responde por UDP", "PASS" if "error" not in d and d["rcode"] == 0 else "FAIL",
+            f"respuesta={resp(d)}")
+        x = fila(res, "ntp", "ntp")
+        reg(f"{origen} -> {host}:{p['ntp']}/udp (ntp): ntp-interno responde por UDP",
+            "PASS" if "error" not in x and x["modo"] == 4 else "FAIL", f"respuesta={resp(x)}")
+
+    imprime("  -- a) desde el anfitrion (como un equipo de la LAN que llega a HOST_IP)")
+    abierto(m["host"], "anfitrion", "anfitrion")
+    imprime("  -- b) desde un contenedor efimero de la red (el camino real proxy -> apps)")
+    abierto(m["red"], "contenedor en la red", "contenedor")
+    imprime(f"  -- c) desde la pila de red de las apps que usan LDAPS: {host}:{p['ldaps']} con TLS verificado (CA del proyecto, "
+            f"nombre {CONSULTA_DNS})")
+    if not m["ca"]:
+        reg("CA del proyecto disponible", "FAIL", f"falta {CA_CRT}: levantar-sistema.sh preparar la genera")
+    for app, r in m["app"].items():
         if "error" in r:
-            reg(f"vlan{d}: contenedor de sondeo", "FAIL", cuerpo_error(r))
-            ctl_ok[d] = False
+            reg(f"{app} (pila de red): contenedor de sondeo", "FAIL", cuerpo_error(r))
             continue
-        c = tcp_de(r, "control")[0]
-        ctl_ok[d] = c["estado"] == "ABIERTO"
-        reg(f"control positivo vlan{d}: un cliente en vlan{d} alcanza {app}", "PASS" if ctl_ok[d] else "FAIL",
-            linea_tcp(c) + "\nrutas del cliente: " + " | ".join(r["rutas"]))
-    imprime("  -- cliente SOLO en su VLAN de departamento (no dual-homed)")
-    for d in APPS:
-        r = m["dept"][d]
-        if "error" in r:
-            continue
-        for t in r["tcp"]:
-            if t["et"].startswith("control"):
-                continue
-            if t["et"].startswith("samba-ad"):
-                infra_ok = any(x["estado"] == "ABIERTO" and x["et"] == t["et"] for x in m["infra"].get("tcp", []))
-                v, why = juzga_negativo(t["estado"], ctl_ok[d], infra_ok)
-                nombre = f"vlan{d} (solo departamento) -> {t['et']} debe FALLAR (no esta dual-homed)"
-            else:
-                app_t, e = t["et"].split("@vlan")
-                destino_ok = ctl_ok.get(APP_DEPTO[app_t], False)   # la app escucha en 0.0.0.0: si contesta en su VLAN, escucha
-                v, why = juzga_negativo(t["estado"], ctl_ok[d], destino_ok)
-                nombre = f"vlan{d} -> {t['et']} debe FALLAR"
-            reg(nombre, v, linea_tcp(t) + f"\nveredicto: {why}")
-    imprime("  -- cliente con la pila de red de la app (dual-homed): SI llega a infraestructura, NO a otros departamentos")
-    for d, (app, _) in APPS.items():
-        r = m["dual"][d]
-        if "error" in r:
-            reg(f"{app} (dual-homed): contenedor de sondeo", "FAIL", cuerpo_error(r))
-            continue
-        for t in tcp_de(r, "samba-ad"):
-            reg(f"{app} -> {t['et']} debe FUNCIONAR (cruce previsto hacia infraestructura)",
-                "PASS" if t["estado"] == "ABIERTO" else "FAIL", linea_tcp(t))
-        ctl_dual = all(t["estado"] == "ABIERTO" for t in tcp_de(r, "samba-ad"))
-        for t in r["tcp"]:
-            if t["et"].startswith("samba-ad"):
-                continue
-            app_t, e = t["et"].split("@vlan")
-            e = int(e)
-            if e == 99:
-                reg(f"{app} -> {t['et']} (otra app, por la VLAN de infraestructura)", "INFO",
-                    linea_tcp(t) + "\nHALLAZGO a leer: vlan99_infra es un unico dominio L2 compartido por las 4 apps; si sale ABIERTO, "
-                    "un bridge NO impide que dos apps de departamentos distintos hablen entre si por infraestructura. "
-                    "En el diseno de 3 equipos (anexo diseno-red/) lo limita su matriz de firewall, que un host no reproduce.")
-            else:
-                v, why = juzga_negativo(t["estado"], ctl_dual, ctl_ok.get(e, False))
-                reg(f"{app} -> {t['et']} debe FALLAR (departamentos aislados aunque la app sea dual-homed)", v,
-                    linea_tcp(t) + f"\nveredicto: {why}")
+        t, s = fila(r, "tcp", "ldaps"), fila(r, "tls", "ldaps")
+        reg(f"{app} -> {host}:{p['ldaps']} (ldaps) ABIERTO", "PASS" if t["estado"] == "ABIERTO" else "FAIL", linea_tcp(t))
+        reg(f"{app} -> ldaps {host}:{p['ldaps']}: handshake TLS verificando la CA con el nombre {CONSULTA_DNS}",
+            "PASS" if s["estado"] == "VERIFICADO" else "FAIL", f"{s['estado']}: {s['detalle']}")
+    s = fila(m["host"], "tls", "ldaps IP")
+    reg(f"el certificado LDAPS cubre la IP {host} (SAN IP) y verifica con la CA", "PASS" if s["estado"] == "VERIFICADO" else "FAIL",
+        f"{s['estado']}: {s['detalle']}")
+    imprime("  -- d) negativos: BD y Redis NO se publican. Controles: HOST_IP alcanzable (proxy abierto) y el servicio "
+            "escucha dentro de la red, por su nombre")
+    ctl_origen = fila(m["host"], "tcp", "proxy")["estado"] == "ABIERTO"
+    for c, pto in SIN_PUBLICAR.items():
+        pb = bindings(c)
+        reg(f"{c}: sin PortBindings", "PASS" if not pb else "FAIL", f"PortBindings={pb or '{}'}")
+        dentro = fila(m["red"], "tcp", f"interno {c}") if "error" not in m["red"] else None
+        ctl_destino = bool(dentro) and dentro["estado"] == "ABIERTO"
+        t = fila(m["host"], "tcp", f"cerrado {c}")
+        if not ctl_origen:
+            v, why = "FAIL", "inconcluyente: HOST_IP no es alcanzable desde el anfitrion (el proxy no contesta)"
+        elif not ctl_destino:
+            v, why = "FAIL", "inconcluyente: el servicio no contesta ni dentro de la red, por su nombre"
+        elif t["estado"] in ("SIN_RESPUESTA", "SIN_RUTA", "RECHAZADO"):
+            v, why = "PASS", f"{t['estado']}: nada escucha en {host}:{pto}, y {c}:{pto} SI contesta dentro de la red"
+        elif t["estado"] == "ABIERTO":
+            v, why = "FAIL", f"{host}:{pto} esta ABIERTO: o {c} se publica o otro servicio del anfitrion usa ese puerto"
+        else:
+            v, why = "FAIL", f"error de la sonda ({t['estado']}), no de la red"
+        reg(f"{c}: {host}:{pto} NO accesible desde el anfitrion", v,
+            linea_tcp(t) + f"\ncontrol dentro de la red: {linea_tcp(dentro) if dentro else '(sin medir)'}\nveredicto: {why}")
 
 
 def bloque_dns(ctx, m, zonas):
-    imprime("\n== 2. DNS, vista interna: se consulta a dns-interno de verdad desde vlan99 (los contenedores normales usan "
-            "extra_hosts / DNS de Docker)")
-    dns_ip = ctx["ips"]["dns-interno"][99]
+    host, p = ctx["host"], ctx["p"]
+    dnsp = p["dns"]
+    imprime(f"\n== 2. DNS: una vista y una zona; bind9 consultado de verdad en {host}:{dnsp} (udp y tcp)")
     if zonas is None:
-        reg(f"zona {DOMINIO} (vista interna) generada", "FAIL", f"falta {ZONA}. Generarla con: levantar-sistema.sh preparar.")
+        reg(f"zona {DOMINIO} generada", "FAIL", f"falta {ZONA}. Generarla con: levantar-sistema.sh preparar.")
         return
-    # "." en la clave de la zona = glue de una delegacion (p. ej. "dc1.ad" -> dc1.ad.reservaviva.lan, el glue de
-    # "ad IN NS dc1.ad.reservaviva.lan." que bind9 delega a samba-ad): esa direccion es correcta pero NO la sirve
-    # bind9 con autoridad (aa=0), la resuelve por recursion hacia el propio DC. Los nombres de servicio (dns, ldap,
-    # ntp, las 4 apps) son etiquetas planas y siguen siendo autoritativos (aa=1) como siempre.
-    nombres = [(f"{h}.{DOMINIO}", ip, "." in h) for h, ip in zonas.items()]
-    inf = vantage(ctx["pref"] + RED[99], {"dns": [(h, dns_ip, h) for h, _, _ in nombres] + [
-        ("inexistente", dns_ip, f"no-existe-xyz.{DOMINIO}"), ("externo", dns_ip, "example.com")]},
-        ctx["img_py"], SCRIPT)
-    if "error" in inf:
-        reg("contenedor de sondeo en vlan99", "FAIL", cuerpo_error(inf))
+    faltan = [h for h in ZONA_NOMBRES if h not in zonas]
+    reg(f"la zona tiene los {len(ZONA_NOMBRES)} nombres {', '.join(ZONA_NOMBRES)} y todos apuntan a HOST_IP ({host})",
+        "PASS" if not faltan and all(zonas[h] == host for h in ZONA_NOMBRES) else "FAIL",
+        f"faltan: {faltan or 'ninguno'}; la zona dice { {h: zonas.get(h) for h in ZONA_NOMBRES} }")
+    # Desde un contenedor: los nombres por HOST_IP:DNS_PORT, y la delegacion/recursion directo a dns-interno (el origen de
+    # una consulta que entra por el puerto publicado es el gateway de la red, que la ACL deja sin recursion).
+    ip_dns = ctx["ip_dns"]
+    rc = vantage(ctx["red"], {"dns": [(h, host, f"{h}.{DOMINIO}", 1, dnsp) for h in ZONA_NOMBRES] + [
+        ("glue", ip_dns, f"dc1.{DOMINIO_AD}"), ("externo", ip_dns, "example.com")]}, ctx["img_py"], SCRIPT)
+    if "error" in rc:
+        reg("contenedor de sondeo en la red (DNS)", "FAIL", cuerpo_error(rc))
         return
-    por = {d["et"]: d for d in inf["dns"]}
-    for h, ip, delegado in nombres:
-        d = por[h]
-        if delegado:
-            ok = "error" not in d and d["rcode"] == 0 and not d["aa"] and d["respuestas"] == [ip]
-            reg(f"{h} -> {ip} (glue de delegacion: NO autoritativo aqui, se resuelve por recursion hacia samba-ad)",
-                "PASS" if ok else "FAIL", f"servidor={dns_ip} respuesta={ {k: v for k, v in d.items() if k not in ('et', 'srv')} }")
-        else:
-            ok = "error" not in d and d["rcode"] == 0 and d["aa"] and d["respuestas"] == [ip]
-            reg(f"{h} -> {ip} (autoritativo, igual que la zona)", "PASS" if ok else "FAIL",
-                f"servidor={dns_ip} respuesta={ {k: v for k, v in d.items() if k not in ('et', 'srv')} }")
-    d = por["inexistente"]
-    reg("nombre inexistente -> NXDOMAIN autoritativo (distingue 'nombre desconocido' de 'sin respuesta')",
-        "PASS" if "error" not in d and d["rcode"] == 3 and d["aa"] else "FAIL", f"respuesta={d}")
+    por = {d["et"]: d for d in rc["dns"]}
+    for h in ZONA_NOMBRES:
+        fq = f"{h}.{DOMINIO}"
+        vias = {"udp (anfitrion)": dns_consulta(host, fq, puerto=dnsp), "tcp (anfitrion)": dns_consulta_tcp(host, fq, puerto=dnsp),
+                "udp (contenedor)": por[h]}
+        bien = {k: "error" not in d and d["rcode"] == 0 and d["aa"] and d["respuestas"] == [host] for k, d in vias.items()}
+        reg(f"{fq} -> {host}: autoritativo por {', '.join(vias)}", "PASS" if all(bien.values()) else "FAIL",
+            "\n".join(f"{k} {host}:{dnsp}: " + ("ok " if bien[k] else "MAL ") + f"respuesta={resp(d)}" for k, d in vias.items()))
+    d1, d2 = (dns_consulta(host, f"no-existe-xyz.{DOMINIO}", puerto=dnsp), dns_consulta_tcp(host, f"no-existe-xyz.{DOMINIO}", puerto=dnsp))
+    reg("nombre inexistente -> NXDOMAIN autoritativo, por udp y tcp (distingue 'nombre desconocido' de 'sin respuesta')",
+        "PASS" if all("error" not in d and d["rcode"] == 3 and d["aa"] for d in (d1, d2)) else "FAIL", f"udp={d1}\ntcp={d2}")
+    d = dns_consulta(host, "example.com", puerto=dnsp)
+    reg(f"example.com desde el anfitrion ({host}:{dnsp}) -> REFUSED (el anfitrion y la LAN no tienen recursion)",
+        "PASS" if "error" not in d and d["rcode"] == 5 else "FAIL", f"respuesta={d}")
+    g = por["glue"]
+    reg(f"delegacion: dc1.{DOMINIO_AD} -> {ctx['ip_dc']} desde un contenedor ({ip_dns}:53; no autoritativo: bind9 la resuelve "
+        "por la delegacion hacia samba-ad)", "PASS" if "error" not in g and g["rcode"] == 0 and not g["aa"] and g["respuestas"] == [ctx["ip_dc"]] else "FAIL",
+        f"respuesta={resp(g)}")
     d = por["externo"]
-    # DESVIACION DEL PLAN (ver servicios/bind9/named.conf, vista "interna"): la delegacion real de ad.reservaviva.lan
-    # obliga a "recursion yes" para TODA la vista "interna" (BIND no permite acotar la recursion a una sola zona
-    # dentro de una vista); antes, con la zona "type forward" del plan original, alcanzaba con recursion solo para
-    # ese subdominio. El efecto practico hoy es que un cliente de red-interna YA NO recibe un REFUSED explicito para
-    # example.com, sino SERVFAIL: bind9 intenta recursionar de verdad y falla porque vlan99_infra no tiene salida a
-    # Internet. La propiedad de seguridad ("nunca se devuelve una IP real de Internet") se sigue cumpliendo, pero
-    # ahora depende de que esta VLAN no tenga salida, no de una politica explicita de bind9.
     ok = "error" not in d and d["rcode"] in (2, 5) and not d["respuestas"]
-    reg("example.com: sin resolucion real hacia Internet (SERVFAIL o REFUSED, sin respuestas)",
-        "PASS" if ok else "FAIL", f"respuesta={d}")
-    if ok and d.get("rcode") == 2:
-        reg("aviso: ya no es REFUSED sino SERVFAIL (recursion ahora es global para la vista 'interna', no solo "
-            "para ad.reservaviva.lan)", "INFO",
-            f"respuesta={d}\nRiesgo latente para pm/dev: si vlan99_infra alguna vez tuviera salida real a Internet, "
-            "esta vista SI recursionaria de verdad para cualquier cliente de red-interna (BIND no admite acotar la "
-            "recursion por zona dentro de una vista). Valorar una RPZ u otro control explicito si eso preocupa; hoy "
-            "el aislamiento es incidental (falta de ruta), no una politica de bind9.")
-    # Cada nombre de la zona debe resolver a la IP real (docker inspect) del contenedor que da ese servicio.
-    for h, (cont, d_) in ZONA_ESPERADA.items():
-        real = ip_real(ctx, cont, d_) or f"(sin IP en vlan{d_})"
-        nombre = f"zona interna: {h}.{DOMINIO} apunta a {cont} (su IP real en vlan{d_})"
-        if h not in zonas:
-            reg(nombre, "FAIL", f"la zona no tiene el nombre '{h}'; {cont} esta en {real}")
-        else:
-            reg(nombre, "PASS" if zonas[h] == real else "FAIL", f"la zona dice {zonas[h]}, el contenedor real esta en {real}")
-    imprime("  -- los clientes solo de departamento NO deben alcanzar el DNS interno (UDP; control = la consulta de arriba)")
-    ctl = all(por[h]["rcode"] == 0 for h, _, _ in nombres if "error" not in por[h]) and "error" not in por[nombres[0][0]]
-    for d_, (app, _) in APPS.items():
-        r = m["dept"][d_]
-        x = (r.get("dns") or [{}])[0]
-        if "error" in r:
-            continue
-        v = ("PASS" if ("error" in x and "timeout" in x["error"]) else "FAIL") if ctl else "FAIL"
-        reg(f"vlan{d_} (solo departamento) -> dns-interno {dns_ip}:53/udp debe quedar SIN RESPUESTA", v,
-            f"respuesta={ {k: v_ for k, v_ in x.items() if k not in ('et',)} }"
-            + ("" if ctl else "\ninconcluyente: el control desde vlan99 no obtuvo respuesta"))
-    for d_, (app, _) in APPS.items():
-        r = m["dual"][d_]
-        x = (r.get("dns") or [{}])[0]
-        reg(f"{app} (dual-homed) -> dns-interno debe RESPONDER", "PASS" if "error" not in x and x.get("rcode") == 0 else "FAIL",
-            f"respuesta={ {k: v for k, v in x.items() if k not in ('et',)} }")
+    reg(f"example.com desde un contenedor ({ip_dns}:53): sin resolucion real (SERVFAIL o REFUSED, sin respuestas)",
+        "PASS" if ok else "FAIL", f"respuesta={resp(d)}")
+    if ok and d["rcode"] == 2:
+        reg("aviso: los contenedores SI tienen recursion en bind9 (la delegacion de ad.reservaviva.lan la exige)", "INFO",
+            f"respuesta={resp(d)}\nSERVFAIL y no REFUSED: bind9 intenta recursionar. Que no resuelva example.com depende de la zona "
+            "'.' vacia de named.conf, no de la red: esta red SI tiene salida a Internet.")
+    # Con Docker Engine en WSL, dns-interno va a <IP>:DNS_PORT y el 53 de la LAN lo atiende el reenviador de Windows
+    # (sistema/reenviador-dns.ps1; ver docs/operacion.md). Se prueba esa ruta completa por UDP y TCP.
+    if dnsp != 53:
+        pista = ("\nsin respuesta en el 53: el reenviador de Windows no esta en marcha o no reenvia. "
+                 "Arrancarlo: .\\levantar-sistema.ps1 arrancar (Windows); comprobarlo: .\\levantar-sistema.ps1 estado")
+        for proto, consulta in (("udp", dns_consulta), ("tcp", dns_consulta_tcp)):
+            d = consulta(host, f"pretix.{DOMINIO}", puerto=53)
+            ok = "error" not in d and d["rcode"] == 0 and d["aa"] and d["respuestas"] == [host]
+            reg(f"reenviador de Windows: pretix.{DOMINIO} por {host}:53/{proto} (-> :{dnsp}) -> {host}",
+                "PASS" if ok else "FAIL", f"respuesta={d}" + ("" if ok else pista))
 
 
 def bloque_ntp(ctx, m):
+    host, pn = ctx["host"], ctx["p"]["ntp"]
     imprime("\n== 3. NTP: ntp-interno con reloj local (H11: 'server 127.127.1.1' + 'local stratum 10')")
-    ntp_ip = ctx["ips"]["ntp-interno"][99]
     r = sh(["docker", "exec", "ntp-interno", "chronyc", "tracking"], timeout=60)
     st = re.search(r"^Stratum\s*:\s*(\d+)", r.stdout, re.M)
     reg("chronyc tracking responde dentro de ntp-interno", "PASS" if r.returncode == 0 and st else "FAIL",
@@ -548,120 +591,18 @@ def bloque_ntp(ctx, m):
     if st:
         reg("el stratum publicado por tracking es el esperado (10)", "PASS" if int(st.group(1)) == 10 else "INFO",
             f"Stratum={st.group(1)} (esperado 10 por 'local stratum 10' de /opt/startup.sh)")
-    x = (m["infra"].get("ntp") or [{}])[0]
-    ok = "error" not in x and x["modo"] == 4 and 1 <= x["stratum"] <= 15 and x["li"] != 3 and abs(x["offset_s"]) < 5
-    reg(f"un cliente SNTP en vlan99 recibe hora valida de {ntp_ip}:123", "PASS" if ok else "FAIL",
-        f"respuesta={ {k: v for k, v in x.items() if k not in ('et',)} }\n"
-        "criterio: modo 4, 1<=stratum<=15, LI!=3 (3 = 'no sincronizado': un cliente lo rechaza), |offset|<5s")
-    r = sh(["docker", "run", "--rm", "--pull=never", "--label", ETIQUETA, "--network", ctx["pref"] + RED[99],
-            "--entrypoint", "chronyd", ctx["img_ntp"], "-Q", f"server {ntp_ip} iburst"], timeout=120)
+    for origen, res in (("anfitrion", m["host"]), ("contenedor", m["red"])):
+        x = fila(res, "ntp", "ntp") if "error" not in res else {"error": cuerpo_error(res)}
+        ok = "error" not in x and x["modo"] == 4 and 1 <= x["stratum"] <= 15 and x["li"] != 3 and abs(x["offset_s"]) < 5
+        reg(f"un cliente SNTP del {origen} recibe hora valida de {host}:{pn}/udp", "PASS" if ok else "FAIL",
+            f"respuesta={resp(x)}\ncriterio: modo 4, 1<=stratum<=15, LI!=3 (3 = 'no sincronizado': un cliente lo rechaza), |offset|<5s")
+    r = sh(["docker", "run", "--rm", "--pull=never", "--label", ETIQUETA, "--network", ctx["red"],
+            "--entrypoint", "chronyd", ctx["img_ntp"], "-Q", f"server {host} port {pn} iburst"], timeout=120)
     txt = (r.stdout + r.stderr).strip()
     ok = r.returncode == 0 and "System clock wrong by" in txt
-    reg("un cliente chrony REAL (chronyd -Q, no toca el reloj) acepta a ntp-interno como fuente", "PASS" if ok else "FAIL",
+    reg(f"un cliente chrony REAL (chronyd -Q, no toca el reloj) acepta a {host}:{pn} como fuente", "PASS" if ok else "FAIL",
         f"rc={r.returncode}\n{txt[-500:]}\nSi falla, distinguir: 'No suitable source' = el cliente rechazo al servidor (HALLAZGO); "
         "otro error (p. ej. capacidades) = fallo de la prueba, no del servidor.")
-    for d_, (app, _) in APPS.items():
-        y = (m["dept"][d_].get("ntp") or [{}])[0]
-        v = "PASS" if "error" in y and "timeout" in y["error"] and "error" not in x else "FAIL"
-        reg(f"vlan{d_} (solo departamento) -> ntp-interno {ntp_ip}:123/udp debe quedar SIN RESPUESTA", v,
-            f"respuesta={ {k: v_ for k, v_ in y.items() if k not in ('et',)} }")
-        z = (m["dual"][d_].get("ntp") or [{}])[0]
-        reg(f"{app} (dual-homed) -> ntp-interno debe RESPONDER", "PASS" if "error" not in z else "FAIL",
-            f"respuesta={ {k: v for k, v in z.items() if k not in ('et',)} }")
-
-
-def bloque_ad(ctx, script):
-    imprime("\n== 5. Active Directory: SRV via bind9 (reenvio), Kerberos, grupos y prueba negativa de membresia")
-    dns_ip = ctx["ips"]["dns-interno"][99]
-
-    # (a) SRV _ldap._tcp y _kerberos._tcp de la zona AD, consultados a bind9 desde vlan99 (una VLAN interna):
-    # demuestra que la zona "type forward" de bind9 reenvia de verdad hacia samba-ad.
-    r = vantage(ctx["pref"] + RED[99], {"dns": [
-        ("srv_ldap", dns_ip, f"_ldap._tcp.{DOMINIO_AD}", 33),
-        ("srv_kerberos", dns_ip, f"_kerberos._tcp.{DOMINIO_AD}", 33)]}, ctx["img_py"], script)
-    if "error" in r:
-        reg("contenedor de sondeo en vlan99 (SRV de AD)", "FAIL", cuerpo_error(r))
-    else:
-        por = {d["et"]: d for d in r["dns"]}
-        for et, puerto_esp, nombre in (("srv_ldap", 389, f"_ldap._tcp.{DOMINIO_AD}"),
-                                        ("srv_kerberos", 88, f"_kerberos._tcp.{DOMINIO_AD}")):
-            d = por.get(et, {"error": "sin respuesta en la sonda"})
-            srv = d.get("registros_srv") or []
-            ok = "error" not in d and d.get("rcode") == 0 and any(s["puerto"] == puerto_esp for s in srv)
-            reg(f"bind9 (10.10.99.11) reenvia SRV {nombre} -> puerto {puerto_esp} (samba-ad)",
-                "PASS" if ok else "FAIL", f"respuesta={ {k: v for k, v in d.items() if k not in ('et',)} }")
-
-    # (b) Kerberos: kinit real dentro de samba-ad. La clave va SIEMPRE por stdin, nunca en argv (visible en
-    # 'docker top'/ps de cualquiera con acceso al demonio).
-    clave_vet = valor_env("LDAP_PRUEBA_VET_PASSWORD", "")
-    if not clave_vet:
-        reg(f"kinit vet.prueba@{REALM_AD} (clave por stdin)", "FAIL", "falta LDAP_PRUEBA_VET_PASSWORD en sistema/test.env")
-    else:
-        rk = sh(["docker", "exec", "-i", "samba-ad", "kinit", f"vet.prueba@{REALM_AD}"], entrada=clave_vet + "\n", timeout=30)
-        ok_kinit = rk.returncode == 0
-        reg(f"kinit vet.prueba@{REALM_AD} dentro de samba-ad", "PASS" if ok_kinit else "FAIL",
-            f"rc={rk.returncode}\n{(rk.stdout + rk.stderr).strip()[-300:]}")
-        if ok_kinit:
-            rl = sh(["docker", "exec", "samba-ad", "klist"], timeout=30)
-            ok_klist = rl.returncode == 0 and "vet.prueba" in rl.stdout and REALM_AD in rl.stdout
-            reg("klist: el ticket TGT obtenido es de vet.prueba en el realm esperado", "PASS" if ok_klist else "FAIL",
-                (rl.stdout + rl.stderr).strip()[-300:])
-        else:
-            reg("klist (omitido: kinit fallo, no hay TGT que comprobar)", "FAIL", "ver el resultado de kinit arriba")
-
-    # (c) Grupos: samba-tool group listmembers debe devolver exactamente los usuarios de prueba esperados.
-    for grupo, miembros in GRUPOS_AD.items():
-        rg = sh(["docker", "exec", "samba-ad", "samba-tool", "group", "listmembers", grupo], timeout=30)
-        listados = sorted(l.strip() for l in rg.stdout.splitlines() if l.strip())
-        ok = rg.returncode == 0 and listados == sorted(miembros)
-        reg(f"samba-tool group listmembers {grupo} == {{{', '.join(sorted(miembros))}}}",
-            "PASS" if ok else "FAIL", f"rc={rg.returncode} listados={listados}\n{rg.stderr.strip()[-200:]}")
-
-    # (d) Prueba NEGATIVA de grupos: vet.prueba (solo GG-Medica) no debe poder entrar en InvenTree (exige
-    # GG-Operaciones) ni en ERPNext (exige GG-RRHH), porque el filtro LDAP de cada app exige 'memberOf' del
-    # grupo correspondiente. Se reutiliza ldaplogin.py (mismo mecanismo que Caso 1/2, HTTP dentro de las apps);
-    # import diferido: solo se ejecuta aqui, en el orquestador, NUNCA dentro de una sonda efimera (--sonda).
-    if str(AQUI) not in sys.path:
-        sys.path.insert(0, str(AQUI))
-    import ldaplogin
-    if not clave_vet:
-        reg("prueba negativa: vet.prueba no entra en ERPNext ni InvenTree", "FAIL", "falta LDAP_PRUEBA_VET_PASSWORD")
-    else:
-        s, t = ldaplogin.http("erpnext-backend", ldaplogin.HTTP_ERP, clave_vet, "vet.prueba", ldaplogin.SITE)
-        ok = s in (401, 403, 417)
-        reg("prueba negativa: vet.prueba (GG-Medica) NO puede entrar en ERPNext (exige GG-RRHH)",
-            "PASS" if ok else "FAIL", f"status={s} (esperado 401/403/417) {t[:120]}")
-        s, t = ldaplogin.http("inventree-app", ldaplogin.HTTP_INV, clave_vet, "vet.prueba")
-        ok = s in (401, 403)
-        reg("prueba negativa: vet.prueba (GG-Medica) NO puede entrar en InvenTree (exige GG-Operaciones)",
-            "PASS" if ok else "FAIL", f"status={s} (esperado 401/403) {t[:120]}")
-
-
-def bloque_consolidado(ctx, persistencia):
-    imprime("\n== 6. Consolidacion: se INVOCAN los scripts existentes, sin duplicarlos")
-    img = ctx["img_py"]
-    r = sh(["docker", "run", "--rm", "-i", "--pull=never", "--label", ETIQUETA, "--network", ctx["pref"] + RED[99],
-            "--entrypoint", "python3", img, "-"], entrada=(AQUI / "ldapprobe.py").read_text(encoding="utf8"), timeout=120)
-    txt = (r.stdout + r.stderr).strip()
-    reg("ldapprobe.py: bind LDAP anonimo + busqueda rootDSE a 10.10.99.10:389 desde vlan99 (samba-ad)",
-        "PASS" if "SONDA LDAP (samba-ad): PASS" in txt else "FAIL", txt[-300:])
-    urls = {10: "http://{ip}:8080/", 20: "http://{ip}:80/control/login/", 30: "http://{ip}:8000/", 40: "http://{ip}:8000/"}
-    for d, (app, _) in APPS.items():
-        ip = ctx["ips"][app][d]
-        r = sh(["docker", "run", "--rm", "-i", "--pull=never", "--label", ETIQUETA, "--network", ctx["pref"] + RED[d],
-                "--entrypoint", "python3", img, "-", urls[d].format(ip=ip)],
-               entrada=(AQUI / "probe.py").read_text(encoding="utf8"), timeout=120)
-        txt = (r.stdout + r.stderr).strip()
-        reg(f"probe.py: {app} responde HTTP desde su propia vlan{d}", "PASS" if r.stdout.strip() and " ERR " not in txt else "FAIL",
-            txt[-300:] + "\n(cualquier codigo HTTP prueba que el servicio contesta; p. ej. Pretix da 400 sin el Host correcto, ver H3)")
-    args = [sys.executable, str(AQUI / "ldaplogin.py")] + (["--persistencia"] if persistencia else [])
-    r = sh(args, timeout=3000)
-    txt = r.stdout + r.stderr
-    ok = r.returncode == 0 and "VEREDICTO GLOBAL: PASS" in txt
-    reg("ldaplogin.py" + (" --persistencia (incluye el caso 4)" if persistencia else " (SIN el caso 4)"),
-        "PASS" if ok else "FAIL", f"rc={r.returncode}\n" + "\n".join(txt.strip().splitlines()[-40:]))
-    if not persistencia:
-        reg("caso 4 de ldaplogin.py (--persistencia)", "FAIL", "NO EJECUTADO por --sin-persistencia: sigue sin verificar")
 
 
 def valor_env(clave, defecto):
@@ -672,16 +613,6 @@ def valor_env(clave, defecto):
             v = l.split("=", 1)[1].strip()
     return v or defecto
 
-
-def publicado(contenedor, puerto):
-    """(ip, puerto) en que Docker publica `puerto` (p. ej. '80/tcp') del contenedor, o None. 0.0.0.0 -> 127.0.0.1."""
-    r = sh(["docker", "inspect", contenedor, "--format", "{{json .HostConfig.PortBindings}}"], timeout=30)
-    try:
-        b = (json.loads(r.stdout) or {}).get(puerto) or []
-        ip, p = b[0].get("HostIp") or "0.0.0.0", int(b[0]["HostPort"])
-    except Exception:
-        return None
-    return ("127.0.0.1" if ip in ("0.0.0.0", "") else ip), p
 
 
 def http_get(ip, puerto, host, ruta, timeout=20):
@@ -752,96 +683,147 @@ def comprobar_web(etiqueta, ip, puerto, host, ruta):
     return r
 
 
+
 def bloque_nombres(ctx):
-    imprime(f"\n== 4. Acceso por nombre: vista lan del DNS y proxy web (*.{DOMINIO})")
-    # Topologia del proxy: solo vlan99_infra. En otra VLAN seria un router entre departamentos.
-    redes = redes_de("proxy-web")
-    if redes is None:
-        reg("contenedor proxy-web existe", "FAIL", "docker inspect proxy-web fallo: falta el servicio 'proxy' (levantar-sistema.sh arrancar)")
-        return
-    solo99 = set(redes) == {ctx["pref"] + RED[99]}
-    reg("proxy-web esta SOLO en vlan99_infra (no es un router entre VLAN)", "PASS" if solo99 else "FAIL", f"redes: {redes}")
-    hr99 = ip_real(ctx, "erpnext-hr", 99)
-    reg("erpnext-hr tiene pata en vlan99_infra (por ahi le llega el proxy)", "PASS" if hr99 else "FAIL",
-        f"erpnext-hr en vlan99: {hr99 or '(ninguna)'}")
-
-    # (b) Vista lan: se pregunta desde FUERA de las VLAN, por el puerto publicado de dns-interno (TCP: el mismo camino que
-    # un equipo de la LAN; al contenedor le llega con el gateway del bridge como origen, que la ACL deja fuera de la vista
-    # interna). IP_ANFITRION esperada = la IP en la que se publica el proxy web.
-    web = publicado("proxy-web", "80/tcp")
-    dnsp = publicado("dns-interno", "53/tcp")
-    if not web or not dnsp:
-        reg("proxy-web y dns-interno publican puerto en el anfitrion", "FAIL", f"proxy-web 80/tcp={web} dns-interno 53/tcp={dnsp}")
-        return
-    anfitrion = web[0]
-    modo = "local" if anfitrion.startswith("127.") else "intranet"
-    reg(f"modo de publicacion: {modo} (proxy en {web[0]}:{web[1]}, DNS en {dnsp[0]}:{dnsp[1]})", "INFO",
-        "local = solo este equipo (127.0.0.1); intranet = levantar-sistema --intranet (IP de la LAN)")
-    zl = zona(ZONA_LAN)
-    if zl is None:
-        reg(f"zona {DOMINIO} (vista lan) generada", "FAIL", f"falta {ZONA_LAN}. Generarla con: levantar-sistema.sh preparar.")
-    else:
-        reg(f"zona de la vista lan generada para la IP del proxy ({anfitrion})",
-            "PASS" if all(zl.get(h) == anfitrion for h in LAN_SI) else "FAIL", f"la zona dice {zl}")
-    for h in LAN_SI:
-        d = dns_consulta_tcp(dnsp[0], f"{h}.{DOMINIO}", puerto=dnsp[1])
-        ok = "error" not in d and d["rcode"] == 0 and d["aa"] and d["respuestas"] == [anfitrion]
-        reg(f"vista lan: {h}.{DOMINIO} -> {anfitrion} (desde el anfitrion por {dnsp[0]}:{dnsp[1]}/tcp)",
-            "PASS" if ok else "FAIL", f"respuesta={d}")
-    for h in LAN_NO:
-        d = dns_consulta_tcp(dnsp[0], f"{h}.{DOMINIO}", puerto=dnsp[1])
-        reg(f"vista lan: {h}.{DOMINIO} -> NXDOMAIN (no se anuncia a la LAN)",
-            "PASS" if "error" not in d and d["rcode"] == 3 and d["aa"] else "FAIL", f"respuesta={d}")
-    d = dns_consulta_tcp(dnsp[0], "example.com", puerto=dnsp[1])
-    reg("vista lan: example.com -> REFUSED (sin recursion tampoco hacia la LAN)",
-        "PASS" if "error" not in d and d["rcode"] == 5 else "FAIL", f"respuesta={d}")
-    # Con Docker Engine en WSL, dns-interno va a <IP>:1053 y el 53 de la LAN lo atiende el reenviador de Windows
-    # (sistema/reenviador-dns.ps1; ver docs/operacion.md). Se prueba esa ruta completa por UDP y TCP.
-    if modo == "intranet" and dnsp[1] != 53:
-        pista = ("\nsin respuesta en el 53: el reenviador de Windows no esta en marcha o no reenvia. "
-                 "Arrancarlo: .\\levantar-sistema.ps1 -Intranet (Windows); comprobarlo: .\\levantar-sistema.ps1 estado")
-        for proto, consulta in (("udp", dns_consulta), ("tcp", dns_consulta_tcp)):
-            d = consulta(dnsp[0], f"pretix.{DOMINIO}", puerto=53)
-            ok = "error" not in d and d["rcode"] == 0 and d["aa"] and d["respuestas"] == [anfitrion]
-            reg(f"reenviador de Windows: pretix.{DOMINIO} por {dnsp[0]}:53/{proto} (-> :{dnsp[1]}) -> {anfitrion}",
-                "PASS" if ok else "FAIL", f"respuesta={d}" + ("" if ok else pista))
-    imprime("  -- la vista interna (bloque 2) da la IP del contenedor a los mismos nombres: split horizon")
-    zi = zona() or {}
-    for h in ("pretix", "rrhh"):
-        reg(f"{h}.{DOMINIO}: vista interna {zi.get(h)} != vista lan {anfitrion}",
-            "PASS" if zi.get(h) and zi.get(h) != anfitrion else "FAIL",
-            "el mismo nombre lleva al contenedor desde las VLAN y al proxy desde fuera")
-
-    # (c) Proxy: por cada nombre, HTML + estatico, con el Host que manda un navegador que llega por ese nombre.
+    host, p = ctx["host"], ctx["p"]
+    imprime(f"\n== 4. Acceso por nombre: proxy web (*.{DOMINIO}) y acceso directo por {host}:puerto y por localhost")
+    web = (host, p["proxy"])
+    # (a) Proxy: por cada nombre, HTML + estatico, con el Host que manda un navegador que llega por ese nombre. El proxy
+    # llega a las apps por HOST_IP:puerto, asi que cada 200 prueba tambien ese camino.
     imprime(f"  -- proxy web {web[0]}:{web[1]} con la cabecera Host de cada nombre")
     suf = "" if web[1] == 80 else f":{web[1]}"
     r = http_get(web[0], web[1], f"openvpms.{DOMINIO}{suf}", "/")
     reg(f"openvpms.{DOMINIO}/ redirige a /openvpms/", "PASS" if r.get("status") == 302 and r.get("location", "").endswith("/openvpms/") else "FAIL",
         resumen_http(r))
-    for h, (cont, ruta, _, _) in WEB.items():
+    for h, (ruta, _) in WEB.items():
         comprobar_web(f"proxy {h}.{DOMINIO}", web[0], web[1], f"{h}.{DOMINIO}{suf}", ruta)
     w = websocket_101(web[0], web[1], f"rrhh.{DOMINIO}{suf}", "/socket.io/?EIO=4&transport=websocket")
     reg(f"proxy rrhh.{DOMINIO}: WebSocket de socket.io (tiempo real de ERPNext) -> 101", "PASS" if " 101 " in w else "FAIL", w)
     r = http_get(web[0], web[1], f"desconocido.{DOMINIO}{suf}", "/")
     reg("nombre desconocido -> 404 del default_server", "PASS" if r.get("status") == 404 and "Reserva Viva" in r.get("cuerpo", "") else "FAIL",
         resumen_http(r) + "\n" + r.get("cuerpo", "")[:200])
-    r = http_get(web[0], web[1], web[0], "/")
+    r = http_get(web[0], web[1], host, "/")
     reg("por IP (sin nombre) -> 404 del default_server", "PASS" if r.get("status") == 404 else "FAIL", resumen_http(r))
 
-    # (d) El acceso directo de administracion sigue funcionando (localhost:<puerto> de test.env).
-    imprime("  -- acceso directo http://localhost:<puerto> (administracion, docs y verificar)")
-    for h, (cont, ruta, var, defecto) in WEB.items():
-        pub = publicado(cont, f"{defecto}/tcp")
-        if not pub:
-            reg(f"directo {h}: {cont} publica {defecto}/tcp", "FAIL", "sin puerto publicado")
-            continue
-        comprobar_web(f"directo localhost:{pub[1]} ({h})", pub[0], pub[1], f"localhost:{pub[1]}", ruta)
+    # (b) Acceso directo de administracion: HOST_IP:<puerto> (como desde la LAN) y localhost:<puerto> (en el propio equipo).
+    imprime(f"  -- acceso directo http://{host}:<puerto> y http://localhost:<puerto> (administracion, docs y verificar)")
+    for h, (ruta, svc) in WEB.items():
+        puerto = p[svc]
+        if h == "pretix":
+            # Pretix responde 400 a todo Host que no sea pretix.reservaviva.lan o localhost: por IP:puerto no se entra.
+            r = http_get(host, puerto, f"{host}:{puerto}", ruta)
+            reg(f"directo {host}:{puerto} (pretix): limitacion conocida, 400 por IP (se entra por nombre o por localhost)",
+                "INFO" if "error" not in r else "FAIL", resumen_http(r))
+        else:
+            comprobar_web(f"directo {host}:{puerto} ({h})", host, puerto, f"{host}:{puerto}", ruta)
+        comprobar_web(f"directo localhost:{puerto} ({h})", "127.0.0.1", puerto, f"localhost:{puerto}", ruta)
+
+
+def bloque_ad(ctx, script):
+    imprime("\n== 5. Active Directory: SRV via bind9 (delegacion), Kerberos, grupos y prueba negativa de membresia")
+    dns_ip = ctx["ip_dns"]
+
+    # (a) SRV _ldap._tcp y _kerberos._tcp de la zona AD, consultados a bind9 desde un contenedor de la red (los
+    # contenedores tienen recursion): demuestra que la delegacion de ad.reservaviva.lan llega de verdad a samba-ad.
+    r = vantage(ctx["red"], {"dns": [
+        ("srv_ldap", dns_ip, f"_ldap._tcp.{DOMINIO_AD}", 33),
+        ("srv_kerberos", dns_ip, f"_kerberos._tcp.{DOMINIO_AD}", 33)]}, ctx["img_py"], script)
+    if "error" in r:
+        reg("contenedor de sondeo en la red (SRV de AD)", "FAIL", cuerpo_error(r))
+    else:
+        por = {d["et"]: d for d in r["dns"]}
+        for et, puerto_esp, nombre in (("srv_ldap", 389, f"_ldap._tcp.{DOMINIO_AD}"),
+                                        ("srv_kerberos", 88, f"_kerberos._tcp.{DOMINIO_AD}")):
+            d = por.get(et, {"error": "sin respuesta en la sonda"})
+            srv = d.get("registros_srv") or []
+            ok = "error" not in d and d.get("rcode") == 0 and any(s["puerto"] == puerto_esp for s in srv)
+            reg(f"bind9 ({dns_ip}) delega SRV {nombre} -> puerto {puerto_esp} (samba-ad)",
+                "PASS" if ok else "FAIL", f"respuesta={resp(d)}")
+
+    # (b) Kerberos: kinit real dentro de samba-ad. La clave va SIEMPRE por stdin, nunca en argv (visible en
+    # 'docker top'/ps de cualquiera con acceso al demonio).
+    clave_vet = valor_env("LDAP_PRUEBA_VET_PASSWORD", "")
+    if not clave_vet:
+        reg(f"kinit vet.prueba@{REALM_AD} (clave por stdin)", "FAIL", "falta LDAP_PRUEBA_VET_PASSWORD en sistema/test.env")
+    else:
+        rk = sh(["docker", "exec", "-i", "samba-ad", "kinit", f"vet.prueba@{REALM_AD}"], entrada=clave_vet + "\n", timeout=30)
+        ok_kinit = rk.returncode == 0
+        reg(f"kinit vet.prueba@{REALM_AD} dentro de samba-ad", "PASS" if ok_kinit else "FAIL",
+            f"rc={rk.returncode}\n{(rk.stdout + rk.stderr).strip()[-300:]}")
+        if ok_kinit:
+            rl = sh(["docker", "exec", "samba-ad", "klist"], timeout=30)
+            ok_klist = rl.returncode == 0 and "vet.prueba" in rl.stdout and REALM_AD in rl.stdout
+            reg("klist: el ticket TGT obtenido es de vet.prueba en el realm esperado", "PASS" if ok_klist else "FAIL",
+                (rl.stdout + rl.stderr).strip()[-300:])
+        else:
+            reg("klist (omitido: kinit fallo, no hay TGT que comprobar)", "FAIL", "ver el resultado de kinit arriba")
+
+    # (c) Grupos: samba-tool group listmembers debe devolver exactamente los usuarios de prueba esperados.
+    for grupo, miembros in GRUPOS_AD.items():
+        rg = sh(["docker", "exec", "samba-ad", "samba-tool", "group", "listmembers", grupo], timeout=30)
+        listados = sorted(l.strip() for l in rg.stdout.splitlines() if l.strip())
+        ok = rg.returncode == 0 and listados == sorted(miembros)
+        reg(f"samba-tool group listmembers {grupo} == {{{', '.join(sorted(miembros))}}}",
+            "PASS" if ok else "FAIL", f"rc={rg.returncode} listados={listados}\n{rg.stderr.strip()[-200:]}")
+
+    # (d) Prueba NEGATIVA de grupos: vet.prueba (solo GG-Medica) no debe poder entrar en InvenTree (exige
+    # GG-Operaciones) ni en ERPNext (exige GG-RRHH), porque el filtro LDAP de cada app exige 'memberOf' del
+    # grupo correspondiente. Ya no hay red que lo impida: es el unico control de acceso entre departamentos. Se
+    # reutiliza ldaplogin.py (mismo mecanismo que Caso 1/2, HTTP dentro de las apps); import diferido: solo se
+    # ejecuta aqui, en el orquestador, NUNCA dentro de una sonda efimera (--sonda).
+    if str(AQUI) not in sys.path:
+        sys.path.insert(0, str(AQUI))
+    import ldaplogin
+    if not clave_vet:
+        reg("prueba negativa: vet.prueba no entra en ERPNext ni InvenTree", "FAIL", "falta LDAP_PRUEBA_VET_PASSWORD")
+    else:
+        s, t = ldaplogin.http("erpnext-backend", ldaplogin.HTTP_ERP, clave_vet, "vet.prueba", ldaplogin.SITE)
+        ok = s in (401, 403, 417)
+        reg("prueba negativa: vet.prueba (GG-Medica) NO puede entrar en ERPNext (exige GG-RRHH)",
+            "PASS" if ok else "FAIL", f"status={s} (esperado 401/403/417) {t[:120]}")
+        s, t = ldaplogin.http("inventree-app", ldaplogin.HTTP_INV, clave_vet, "vet.prueba")
+        ok = s in (401, 403)
+        reg("prueba negativa: vet.prueba (GG-Medica) NO puede entrar en InvenTree (exige GG-Operaciones)",
+            "PASS" if ok else "FAIL", f"status={s} (esperado 401/403) {t[:120]}")
+
+
+def bloque_consolidado(ctx, persistencia):
+    imprime("\n== 6. Consolidacion: se INVOCAN los scripts existentes, sin duplicarlos")
+    host, p, img = ctx["host"], ctx["p"], ctx["img_py"]
+
+    def en_la_red(entrada, *args):
+        return sh(["docker", "run", "--rm", "-i", "--pull=never", "--label", ETIQUETA, "--network", ctx["red"],
+                   "--entrypoint", "python3", img, "-", *args], entrada=entrada, timeout=120)
+
+    sonda_ldap = (AQUI / "ldapprobe.py").read_text(encoding="utf8")
+    for destino, ip, puerto in (("por HOST_IP", host, p["ldap"]), ("por la IP fija del DC", ctx["ip_dc"], 389)):
+        txt = (lambda r: (r.stdout + r.stderr).strip())(en_la_red(sonda_ldap, ip, str(puerto)))
+        reg(f"ldapprobe.py: bind LDAP anonimo + busqueda rootDSE a {ip}:{puerto} desde un contenedor ({destino}, samba-ad)",
+            "PASS" if "SONDA LDAP (samba-ad): PASS" in txt else "FAIL", txt[-300:])
+    urls = [f"http://{host}:{p['openvpms']}/", f"http://{host}:{p['pretix']}/control/login/",
+            f"http://{host}:{p['inventree']}/", f"http://{host}:{p['erpnext']}/"]
+    r = en_la_red((AQUI / "probe.py").read_text(encoding="utf8"), *urls)
+    txt = (r.stdout + r.stderr).strip()
+    for u in urls:
+        linea = next((l for l in txt.splitlines() if l.startswith(u)), "(sin salida)")
+        reg(f"probe.py: {u} responde HTTP desde un contenedor de la red", "PASS" if linea != "(sin salida)" and " ERR " not in linea else "FAIL",
+            linea + "\n(cualquier codigo HTTP prueba que el servicio contesta; Pretix da 400 por IP:puerto, ver H3)")
+    args = [sys.executable, str(AQUI / "ldaplogin.py")] + (["--persistencia"] if persistencia else [])
+    r = sh(args, timeout=3000)
+    txt = r.stdout + r.stderr
+    ok = r.returncode == 0 and "VEREDICTO GLOBAL: PASS" in txt
+    reg("ldaplogin.py" + (" --persistencia (incluye el caso 4)" if persistencia else " (SIN el caso 4)"),
+        "PASS" if ok else "FAIL", f"rc={r.returncode}\n" + "\n".join(txt.strip().splitlines()[-40:]))
+    if not persistencia:
+        reg("caso 4 de ldaplogin.py (--persistencia)", "FAIL", "NO EJECUTADO por --sin-persistencia: sigue sin verificar")
 
 
 LIMITES = """
-LO QUE UN SOLO HOST NO PUEDE DEMOSTRAR (ver verificar_arquitectura.md): etiquetado 802.1Q y puertos troncales,
-el switch fisico, y la matriz de firewall del diseno de 3 equipos sobre interfaces reales. Aqui cada VLAN es un bridge de Docker con
-la misma subred: 'pasa en un host' NO es 'pasa en el laboratorio'."""
+LO QUE UN SOLO HOST NO PUEDE DEMOSTRAR (ver verificar_arquitectura.md): el switch fisico del laboratorio ni el acceso desde
+OTROS equipos de la LAN; aqui se prueba desde el propio anfitrion y desde contenedores, y 'pasa en un host' NO es 'pasa en
+el laboratorio'. Tampoco hay segmentacion que demostrar: todos los contenedores comparten una red y todo lo publicado queda
+accesible en HOST_IP (docs/seguridad.md). Lo que SI se comprueba es lo que se conserva: BD y Redis sin publicar, LDAPS con
+CA propia y el control de acceso por grupos de AD dentro de cada aplicacion."""
 
 
 def main():
@@ -863,7 +845,7 @@ def main():
     ctx = bloque_prereq()
     if ctx:
         m = bloque_medicion(ctx, SCRIPT)
-        bloque_segmentacion(ctx, m)
+        bloque_puertos(ctx, m)
         bloque_dns(ctx, m, zona())
         bloque_ntp(ctx, m)
         bloque_nombres(ctx)
@@ -927,13 +909,8 @@ def autotest():
     est = tcp_estado("192.0.2.1", 9, 1)
     chk("tcp: TEST-NET-1 sin destino -> SIN_RESPUESTA o SIN_RUTA, nunca ABIERTO/RECHAZADO",
         est[0] in ("SIN_RESPUESTA", "SIN_RUTA"), f"(obtenido {est[:2]})")
-    for est_, co, cd, esp in [("SIN_RESPUESTA", True, True, "PASS"), ("SIN_RUTA", True, True, "PASS"),
-                              ("ABIERTO", True, True, "FAIL"), ("RECHAZADO", True, True, "FAIL"),
-                              ("SIN_RESPUESTA", False, True, "FAIL"), ("SIN_RESPUESTA", True, False, "FAIL"),
-                              ("ERROR", True, True, "FAIL")]:
-        chk(f"juzga_negativo({est_}, origen_ok={co}, destino_ok={cd}) -> {esp}", juzga_negativo(est_, co, cd)[0] == esp)
 
-    modo = {"v": (0, ["10.10.99.10"], True)}
+    modo = {"v": (0, ["192.0.2.10"], True)}
     u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); u.bind(("127.0.0.1", 0)); up = u.getsockname()[1]
 
     def servidor():
@@ -951,7 +928,7 @@ def autotest():
                 u.sendto(_respuesta_dns(d, *modo["v"]), dire)
     threading.Thread(target=servidor, daemon=True).start()
     r = dns_consulta("127.0.0.1", f"ldap.{DOMINIO}", 2, up)
-    chk("dns: respuesta autoritativa con puntero de compresion", r.get("rcode") == 0 and r["aa"] and r["respuestas"] == ["10.10.99.10"], f"{r}")
+    chk("dns: respuesta autoritativa con puntero de compresion", r.get("rcode") == 0 and r["aa"] and r["respuestas"] == ["192.0.2.10"], f"{r}")
     modo["v"] = (3, [], True)
     r = dns_consulta("127.0.0.1", f"x.{DOMINIO}", 2, up)
     chk("dns: NXDOMAIN se lee como rcode 3 (no como error)", r.get("rcode") == 3 and r["aa"] and not r["respuestas"], f"{r}")
@@ -964,6 +941,13 @@ def autotest():
     r = sntp_consulta("127.0.0.1", 2, up)
     chk("sntp: paquete de stratum 10, LI 0, modo 4 se interpreta bien", r.get("stratum") == 10 and r["li"] == 0 and r["modo"] == 4
         and r["refid"] == "127.127.1.1" and abs(r["offset_s"]) < 1, f"{r}")
+    # medir/sonda: el puerto de DNS y NTP viaja en la especificacion (antes la sonda consultaba siempre 53 y 123).
+    modo["v"] = (0, ["192.0.2.9"], True)
+    r = medir({"dns": [("d", "127.0.0.1", f"ldap.{DOMINIO}", 1, up)], "ntp": [("n", "127.0.0.1", up)]})
+    chk("medir: DNS y NTP salen por el puerto indicado en la especificacion",
+        r["dns"][0].get("respuestas") == ["192.0.2.9"] and r["ntp"][0].get("stratum") == 10, f"{r}")
+    r = medir({"dns": [("d", "127.0.0.1", f"ldap.{DOMINIO}")]})
+    chk("medir: sin puerto se usa el 53 (aqui cerrado: no llega al servidor de prueba)", "respuestas" not in r["dns"][0], f"{r}")
     u.close()
     # DNS por TCP: servidor de un solo uso que contesta con prefijo de longitud.
     t = socket.socket(); t.bind(("127.0.0.1", 0)); t.listen(1); tp = t.getsockname()[1]
@@ -997,9 +981,23 @@ def autotest():
         estatico_de('<script src="https://x.org/a.js"></script><script src="/static/b.js?v=1"></script>', "/web/") == "/static/b.js?v=1")
     z = zona()
     chk("zona: se lee la zona interna generada (o se avisa de que falta)", z is None or ("ldap" in z), f"{z}")
-    z = zona(ZONA_LAN)
-    chk("zona: se lee la zona de la vista lan (o se avisa de que falta); no anuncia ldap ni ntp",
-        z is None or ("pretix" in z and "ldap" not in z and "ntp" not in z), f"{z}")
+    chk("zona: la zona generada trae los nombres de servicio (o se avisa de que falta)",
+        z is None or all(h in z for h in ZONA_NOMBRES), f"{z}")
+    b = '{"80/tcp":[{"HostIp":"192.168.1.26","HostPort":"80"}],"53/udp":[{"HostIp":"","HostPort":"1053"}]}'
+    chk("parse_bindings: lee IP y puerto publicados (HostIp vacio = 0.0.0.0)",
+        parse_bindings(b) == {"80/tcp": [("192.168.1.26", 80)], "53/udp": [("0.0.0.0", 1053)]}, f"{parse_bindings(b)}")
+    chk("parse_bindings: un contenedor sin puertos publicados ({} o null) -> {}", parse_bindings("{}") == {} == parse_bindings("null"))
+    # TLS: puerto sin servicio -> SIN_CONEXION; un servidor que no habla TLS -> TLS_FALLA (no se confunde con lo anterior).
+    t = socket.socket(); t.bind(("127.0.0.1", 0)); t.listen(1); tp = t.getsockname()[1]
+
+    def servidor_basura():
+        c, _ = t.accept()
+        c.sendall(b"esto no es TLS\r\n")
+        c.close()
+    threading.Thread(target=servidor_basura, daemon=True).start()
+    chk("tls: un servidor que no habla TLS -> TLS_FALLA", tls_estado("127.0.0.1", tp, "ldap.reservaviva.lan", "", 2)[0] == "TLS_FALLA")
+    t.close()
+    chk("tls: puerto cerrado -> SIN_CONEXION", tls_estado("127.0.0.1", tp, "ldap.reservaviva.lan", "", 2)[0] == "SIN_CONEXION")
     imprime(f"\nautotest: {'PASS' if not fallos else 'FAIL ' + str(fallos)}   (mecanica solamente; el arnes NO se ejecuto)")
     return 0 if not fallos else 1
 
